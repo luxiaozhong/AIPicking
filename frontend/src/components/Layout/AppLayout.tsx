@@ -1,0 +1,163 @@
+import React from 'react';
+import { Layout, Menu, Switch, Dropdown, Button, Space, theme } from 'antd';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  DashboardOutlined,
+  LineChartOutlined,
+  BarChartOutlined,
+  BulbOutlined,
+  UserOutlined,
+  TeamOutlined,
+  LogoutOutlined,
+} from '@ant-design/icons';
+import { useThemeStore } from '@/stores/themeStore';
+import { useAuthStore } from '@/stores/authStore';
+
+const { Header, Sider, Content, Footer } = Layout;
+
+interface AppLayoutProps {
+  children: React.ReactNode;
+}
+
+const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { token: themeToken } = theme.useToken();
+  const { isDark, toggle } = useThemeStore();
+  const { user, logout } = useAuthStore();
+
+  // 登录页不显示布局
+  if (location.pathname === '/login') {
+    return <>{children}</>;
+  }
+
+  const isAdmin = user?.role === 'admin';
+
+  const menuItems = [
+    {
+      key: '/dashboard',
+      icon: <DashboardOutlined />,
+      label: '仪表盘',
+    },
+    {
+      key: '/strategies',
+      icon: <LineChartOutlined />,
+      label: '策略管理',
+    },
+    {
+      key: '/backtests',
+      icon: <BarChartOutlined />,
+      label: '回测报告',
+    },
+    {
+      key: '/backtests/batch',
+      icon: <BarChartOutlined />,
+      label: '批量回测',
+    },
+    ...(isAdmin
+      ? [
+          {
+            key: '/users',
+            icon: <TeamOutlined />,
+            label: '用户管理',
+          },
+        ]
+      : []),
+  ];
+
+  const selectedKey = (() => {
+    if (location.pathname.startsWith('/users')) return '/users';
+    if (location.pathname.startsWith('/backtests/batch')) return '/backtests/batch';
+    if (location.pathname.startsWith('/backtests')) return '/backtests';
+    if (location.pathname.startsWith('/strategies')) return '/strategies';
+    if (location.pathname.startsWith('/dashboard')) return '/dashboard';
+    return '/dashboard';
+  })();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
+
+  const userMenuItems = [
+    {
+      key: 'username',
+      label: user?.username || '用户',
+      disabled: true,
+    },
+    {
+      key: 'role',
+      label: isAdmin ? '管理员' : '普通用户',
+      disabled: true,
+    },
+    { type: 'divider' as const },
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: '退出登录',
+      danger: true,
+      onClick: handleLogout,
+    },
+  ];
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider
+        breakpoint="lg"
+        collapsedWidth={64}
+        style={{ position: 'sticky', top: 0, height: '100vh' }}
+      >
+        <div
+          style={{
+            color: '#fff',
+            fontSize: 16,
+            fontWeight: 'bold',
+            padding: '16px 24px',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+          }}
+        >
+          AIpicking
+        </div>
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={[selectedKey]}
+          items={menuItems}
+          onClick={({ key }) => navigate(key)}
+        />
+      </Sider>
+      <Layout>
+        <Header
+          style={{
+            background: themeToken.colorBgContainer,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            paddingRight: 24,
+            borderBottom: `1px solid ${themeToken.colorBorderSecondary}`,
+            gap: 16,
+          }}
+        >
+          <Space size="small">
+            <BulbOutlined style={{ fontSize: 16 }} />
+            <Switch size="small" checked={isDark} onChange={toggle} />
+          </Space>
+          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+            <Button type="text" icon={<UserOutlined />}>
+              {user?.username || '用户'}
+            </Button>
+          </Dropdown>
+        </Header>
+        <Content style={{ padding: 24, background: themeToken.colorBgLayout, minHeight: 360 }}>
+          {children}
+        </Content>
+        <Footer style={{ textAlign: 'center', fontSize: 12, color: '#999' }}>
+          AIpicking ©{new Date().getFullYear()} Created with React + FastAPI
+        </Footer>
+      </Layout>
+    </Layout>
+  );
+};
+
+export default AppLayout;

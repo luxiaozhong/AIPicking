@@ -1,0 +1,159 @@
+import React, { useEffect, useState } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Spin } from 'antd';
+import AppLayout from '@/components/Layout/AppLayout';
+import ProtectedRoute from '@/components/Auth/ProtectedRoute';
+import StrategyList from '@/pages/StrategyList';
+import StrategyUpload from '@/pages/StrategyUpload';
+import StrategyEdit from '@/pages/StrategyEdit';
+import StrategyDetail from '@/pages/StrategyDetail';
+import StrategyBuilder from '@/pages/StrategyBuilder';
+import BacktestList from '@/pages/BacktestList';
+import BacktestDetail from '@/pages/BacktestDetail';
+import BacktestForm from '@/pages/BacktestForm';
+import BatchBacktestList from '@/pages/BatchBacktestList';
+import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
+import Dashboard from '@/pages/Dashboard';
+import LoginPage from '@/pages/LoginPage';
+import UserManagement from '@/pages/UserManagement';
+import NotFound from '@/pages/NotFound';
+import { useAuthStore } from '@/stores/authStore';
+
+const App: React.FC = () => {
+  const [initializing, setInitializing] = useState(true);
+  const { isAuthenticated, initialize } = useAuthStore();
+  const location = useLocation();
+
+  useEffect(() => {
+    initialize().finally(() => setInitializing(false));
+  }, []);
+
+  if (initializing) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  // 未登录只显示 LoginPage
+  if (!isAuthenticated && location.pathname !== '/login') {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
+    <AppLayout>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies"
+          element={
+            <ProtectedRoute>
+              <StrategyList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/upload"
+          element={
+            <ProtectedRoute>
+              <StrategyUpload />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/new"
+          element={
+            <ProtectedRoute>
+              <StrategyEdit />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/builder"
+          element={
+            <ProtectedRoute>
+              <StrategyBuilder />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/:id"
+          element={
+            <ProtectedRoute>
+              <StrategyDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/:id/edit"
+          element={
+            <ProtectedRoute>
+              <StrategyEdit />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/:id/backtest"
+          element={
+            <ProtectedRoute>
+              <BacktestForm />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests"
+          element={
+            <ProtectedRoute>
+              <BacktestList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests/batch"
+          element={
+            <ProtectedRoute>
+              <BatchBacktestList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests/batch/:id"
+          element={
+            <ProtectedRoute>
+              <BatchBacktestDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests/:id"
+          element={
+            <ProtectedRoute>
+              <BacktestDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute requireAdmin>
+              <UserManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </AppLayout>
+  );
+};
+
+export default App;
