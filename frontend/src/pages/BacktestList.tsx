@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
-import { Card, Button, Table, Space, message, Select, Input } from 'antd';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Card, Button, Table, Space, message, Select, AutoComplete, Spin, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useBacktestStore } from '@/stores/backtestStore';
 import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
 import ReturnLabel from '@/components/shared/ReturnLabel';
+import stockService from '@/services/stockService';
+import type { StockItem } from '@/types/stock';
 
 export default function BacktestList() {
   const navigate = useNavigate();
@@ -25,6 +27,36 @@ export default function BacktestList() {
 
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [stockSearch, setStockSearch] = useState<string>('');
+  const [stockOptions, setStockOptions] = useState<{ value: string; label: React.ReactNode }[]>([]);
+  const [stockSearching, setStockSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  const doSearch = (stock: string) => {
+    fetchBacktests({ page: 1, status: statusFilter, stock: stock || undefined });
+  };
+
+  const handleStockSearch = useCallback((keyword: string) => {
+    if (!keyword) {
+      setStockOptions([]);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setStockSearching(true);
+      try {
+        const items: StockItem[] = await stockService.search(keyword);
+        setStockOptions(items.map((s) => ({
+          value: s.ts_code,
+          label: <span>{s.ts_code}  <Typography.Text type="secondary">{s.name}</Typography.Text></span>,
+        })));
+      } catch (err) {
+        console.error('Stock search failed:', err);
+        setStockOptions([]);
+      } finally {
+        setStockSearching(false);
+      }
+    }, 300);
+  }, []);
 
   useEffect(() => {
     fetchBacktests();
@@ -154,16 +186,23 @@ export default function BacktestList() {
               placeholder="全部"
             />
           </Space>
-          <Input.Search
+          <AutoComplete
             placeholder="搜索股票代码或名称"
             value={stockSearch}
-            onChange={(e) => setStockSearch(e.target.value)}
-            onSearch={(value) => {
-              fetchBacktests({ page: 1, status: statusFilter, stock: value || undefined });
+            options={stockOptions}
+            onSearch={handleStockSearch}
+            onSelect={(value: string) => {
+              setStockSearch(value);
+              doSearch(value);
             }}
+            onChange={(value: string) => setStockSearch(value)}
             allowClear
             style={{ width: 260 }}
+            notFoundContent={stockSearching ? <Spin size="small" /> : null}
           />
+          <Button type="primary" onClick={() => doSearch(stockSearch)} style={{ marginLeft: 8 }}>
+            搜索
+          </Button>
         </div>
 
         <Table
