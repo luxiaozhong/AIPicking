@@ -8,20 +8,31 @@ import ReturnLabel from '@/components/shared/ReturnLabel';
 import StatCard from '@/components/shared/StatCard';
 import ReturnComparisonChart from '@/components/charts/ReturnComparisonChart';
 import WinRateDonutChart from '@/components/charts/WinRateDonutChart';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import type { BatchBacktestReport, DailyResultItem, RecommendationItem, BacktestSummary } from '@/types/backtest';
 
-const recColumns = [
-  { title: '排名', key: 'index', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
-  { title: '代码', dataIndex: 'ts_code', key: 'ts_code', width: 110 },
-  { title: '名称', dataIndex: 'name', key: 'name', width: 100 },
-  { title: '得分', dataIndex: 'score', key: 'score', width: 70 },
-  { title: '当日', dataIndex: 'return_0d', key: 'return_0d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
-  { title: '3天', dataIndex: 'return_3d', key: 'return_3d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
-  { title: '7天', dataIndex: 'return_7d', key: 'return_7d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
-  { title: '15天', dataIndex: 'return_15d', key: 'return_15d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
-];
+function getRecColumns(onStockClick: (record: RecommendationItem) => void) {
+  return [
+    { title: '排名', key: 'index', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
+    {
+      title: '代码',
+      dataIndex: 'ts_code',
+      key: 'ts_code',
+      width: 110,
+      render: (code: string, record: RecommendationItem) => (
+        <a onClick={() => onStockClick(record)}>{code}</a>
+      ),
+    },
+    { title: '名称', dataIndex: 'name', key: 'name', width: 100 },
+    { title: '得分', dataIndex: 'score', key: 'score', width: 70 },
+    { title: '当日', dataIndex: 'return_0d', key: 'return_0d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
+    { title: '3天', dataIndex: 'return_3d', key: 'return_3d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
+    { title: '7天', dataIndex: 'return_7d', key: 'return_7d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
+    { title: '15天', dataIndex: 'return_15d', key: 'return_15d', width: 90, render: (v: number | null) => <ReturnLabel value={v ?? null} /> },
+  ];
+}
 
-function DailyPanel({ result }: { result: DailyResultItem }) {
+function DailyPanel({ result, onStockClick }: { result: DailyResultItem; onStockClick: (record: RecommendationItem) => void }) {
   const isCompleted = result.status === 'completed';
   const isFailed = result.status === 'failed';
   const recs = result.recommendations || [];
@@ -66,7 +77,7 @@ function DailyPanel({ result }: { result: DailyResultItem }) {
           </Row>
           <Table
             dataSource={recs}
-            columns={recColumns}
+            columns={getRecColumns(onStockClick)}
             rowKey="ts_code"
             pagination={false}
             size="small"
@@ -87,6 +98,7 @@ export default function BatchBacktestDetail() {
   const [report, setReport] = useState<BatchBacktestReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedStock, setSelectedStock] = useState<RecommendationItem | null>(null);
 
   const fetchData = async () => {
     if (!id) return;
@@ -140,7 +152,7 @@ export default function BatchBacktestDetail() {
           {avg3d !== null && <span style={{ color: parseFloat(avg3d) >= 0 ? '#52c41a' : '#ff4d4f' }}>3d avg: {avg3d}</span>}
         </Space>
       ),
-      children: <DailyPanel result={result} />,
+      children: <DailyPanel result={result} onStockClick={setSelectedStock} />,
     };
   });
 
@@ -200,6 +212,12 @@ export default function BatchBacktestDetail() {
           />
         </Card>
       )}
+      <StockKLineModal
+        ts_code={selectedStock?.ts_code ?? ''}
+        name={selectedStock?.name}
+        open={!!selectedStock}
+        onClose={() => setSelectedStock(null)}
+      />
     </>
   );
 }
