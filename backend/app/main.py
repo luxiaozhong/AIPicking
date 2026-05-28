@@ -39,6 +39,15 @@ async def startup_event():
     finally:
         await session.close()
 
+    # 预置内置策略
+    from seed_strategies import seed_strategies
+    session = await async_session()
+    try:
+        await seed_strategies(session, admin_user_id=admin.id)
+        await session.commit()
+    finally:
+        await session.close()
+
     print("数据库已初始化")
 
 
