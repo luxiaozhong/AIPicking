@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import stockService from '@/services/stockService';
 import type { KLineItem } from '@/types/stock';
 
+const MAX_CACHE_SIZE = 50;
 const cache = new Map<string, { name: string; items: KLineItem[] }>();
+const cacheKeys: string[] = [];
 
 interface KLineDataState {
   name: string;
@@ -40,6 +42,11 @@ export function useKLineData(tsCode: string | null, days: number = 365) {
       .then((result) => {
         if (cancelled) return;
         const value = { name: result.name, items: result.items };
+        cacheKeys.push(key);
+        if (cacheKeys.length > MAX_CACHE_SIZE) {
+          const oldest = cacheKeys.shift()!;
+          cache.delete(oldest);
+        }
         cache.set(key, value);
         setData(value);
         setLoading(false);

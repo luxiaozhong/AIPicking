@@ -19,9 +19,10 @@ export default function StockKLineModal({
 }: StockKLineModalProps) {
   const { data, loading, error } = useKLineData(open ? ts_code : null, days);
 
+  const daysLabel = days >= 365 ? '近一年' : `近${days}天`;
   const title = name
-    ? `${name}（${ts_code}）— 近一年 K 线图`
-    : `${ts_code} — 近一年 K 线图`;
+    ? `${name}（${ts_code}）— ${daysLabel} K 线图`
+    : `${ts_code} — ${daysLabel} K 线图`;
 
   return (
     <Modal
