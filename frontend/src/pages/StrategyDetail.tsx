@@ -14,6 +14,7 @@ import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
 import CodeBlock from '@/components/shared/CodeBlock';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import type { RecommendationItem } from '@/types/backtest';
 import stockService from '@/services/stockService';
 import type { StockItem } from '@/types/stock';
@@ -43,6 +44,7 @@ export default function StrategyDetail() {
     total: number;
     recommendations: RecommendationItem[];
   } | null>(null);
+  const [selectedStock, setSelectedStock] = useState<RecommendationItem | null>(null);
 
   useEffect(() => {
     if (id) fetchStrategy(parseInt(id));
@@ -209,7 +211,14 @@ export default function StrategyDetail() {
                 dataSource={executeResult.recommendations}
                 columns={[
                   { title: '排名', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
-                  { title: '股票代码', dataIndex: 'ts_code', width: 110 },
+                  {
+                    title: '股票代码',
+                    dataIndex: 'ts_code',
+                    width: 110,
+                    render: (code: string, record: RecommendationItem) => (
+                      <a onClick={() => setSelectedStock(record)}>{code}</a>
+                    ),
+                  },
                   { title: '股票名称', dataIndex: 'name', width: 100 },
                   { title: '得分', dataIndex: 'score', width: 80, sorter: (a: RecommendationItem, b: RecommendationItem) => a.score - b.score },
                   { title: '信号说明', dataIndex: 'signal' },
@@ -279,6 +288,12 @@ export default function StrategyDetail() {
         extra={actions}
       />
       <Tabs defaultActiveKey="info" items={tabItems} />
+      <StockKLineModal
+        ts_code={selectedStock?.ts_code ?? ''}
+        name={selectedStock?.name}
+        open={!!selectedStock}
+        onClose={() => setSelectedStock(null)}
+      />
     </>
   );
 }
