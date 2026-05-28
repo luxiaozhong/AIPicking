@@ -34,6 +34,7 @@ async def startup_event():
     session = await async_session()
     try:
         admin = await seed_default_admin(session)
+        await session.commit()
         print(f"默认管理员账号已就绪: {admin.username}")
     finally:
         await session.close()
