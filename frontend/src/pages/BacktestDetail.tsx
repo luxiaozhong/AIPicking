@@ -38,12 +38,14 @@ export default function BacktestDetail() {
     }
   }, [error, clearError]);
 
+  const [selectedStock, setSelectedStock] = useState<RecommendationItem | null>(null);
+
   if (loading && !currentBacktest) {
     return <LoadingSkeleton type="detail" />;
   }
 
   if (!currentBacktest) {
-    return <Alert type="error" message="回测报告不存在" />;
+    return <Alert type="error" title="回测报告不存在" />;
   }
 
   const { currentBacktest: bt } = useBacktestStore.getState();
@@ -52,7 +54,6 @@ export default function BacktestDetail() {
   const isPending = bt?.status === 'pending' || bt?.status === 'running';
   const isCompleted = bt?.status === 'completed';
   const isFailed = bt?.status === 'failed';
-  const [selectedStock, setSelectedStock] = useState<RecommendationItem | null>(null);
 
   const columns = [
     { title: '排名', key: 'index', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
