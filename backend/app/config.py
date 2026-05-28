@@ -34,7 +34,7 @@ class Settings:
         # 股票历史数据库路径
         self.STOCK_DB_PATH = os.getenv(
             "STOCK_DB_PATH",
-            "/Users/aklu/workbuddy/2026-05-22-21-48-44/data/stock_db.sqlite"
+            "/opt/stock_data/stock_db.sqlite"
         )
 
 

@@ -115,7 +115,7 @@ DATABASE_URL=sqlite+aiosqlite:///./data/database/aipicking.db
 CORS_ORIGINS=["http://DOMAIN_PLACEHOLDER"]
 BACKTEST_DATA_DIR=./data/market_data
 JWT_SECRET_KEY=JWT_PLACEHOLDER
-STOCK_DB_PATH=./data/market_data/stock_db.sqlite
+STOCK_DB_PATH=/opt/stock_data/stock_db.sqlite
 DOTENV
     sudo -u "$ACTUAL_USER" sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN_OR_IP}/" .env
     sudo -u "$ACTUAL_USER" sed -i "s/JWT_PLACEHOLDER/${JWT_SECRET}/" .env
