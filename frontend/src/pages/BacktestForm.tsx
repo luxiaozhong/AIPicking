@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Card, Form, DatePicker, Checkbox, Button, message, Typography, Spin, Input, Radio } from 'antd';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Card, Form, DatePicker, Checkbox, Button, message, Typography, Spin, Input, Radio, AutoComplete } from 'antd';
 import dayjs from 'dayjs';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStrategyStore } from '@/stores/strategyStore';
 import { useBacktestStore } from '@/stores/backtestStore';
 import PageHeader from '@/components/shared/PageHeader';
 import backtestService from '@/services/backtestService';
+import stockService from '@/services/stockService';
+import type { StockItem } from '@/types/stock';
 
 const { Text } = Typography;
 const { Group: CheckboxGroup } = Checkbox;
@@ -29,6 +31,31 @@ export default function BacktestForm() {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [batchName, setBatchName] = useState('');
+  const [stockOptions, setStockOptions] = useState<{ value: string; label: React.ReactNode }[]>([]);
+  const [stockSearching, setStockSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleStockSearch = useCallback((keyword: string) => {
+    if (!keyword) {
+      setStockOptions([]);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setStockSearching(true);
+      try {
+        const items: StockItem[] = await stockService.search(keyword);
+        setStockOptions(items.map((s) => ({
+          value: s.ts_code,
+          label: <span>{s.ts_code}  <Text type="secondary">{s.name}</Text></span>,
+        })));
+      } catch {
+        setStockOptions([]);
+      } finally {
+        setStockSearching(false);
+      }
+    }, 300);
+  }, []);
 
   useEffect(() => {
     if (id) fetchStrategy(parseInt(id));
@@ -192,11 +219,15 @@ export default function BacktestForm() {
           </Form.Item>
 
           <Form.Item label="目标股票（可选）">
-            <Input
-              placeholder="留空则全市场选股，输入如 300328.SZ 则只看该股"
+            <AutoComplete
               value={stockCode}
-              onChange={(e) => setStockCode(e.target.value)}
+              options={stockOptions}
+              onSearch={handleStockSearch}
+              onSelect={(value: string) => setStockCode(value)}
+              onChange={(value: string) => setStockCode(value)}
+              placeholder="输入股票代码或名称搜索（留空则全市场选股）"
               allowClear
+              notFoundContent={stockSearching ? <Spin size="small" /> : null}
             />
           </Form.Item>
 
