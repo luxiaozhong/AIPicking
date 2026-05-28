@@ -38,3 +38,34 @@ class StockService:
             "items": [dict(r) for r in rows],
             "total": len(rows),
         }
+
+    @staticmethod
+    def get_kline(ts_code: str, days: int = 365) -> dict:
+        """获取单只股票的日 K 线数据"""
+        conn = sqlite3.connect(settings.STOCK_DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        # 获取股票名称
+        stock = conn.execute(
+            "SELECT name FROM stocks WHERE ts_code = ?", (ts_code,)
+        ).fetchone()
+
+        # 获取最近 N 个交易日的 OHLCV 数据
+        rows = conn.execute(
+            """
+            SELECT trade_date, open, high, low, close, vol, amount
+            FROM daily
+            WHERE ts_code = ?
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (ts_code, days),
+        ).fetchall()
+        conn.close()
+
+        items = [dict(r) for r in reversed(rows)]
+        return {
+            "ts_code": ts_code,
+            "name": stock["name"] if stock else "",
+            "items": items,
+        }
