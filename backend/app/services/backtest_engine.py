@@ -10,8 +10,8 @@ from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime, timedelta
 
 
-# 数据库路径（固定）
-STOCK_DB_PATH = "/Users/aklu/workbuddy/2026-05-22-21-48-44/data/stock_db.sqlite"
+from ..config import settings
+STOCK_DB_PATH = settings.STOCK_DB_PATH
 
 # 推荐股票数量上限
 MAX_RECOMMENDATIONS = 10
