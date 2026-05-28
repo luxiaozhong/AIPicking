@@ -69,7 +69,8 @@ export default function StrategyDetail() {
           value: s.ts_code,
           label: <span>{s.ts_code}  <Typography.Text type="secondary">{s.name}</Typography.Text></span>,
         })));
-      } catch {
+      } catch (err) {
+        console.error('Stock search failed:', err);
         setStockOptions([]);
       } finally {
         setStockSearching(false);

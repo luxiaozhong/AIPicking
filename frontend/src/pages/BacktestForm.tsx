@@ -49,7 +49,8 @@ export default function BacktestForm() {
           value: s.ts_code,
           label: <span>{s.ts_code}  <Text type="secondary">{s.name}</Text></span>,
         })));
-      } catch {
+      } catch (err) {
+        console.error('Stock search failed:', err);
         setStockOptions([]);
       } finally {
         setStockSearching(false);
