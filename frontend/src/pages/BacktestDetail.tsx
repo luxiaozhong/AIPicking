@@ -5,10 +5,12 @@ import { useBacktestStore } from '@/stores/backtestStore';
 import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
 import ReturnLabel from '@/components/shared/ReturnLabel';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import StatCard from '@/components/shared/StatCard';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import ReturnComparisonChart from '@/components/charts/ReturnComparisonChart';
 import WinRateDonutChart from '@/components/charts/WinRateDonutChart';
+import type { RecommendationItem } from '@/types/backtest';
 
 export default function BacktestDetail() {
   const { id } = useParams<{ id: string }>();
@@ -50,10 +52,19 @@ export default function BacktestDetail() {
   const isPending = bt?.status === 'pending' || bt?.status === 'running';
   const isCompleted = bt?.status === 'completed';
   const isFailed = bt?.status === 'failed';
+  const [selectedStock, setSelectedStock] = useState<RecommendationItem | null>(null);
 
   const columns = [
     { title: '排名', key: 'index', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
-    { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 110 },
+    {
+      title: '股票代码',
+      dataIndex: 'ts_code',
+      key: 'ts_code',
+      width: 110,
+      render: (code: string, record: RecommendationItem) => (
+        <a onClick={() => setSelectedStock(record)}>{code}</a>
+      ),
+    },
     { title: '股票名称', dataIndex: 'name', key: 'name', width: 100 },
     { title: '得分', dataIndex: 'score', key: 'score', width: 80, sorter: (a: { score: number }, b: { score: number }) => a.score - b.score },
     { title: '信号说明', dataIndex: 'signal', key: 'signal' },
@@ -165,6 +176,13 @@ export default function BacktestDetail() {
           </Spin>
         </Card>
       )}
+
+      <StockKLineModal
+        ts_code={selectedStock?.ts_code ?? ''}
+        name={selectedStock?.name}
+        open={!!selectedStock}
+        onClose={() => setSelectedStock(null)}
+      />
     </>
   );
 }
