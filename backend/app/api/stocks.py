@@ -16,4 +16,5 @@ def search_stocks(
     current_user: User = Depends(get_current_user),
 ):
     """搜索股票（按代码或名称模糊匹配）"""
-    return StockService.search(q, limit)
+    result = StockService.search(q, limit)
+    return {"code": 0, "message": "ok", "data": result}
