@@ -339,7 +339,7 @@ class BacktestEngine:
             - daily_data: dict[ts_code] -> list[dict]，每个股票的日线数据（截止日前 120 天）
             - sector_flow_data: list[dict]，板块资金流向数据
         """
-        conn = sqlite3.connect(STOCK_DB_PATH)
+        conn = sqlite3.connect(STOCK_DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
@@ -414,7 +414,7 @@ class BacktestEngine:
 
         加载 start_date - 180 天到 end_date 的完整数据，后续按天切片。
         """
-        conn = sqlite3.connect(STOCK_DB_PATH)
+        conn = sqlite3.connect(STOCK_DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -500,7 +500,7 @@ class BacktestEngine:
         返回:
             补充了 return_Xd 字段的推荐股票列表
         """
-        conn = sqlite3.connect(STOCK_DB_PATH)
+        conn = sqlite3.connect(STOCK_DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
