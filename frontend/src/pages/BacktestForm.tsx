@@ -33,7 +33,7 @@ export default function BacktestForm() {
   const [batchName, setBatchName] = useState('');
   const [stockOptions, setStockOptions] = useState<{ value: string; label: React.ReactNode }[]>([]);
   const [stockSearching, setStockSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   const handleStockSearch = useCallback((keyword: string) => {
     if (!keyword) {

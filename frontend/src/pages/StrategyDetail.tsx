@@ -36,7 +36,7 @@ export default function StrategyDetail() {
   const [stockCode, setStockCode] = useState('');
   const [stockOptions, setStockOptions] = useState<{ value: string; label: React.ReactNode }[]>([]);
   const [stockSearching, setStockSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [executeResult, setExecuteResult] = useState<{
     strategy_name: string;
     cutoff_date: string;
