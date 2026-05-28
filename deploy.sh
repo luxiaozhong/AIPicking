@@ -3,7 +3,7 @@ set -e
 
 # ============================================================
 # AIpicking 一键部署脚本
-# 适用于 Ubuntu 20.04+ / Debian 11+
+# 支持 Ubuntu/Debian (apt) 和 CentOS/RHEL/TencentOS (yum/dnf)
 # 用法: chmod +x deploy.sh && sudo ./deploy.sh
 # ============================================================
 
@@ -20,19 +20,28 @@ err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 PROJECT_DIR="/opt/AIpicking"
 REPO_URL="https://github.com/luxiaozhong/AIPicking.git"
 BACKEND_PORT=8000
-DOMAIN_OR_IP="_"          # 有域名则替换为你的域名
-NODE_VERSION=20
-PYTHON_BIN="python3"
+DOMAIN_OR_IP="_"
+NODE_MAJOR=20
 # -----------------------------------------
 
 if [[ $EUID -ne 0 ]]; then
     err "请用 sudo 运行: sudo ./deploy.sh"
 fi
 
-# 实际用户（sudo 情况下的执行者）
 ACTUAL_USER="${SUDO_USER:-$USER}"
-ACTUAL_HOME=$(eval echo "~$ACTUAL_USER")
 
+# -------------------- 检测包管理器 --------------------
+if command -v apt &>/dev/null; then
+    PKG_MGR="apt"
+elif command -v dnf &>/dev/null; then
+    PKG_MGR="dnf"
+elif command -v yum &>/dev/null; then
+    PKG_MGR="yum"
+else
+    err "未检测到 apt/dnf/yum 包管理器"
+fi
+
+log "检测到包管理器: ${PKG_MGR}"
 log "开始部署 AIpicking..."
 
 # ============================================================
@@ -40,37 +49,52 @@ log "开始部署 AIpicking..."
 # ============================================================
 log "安装系统依赖..."
 
-apt update -qq
+case $PKG_MGR in
+    apt)
+        apt update -qq
+        apt install -y -qq curl git nginx
+        # Python
+        if ! command -v python3 &>/dev/null; then
+            apt install -y -qq python3 python3-venv python3-pip
+        fi
+        # Node.js (NodeSource)
+        if ! command -v node &>/dev/null || [[ $(node -v | sed 's/v//' | cut -d. -f1) -lt $NODE_MAJOR ]]; then
+            curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -
+            apt install -y -qq nodejs
+        fi
+        NGINX_CONF_DIR="/etc/nginx/sites-available"
+        NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
+        NGINX_DEFAULT_CONF="/etc/nginx/sites-enabled/default"
+        ;;
+    dnf|yum)
+        $PKG_MGR update -y -q 2>/dev/null || true
+        $PKG_MGR install -y -q curl git nginx
+        # Python
+        if ! command -v python3 &>/dev/null; then
+            $PKG_MGR install -y -q python3 python3-pip
+        fi
+        # Node.js (NodeSource)
+        if ! command -v node &>/dev/null || [[ $(node -v | sed 's/v//' | cut -d. -f1) -lt $NODE_MAJOR ]]; then
+            curl -fsSL https://rpm.nodesource.com/setup_${NODE_MAJOR}.x | bash -
+            $PKG_MGR install -y -q nodejs
+        fi
+        NGINX_CONF_DIR="/etc/nginx/conf.d"
+        NGINX_ENABLED_DIR="/etc/nginx/conf.d"
+        NGINX_DEFAULT_CONF="/etc/nginx/conf.d/default.conf"
+        ;;
+esac
 
-# Python
-if ! command -v $PYTHON_BIN &>/dev/null; then
-    apt install -y -qq $PYTHON_BIN $PYTHON_BIN-venv $PYTHON_BIN-pip
-    log "Python3 已安装"
-else
-    log "Python3 已存在，跳过"
+# Python 虚拟环境模块（CentOS 可能缺失）
+if ! python3 -m venv --help &>/dev/null 2>&1; then
+    if [[ $PKG_MGR == "yum" || $PKG_MGR == "dnf" ]]; then
+        $PKG_MGR install -y -q python3-venv 2>/dev/null || true
+    fi
 fi
 
-# Node.js (via NodeSource)
-if ! command -v node &>/dev/null || [[ $(node -v | sed 's/v//' | cut -d. -f1) -lt $NODE_VERSION ]]; then
-    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
-    apt install -y -qq nodejs
-    log "Node.js $(node -v) 已安装"
-else
-    log "Node.js $(node -v) 已存在，跳过"
-fi
-
-# Git
-if ! command -v git &>/dev/null; then
-    apt install -y -qq git
-fi
-
-# Nginx
-if ! command -v nginx &>/dev/null; then
-    apt install -y -qq nginx
-    log "Nginx 已安装"
-else
-    log "Nginx 已存在，跳过"
-fi
+log "基础依赖安装完成"
+log "Python: $(python3 --version 2>&1)"
+log "Node.js: $(node -v 2>&1)"
+log "Nginx: $(nginx -v 2>&1)"
 
 # ============================================================
 # 2. 拉取代码
@@ -92,23 +116,20 @@ log "配置后端..."
 
 cd "$PROJECT_DIR/backend"
 
-# 虚拟环境
 if [[ ! -d venv ]]; then
-    sudo -u "$ACTUAL_USER" $PYTHON_BIN -m venv venv
+    sudo -u "$ACTUAL_USER" python3 -m venv venv
     log "Python 虚拟环境已创建"
 fi
 
-# 安装 Python 依赖
 ./venv/bin/pip install -r requirements.txt -q
 log "Python 依赖已安装"
 
-# 数据目录
 sudo -u "$ACTUAL_USER" mkdir -p data/database data/market_data strategies/examples
 
-# 生产环境配置（首次部署时生成，后续不覆盖）
-if [[ ! -f .env.production ]]; then
+# 生产环境配置（首次生成，后续不覆盖）
+if [[ ! -f .env ]]; then
     JWT_SECRET=$(openssl rand -hex 32)
-    cat > .env << 'DOTENV'
+    cat > .env << DOTENV
 APP_NAME=AIpicking
 DEBUG=False
 DATABASE_URL=sqlite+aiosqlite:///./data/database/aipicking.db
@@ -117,8 +138,8 @@ BACKTEST_DATA_DIR=./data/market_data
 JWT_SECRET_KEY=JWT_PLACEHOLDER
 STOCK_DB_PATH=/opt/stock_data/stock_db.sqlite
 DOTENV
-    sudo -u "$ACTUAL_USER" sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN_OR_IP}/" .env
-    sudo -u "$ACTUAL_USER" sed -i "s/JWT_PLACEHOLDER/${JWT_SECRET}/" .env
+    sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN_OR_IP}/" .env
+    sed -i "s/JWT_PLACEHOLDER/${JWT_SECRET}/" .env
     log ".env 已生成（JWT_SECRET 已随机生成）"
 else
     log ".env 已存在，跳过"
@@ -131,7 +152,6 @@ log "构建前端..."
 
 cd "$PROJECT_DIR/frontend"
 
-# 生产环境前端配置
 sudo -u "$ACTUAL_USER" cat > .env.production << 'DOTENV'
 VITE_API_BASE_URL=/api/v1
 VITE_APP_TITLE=AIpicking 量化交易平台
@@ -146,7 +166,9 @@ log "前端构建完成 → dist/"
 # ============================================================
 log "配置 Nginx..."
 
-cat > /etc/nginx/sites-available/aipicking << NGINX_EOF
+mkdir -p "$NGINX_CONF_DIR"
+
+cat > "${NGINX_CONF_DIR}/aipicking.conf" << NGINX_EOF
 server {
     listen 80;
     server_name ${DOMAIN_OR_IP};
@@ -154,11 +176,9 @@ server {
     root ${PROJECT_DIR}/frontend/dist;
     index index.html;
 
-    # gzip
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml image/svg+xml;
 
-    # API 反向代理
     location /api/ {
         proxy_pass http://127.0.0.1:${BACKEND_PORT};
         proxy_set_header Host \$host;
@@ -168,19 +188,23 @@ server {
         proxy_read_timeout 120s;
     }
 
-    # SPA fallback
     location / {
         try_files \$uri \$uri/ /index.html;
     }
 }
 NGINX_EOF
 
-# 启用站点
-ln -sf /etc/nginx/sites-available/aipicking /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
+# Ubuntu/Debian 需要软链；CentOS conf.d 直接生效
+if [[ "$PKG_MGR" == "apt" ]]; then
+    ln -sf "${NGINX_CONF_DIR}/aipicking.conf" "${NGINX_ENABLED_DIR}/aipicking.conf"
+    rm -f "$NGINX_DEFAULT_CONF"
+else
+    rm -f "$NGINX_DEFAULT_CONF"
+fi
 
-nginx -t && systemctl reload nginx
-log "Nginx 已配置并重载"
+nginx -t && systemctl reload nginx 2>/dev/null || systemctl start nginx
+systemctl enable nginx
+log "Nginx 已配置"
 
 # ============================================================
 # 6. 配置 systemd 服务
@@ -210,7 +234,16 @@ systemctl restart aipicking
 log "后端服务已启动"
 
 # ============================================================
-# 7. 检查状态
+# 7. 防火墙（如果 firewalld 在运行则放行 80 端口）
+# ============================================================
+if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
+    firewall-cmd --permanent --add-service=http 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    log "防火墙已放行 80 端口"
+fi
+
+# ============================================================
+# 8. 状态检查
 # ============================================================
 echo ""
 echo "========================================"
@@ -218,14 +251,12 @@ echo "  部署完成！"
 echo "========================================"
 echo ""
 
-# 后端状态
 if systemctl is-active --quiet aipicking; then
-    log "后端: 运行中 (systemctl status aipicking)"
+    log "后端: 运行中"
 else
-    warn "后端: 未运行，请检查 journalctl -u aipicking -f"
+    warn "后端: 未运行，查看日志: journalctl -u aipicking -f"
 fi
 
-# Nginx 状态
 if systemctl is-active --quiet nginx; then
     log "Nginx: 运行中"
 else
@@ -233,20 +264,13 @@ else
 fi
 
 echo ""
-echo "访问地址:"
-echo "  http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo '服务器IP')"
+echo "  访问: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo '服务器IP')"
 echo ""
-echo "默认管理员账号: admin / admin123"
+echo "  管理员: admin / admin123"
 echo ""
-echo "常用命令:"
-echo "  systemctl status aipicking   # 查看后端状态"
-echo "  systemctl restart aipicking  # 重启后端"
-echo "  journalctl -u aipicking -f   # 查看后端日志"
-echo "  nginx -t && systemctl reload nginx  # 重载 Nginx"
-echo "  cd ${PROJECT_DIR} && git pull  # 更新代码后重新部署"
-echo ""
-echo "重要提示:"
-echo "  如有域名，请修改 /etc/nginx/sites-available/aipicking 中的 server_name"
-echo "  如需 HTTPS，运行: sudo certbot --nginx -d 你的域名"
-echo "  请将股票数据库文件放到: ${PROJECT_DIR}/backend/data/market_data/"
+echo "常用:"
+echo "  systemctl restart aipicking     # 重启后端"
+echo "  journalctl -u aipicking -f      # 后端日志"
+echo "  nginx -t && systemctl reload nginx"
+echo "  cd ${PROJECT_DIR} && git pull && systemctl restart aipicking  # 更新"
 echo ""
