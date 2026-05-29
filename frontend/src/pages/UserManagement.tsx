@@ -118,6 +118,11 @@ const UserManagement: React.FC = () => {
       render: (t: string) => t ? new Date(t).toLocaleString() : '-',
     },
     {
+      title: '最后登录',
+      dataIndex: 'last_login',
+      render: (t: string) => t ? new Date(t).toLocaleString() : '—',
+    },
+    {
       title: '操作',
       key: 'actions',
       width: 200,

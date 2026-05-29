@@ -34,6 +34,7 @@ async def list_users(
                 is_active=u.is_active,
                 created_at=u.created_at.isoformat() if u.created_at else None,
                 updated_at=u.updated_at.isoformat() if u.updated_at else None,
+                last_login=u.last_login.isoformat() if u.last_login else None,
             )
             for u in users
         ],

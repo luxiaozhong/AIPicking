@@ -27,6 +27,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    last_login: Optional[str] = None
 
     class Config:
         from_attributes = True

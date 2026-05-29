@@ -9,6 +9,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.user import User
+from ..models.base import beijing_now
 from ..config import settings
 
 # JWT 配置
@@ -78,6 +79,8 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> O
         return None
     if not verify_password(password, user.password_hash):
         return None
+    user.last_login = beijing_now()
+    await db.flush()
     return user
 
 
