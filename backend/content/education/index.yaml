@@ -1,0 +1,13 @@
+categories:
+  - key: indicators
+    label: 指标讲解
+    icon: LineChartOutlined
+    order: 1
+  - key: strategies
+    label: 策略案例
+    icon: BulbOutlined
+    order: 2
+  - key: guides
+    label: 操作指南
+    icon: BookOutlined
+    order: 3
