@@ -9,6 +9,7 @@ import {
   UserOutlined,
   TeamOutlined,
   LogoutOutlined,
+  ReadOutlined,
 } from '@ant-design/icons';
 import { useThemeStore } from '@/stores/themeStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -38,6 +39,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       key: '/dashboard',
       icon: <DashboardOutlined />,
       label: '仪表盘',
+    },
+    {
+      key: '/education',
+      icon: <ReadOutlined />,
+      label: '学习中心',
     },
     {
       key: '/strategies',
@@ -70,6 +76,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     if (location.pathname.startsWith('/backtests/batch')) return '/backtests/batch';
     if (location.pathname.startsWith('/backtests')) return '/backtests';
     if (location.pathname.startsWith('/strategies')) return '/strategies';
+    if (location.pathname.startsWith('/education')) return '/education';
     if (location.pathname.startsWith('/dashboard')) return '/dashboard';
     return '/dashboard';
   })();

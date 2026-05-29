@@ -17,6 +17,8 @@ import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
 import Dashboard from '@/pages/Dashboard';
 import LoginPage from '@/pages/LoginPage';
 import UserManagement from '@/pages/UserManagement';
+import EducationPage from '@/pages/EducationPage';
+import EducationDetailPage from '@/pages/EducationDetailPage';
 import NotFound from '@/pages/NotFound';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -52,6 +54,22 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/education"
+          element={
+            <ProtectedRoute>
+              <EducationPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/education/:category/:slug"
+          element={
+            <ProtectedRoute>
+              <EducationDetailPage />
             </ProtectedRoute>
           }
         />
