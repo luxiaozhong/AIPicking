@@ -45,6 +45,7 @@ const AIStrategyBuilder: React.FC = () => {
     taskId, tasks, tasksLoading, submitting, generatedStrategyId,
     submitAnalysis, updateIndicator, removeIndicator, addIndicator,
     setBuyLogic, confirmAndGenerate, fetchTasks, loadTask, clearAnalysis,
+    cancelPolling, resumeInProgressTask,
   } = useAIStrategyStore();
 
   const [addingNew, setAddingNew] = useState(false);
@@ -52,6 +53,10 @@ const AIStrategyBuilder: React.FC = () => {
 
   useEffect(() => {
     fetchTasks();
+    resumeInProgressTask();
+    return () => {
+      cancelPolling();
+    };
   }, []);
 
   useEffect(() => {
