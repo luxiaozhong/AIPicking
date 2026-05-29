@@ -86,9 +86,14 @@ export const strategyService = {
     return response.data;
   },
 
-  // 删除策略
+  // 删除策略（软删除）
   async deleteStrategy(id: number) {
     await api.delete(`/strategies/${id}`);
+  },
+
+  // 彻底删除策略（硬删除，同时删除关联的回测报告）
+  async permanentDeleteStrategy(id: number) {
+    await api.delete(`/strategies/${id}/permanent`);
   },
 };
 

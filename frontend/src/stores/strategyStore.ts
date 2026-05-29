@@ -10,11 +10,11 @@ interface StrategyState {
   limit: number;
   loading: boolean;
   error: string | null;
-  
+
   // 当前策略详情
   currentStrategy: Strategy | null;
   codeContent: string;
-  
+
   // 操作方法
   fetchStrategies: (params?: {
     page?: number;
@@ -22,13 +22,13 @@ interface StrategyState {
     search?: string;
     status?: string;
   }) => Promise<void>;
-  
+
   uploadStrategy: (file: File, name?: string, description?: string, tags?: string) => Promise<StrategyUploadResponse>;
-  
+
   fetchStrategy: (id: number) => Promise<void>;
-  
+
   downloadStrategy: (id: number, fileName: string) => Promise<void>;
-  
+
   updateStrategy: (id: number, data: {
     name?: string;
     description?: string;
@@ -36,11 +36,13 @@ interface StrategyState {
     tags?: string[];
     status?: string;
   }) => Promise<Strategy>;
-  
+
   updateStrategyCode: (id: number, file?: File, code?: string) => Promise<StrategyUploadResponse>;
-  
+
   deleteStrategy: (id: number) => Promise<void>;
-  
+
+  permanentDeleteStrategy: (id: number) => Promise<void>;
+
   clearError: () => void;
 }
 
@@ -52,14 +54,14 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
   limit: 20,
   loading: false,
   error: null,
-  
+
   currentStrategy: null,
   codeContent: '',
-  
+
   // 获取策略列表
   fetchStrategies: async (params = {}) => {
     set({ loading: true, error: null });
-    
+
     try {
       const response = await strategyService.getStrategies({
         page: params.page || get().page,
@@ -67,7 +69,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         search: params.search,
         status: params.status,
       });
-      
+
       set({
         strategies: response.items,
         total: response.total,
@@ -82,52 +84,52 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
       });
     }
   },
-  
+
   // 上传策略
   uploadStrategy: async (file: File, name?: string, description?: string, tags?: string) => {
     set({ loading: true, error: null });
-    
+
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
+
       if (name) {
         formData.append('name', name);
       }
-      
+
       if (description) {
         formData.append('description', description);
       }
-      
+
       if (tags) {
         formData.append('tags', tags);
       }
-      
+
       const response = await strategyService.uploadStrategy(formData);
-      
+
       set({ loading: false });
-      
+
       // 刷新列表
       get().fetchStrategies();
-      
+
       return response;
     } catch (error: any) {
       set({
         loading: false,
         error: error.response?.data?.message || '上传策略失败',
       });
-      
+
       throw error;
     }
   },
-  
+
   // 获取策略详情
   fetchStrategy: async (id: number) => {
     set({ loading: true, error: null });
-    
+
     try {
       const response = await strategyService.getStrategy(id);
-      
+
       set({
         currentStrategy: response.data,
         codeContent: response.code_content,
@@ -140,7 +142,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
       });
     }
   },
-  
+
   // 下载策略
   downloadStrategy: async (id: number, fileName: string) => {
     try {
@@ -151,7 +153,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
       });
     }
   },
-  
+
   // 更新策略元数据
   updateStrategy: async (id: number, data: {
     name?: string;
@@ -161,7 +163,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
     status?: string;
   }) => {
     set({ loading: true, error: null });
-    
+
     try {
       const response = await strategyService.updateStrategy(id, data);
 
@@ -176,26 +178,26 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         loading: false,
         error: error.response?.data?.message || '更新策略失败',
       });
-      
+
       throw error;
     }
   },
-  
+
   // 更新策略代码
   updateStrategyCode: async (id: number, file?: File, code?: string) => {
     set({ loading: true, error: null });
-    
+
     try {
       const formData = new FormData();
-      
+
       if (file) {
         formData.append('file', file);
       }
-      
+
       if (code) {
         formData.append('code', code);
       }
-      
+
       const response = await strategyService.updateStrategyCode(id, formData);
 
       // 刷新策略详情
@@ -209,20 +211,20 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         loading: false,
         error: error.response?.data?.message || '更新策略代码失败',
       });
-      
+
       throw error;
     }
   },
-  
-  // 删除策略
+
+  // 删除策略（软删除）
   deleteStrategy: async (id: number) => {
     set({ loading: true, error: null });
-    
+
     try {
       await strategyService.deleteStrategy(id);
-      
+
       set({ loading: false });
-      
+
       // 刷新列表
       get().fetchStrategies();
     } catch (error: any) {
@@ -230,11 +232,32 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         loading: false,
         error: error.response?.data?.message || '删除策略失败',
       });
-      
+
       throw error;
     }
   },
-  
+
+  // 彻底删除策略（硬删除，同时删除关联的回测报告）
+  permanentDeleteStrategy: async (id: number) => {
+    set({ loading: true, error: null });
+
+    try {
+      await strategyService.permanentDeleteStrategy(id);
+
+      set({ loading: false });
+
+      // 刷新列表
+      get().fetchStrategies();
+    } catch (error: any) {
+      set({
+        loading: false,
+        error: error.response?.data?.message || '彻底删除策略失败',
+      });
+
+      throw error;
+    }
+  },
+
   // 清除错误
   clearError: () => {
     set({ error: null });

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Card, Button, Table, Space, message, Select, AutoComplete, Spin, Typography } from 'antd';
+import { Card, Button, Table, Space, message, Select, AutoComplete, Spin, Typography, Popconfirm } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useBacktestStore } from '@/stores/backtestStore';
@@ -138,16 +138,23 @@ export default function BacktestList() {
           <Button type="link" size="small" onClick={() => navigate(`/backtests/${record.id}`)}>
             查看
           </Button>
-          <Button type="link" size="small" danger onClick={async () => {
-            try {
-              await deleteBacktest(record.id);
-              message.success('删除成功');
-            } catch {
-              // error message handled by useEffect watching store error state
-            }
-          }}>
-            删除
-          </Button>
+          <Popconfirm
+            title="确定删除此回测报告？"
+            onConfirm={async () => {
+              try {
+                await deleteBacktest(record.id);
+                message.success('删除成功');
+              } catch {
+                // error message handled by useEffect watching store error state
+              }
+            }}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button type="link" size="small" danger>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },

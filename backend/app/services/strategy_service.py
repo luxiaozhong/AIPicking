@@ -304,10 +304,14 @@ class StrategyService:
     async def update_strategy(
         db: AsyncSession,
         strategy_id: int,
-        strategy: StrategyUpdate
+        strategy: StrategyUpdate,
+        user_id: Optional[int] = None,
+        user_role: str = "user",
     ) -> Strategy:
         """更新策略元数据（名称、描述、标签等，不含代码）"""
-        db_strategy = await StrategyService.get_strategy(db, strategy_id)
+        db_strategy = await StrategyService.get_strategy(
+            db, strategy_id, user_id=user_id, user_role=user_role
+        )
         
         # 更新字段
         update_data = strategy.model_dump(exclude_unset=True)
@@ -336,6 +340,52 @@ class StrategyService:
             db, strategy_id, user_id=user_id, user_role=user_role
         )
         db_strategy.status = "deleted"
+        await db.commit()
+
+    @staticmethod
+    async def permanent_delete_strategy(
+        db: AsyncSession,
+        strategy_id: int,
+        user_id: Optional[int] = None,
+        user_role: str = "user",
+    ) -> None:
+        """彻底删除策略（硬删除，同时删除关联的回测报告和执行记录）"""
+        from ..models.backtest import BacktestReport, BatchBacktestReport, StrategyRun
+
+        db_strategy = await StrategyService.get_strategy(
+            db, strategy_id, user_id=user_id, user_role=user_role
+        )
+
+        # 删除关联的回测报告
+        backtest_result = await db.execute(
+            select(BacktestReport).where(BacktestReport.strategy_id == strategy_id)
+        )
+        for bt in backtest_result.scalars().all():
+            await db.delete(bt)
+
+        # 删除关联的批量回测报告
+        batch_result = await db.execute(
+            select(BatchBacktestReport).where(BatchBacktestReport.strategy_id == strategy_id)
+        )
+        for bt in batch_result.scalars().all():
+            await db.delete(bt)
+
+        # 删除关联的策略执行记录
+        run_result = await db.execute(
+            select(StrategyRun).where(StrategyRun.strategy_id == strategy_id)
+        )
+        for run in run_result.scalars().all():
+            await db.delete(run)
+
+        # 删除策略文件
+        if db_strategy.file_path and os.path.exists(db_strategy.file_path):
+            try:
+                os.remove(db_strategy.file_path)
+            except OSError:
+                pass
+
+        # 硬删除策略记录
+        await db.delete(db_strategy)
         await db.commit()
 
     @staticmethod

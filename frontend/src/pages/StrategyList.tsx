@@ -22,6 +22,8 @@ export default function StrategyList() {
     error,
     fetchStrategies,
     deleteStrategy,
+    updateStrategy,
+    permanentDeleteStrategy,
     clearError,
   } = useStrategyStore();
 
@@ -57,8 +59,30 @@ export default function StrategyList() {
     try {
       await deleteStrategy(id);
       message.success('删除成功');
+      // 保持当前过滤条件，避免重置为默认的「活跃」
+      fetchStrategies({ page: 1, search: search || undefined, status: statusFilter });
     } catch {
       message.error('删除失败');
+    }
+  };
+
+  const handleRestore = async (id: number) => {
+    try {
+      await updateStrategy(id, { status: 'active' });
+      message.success('恢复成功');
+      fetchStrategies({ page: 1, search: search || undefined, status: statusFilter });
+    } catch {
+      message.error('恢复失败');
+    }
+  };
+
+  const handlePermanentDelete = async (id: number) => {
+    try {
+      await permanentDeleteStrategy(id);
+      message.success('彻底删除成功');
+      fetchStrategies({ page: 1, search: search || undefined, status: statusFilter });
+    } catch {
+      message.error('彻底删除失败');
     }
   };
 
@@ -136,7 +160,7 @@ export default function StrategyList() {
         title: '操作',
         key: 'action',
         width: 180,
-        render: (_: unknown, record: { id: number }) => (
+        render: (_: unknown, record: { id: number; status: string }) => (
           <Space size="small">
             <Button type="link" size="small" onClick={() => navigate(`/strategies/${record.id}`)}>
               查看
@@ -144,23 +168,48 @@ export default function StrategyList() {
             <Button type="link" size="small" onClick={() => navigate(`/strategies/${record.id}/edit`)}>
               编辑
             </Button>
-            <Popconfirm
-              title="确定删除此策略？"
-              onConfirm={() => handleDelete(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Button type="link" size="small" danger>
-                删除
-              </Button>
-            </Popconfirm>
+            {record.status === 'deleted' ? (
+              <>
+                <Popconfirm
+                  title="确定恢复此策略？"
+                  onConfirm={() => handleRestore(record.id)}
+                  okText="确定"
+                  cancelText="取消"
+                >
+                  <Button type="link" size="small">
+                    恢复
+                  </Button>
+                </Popconfirm>
+                <Popconfirm
+                  title="彻底删除将同时删除所有关联的回测报告，不可恢复。确定继续？"
+                  onConfirm={() => handlePermanentDelete(record.id)}
+                  okText="确定"
+                  cancelText="取消"
+                >
+                  <Button type="link" size="small" danger>
+                    彻底删除
+                  </Button>
+                </Popconfirm>
+              </>
+            ) : (
+              <Popconfirm
+                title="确定删除此策略？"
+                onConfirm={() => handleDelete(record.id)}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger>
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
           </Space>
         ),
       }
     );
 
     return cols;
-  }, [isAdmin, navigate]);
+  }, [isAdmin, navigate, statusFilter, search]);
 
   return (
     <>

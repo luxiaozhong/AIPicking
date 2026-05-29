@@ -135,7 +135,10 @@ async def update_strategy(
     current_user: User = Depends(get_current_user),
 ):
     """更新策略元数据（名称、描述、标签等）"""
-    return await StrategyService.update_strategy(db, strategy_id, strategy)
+    return await StrategyService.update_strategy(
+        db, strategy_id, strategy,
+        user_id=current_user.id, user_role=current_user.role
+    )
 
 
 @router.put("/{strategy_id}/code", response_model=StrategyUploadResponse)
@@ -149,6 +152,18 @@ async def update_strategy_code(
     """更新策略代码（上传新文件或在线编辑）"""
     return await StrategyService.update_strategy_code(
         db, strategy_id, file, code
+    )
+
+
+@router.delete("/{strategy_id}/permanent", status_code=204)
+async def permanent_delete_strategy(
+    strategy_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """彻底删除策略（同时删除关联的回测报告）"""
+    await StrategyService.permanent_delete_strategy(
+        db, strategy_id, user_id=current_user.id, user_role=current_user.role
     )
 
 
