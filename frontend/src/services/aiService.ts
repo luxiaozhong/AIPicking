@@ -32,7 +32,6 @@ export const aiService = {
     task_id: string;
     strategy_name?: string;
     indicators: Record<string, unknown>[];
-    buy_logic?: string;
   }) {
     const response = await api.post('/ai/confirm-strategy', data);
     return response.data;

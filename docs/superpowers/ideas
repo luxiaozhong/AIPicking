@@ -5,9 +5,18 @@ done 给个股跑分的时候，也要加到回测页面，这样可以看具体
 done 回测的时候目前只能某一天， 增加功能跑一个周期。
 done 检查一下 checkup 策略 的数据源， 不是我的源数据库吗
 done 回测推荐清单， 点击股票后画出过去 1 年的 k 线图
+done 新功能， 给系统一个股票和一个时间段的 k 线图， 让它总结合理的量化指标做成策略。 这样寻找下一个牛股， 甚至增加当时消息面的信息
+done bug - 生成策略失败， 华天 - 4。8  但是后面重新进入策略发现又生成了。
+done 运行回测， 系统卡死 -- 回测已改为线程池执行
+
+删掉的策略， 重新恢复过来 - 状态重置。 
+点击删除已经删除的策略是什么逻辑？ filter🈶️变成活跃
 
 把数据同步 job 放过来
 策略也可以python生成好，上传然后会按策略执行拉出满足的股票是吗？
-实现外部可以跑通的策略代码上传后自动转成合适 app 的执行策略反而会失败， 智能回测吗
-新功能， 给系统一个股票和一个时间段的 k 线图， 让它总结合理的量化指标做成策略。 这样寻找下一个牛股， 甚至增加当时消息面的信息
-14	抽公共 StockSearchLookup 组件 -- BacktestForm/StrategyDetail/AIStrategyBuilder/BacktestList 四个页面复制了相同的股票搜索样板代码，应抽成 shared 组件
+实现外部可以跑通的策略代码上传后自动
+转成合适 app 的执行策略反而会失败， 智能回测吗
+
+14	AI Builder 页面卸载时停掉轮询 (clearTimeout)，避免内存泄漏
+15	重新进入 AI Builder 时检查进行中的任务，自动恢复轮询
+16	抽公共 StockSearchLookup 组件 -- BacktestForm/StrategyDetail/AIStrategyBuilder/BacktestList 四个页面复制了相同的股票搜索样板代码，应抽成 shared 组件

@@ -42,7 +42,7 @@ const AIStrategyBuilder: React.FC = () => {
 
   const {
     status, error, result, indicators, buyLogic,
-    taskId, tasks, tasksLoading, submitting,
+    taskId, tasks, tasksLoading, submitting, generatedStrategyId,
     submitAnalysis, updateIndicator, removeIndicator, addIndicator,
     setBuyLogic, confirmAndGenerate, fetchTasks, loadTask, clearAnalysis,
   } = useAIStrategyStore();
@@ -60,6 +60,12 @@ const AIStrategyBuilder: React.FC = () => {
       loadTask(tid);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (generatedStrategyId) {
+      navigate(`/strategies/${generatedStrategyId}`);
+    }
+  }, [generatedStrategyId]);
 
   const handleStockSearch = useCallback((keyword: string) => {
     if (!keyword) {
@@ -484,8 +490,13 @@ const AIStrategyBuilder: React.FC = () => {
           />
 
           {submitting && (
-            <div style={{ textAlign: 'center', marginTop: 16 }}>
-              <Spin tip="正在生成策略..." />
+            <div style={{ textAlign: 'center', padding: '80px 0' }}>
+              <Spin size="large" />
+              <Paragraph style={{ marginTop: 24, fontSize: 16 }}>
+                <RobotOutlined style={{ marginRight: 8 }} />
+                DeepSeek 正在生成策略代码...
+              </Paragraph>
+              <Text type="secondary">正在为每个指标生成计算代码，最长可能需要 2-3 分钟</Text>
             </div>
           )}
         </Card>

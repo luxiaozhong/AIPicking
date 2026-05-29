@@ -310,6 +310,9 @@ async def get_analysis_result(
     if task.status == "processing":
         return {"code": 0, "data": {"status": "processing"}}
 
+    if task.status == "generating":
+        return {"code": 0, "data": {"status": "generating"}}
+
     if task.status == "failed":
         return {
             "code": 0,
@@ -320,6 +323,7 @@ async def get_analysis_result(
         }
 
     result = json.loads(task.result_json or "{}")
+    strategy_id = result.get("strategy_id")
     kline_summary = json.loads(task.kline_summary or "{}")
     return {
         "code": 0,
@@ -328,6 +332,9 @@ async def get_analysis_result(
             "summary": result.get("summary", ""),
             "indicators": result.get("indicators", []),
             "kline_summary": kline_summary,
+            "strategy_id": strategy_id,
+            "generated_factors": result.get("generated_factors", []),
+            "failed_factors": result.get("failed_factors", []),
         },
     }
 
@@ -375,7 +382,7 @@ async def confirm_strategy(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """确认指标 → 生成策略"""
+    """确认指标 → 后台生成策略（异步，避免 DeepSeek 调用超时）"""
     task = (
         await db.execute(
             select(AIStrategyTask).where(
@@ -388,43 +395,100 @@ async def confirm_strategy(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    result = await match_and_generate(
-        task=task,
-        indicators=req.indicators,
-        strategy_name=req.strategy_name,
-        buy_logic="OR",
-        user_id=current_user.id,
-    )
+    if task.status != "completed":
+        return {"code": 400, "message": "分析尚未完成", "data": None}
 
-    # 保存策略
-    if req.strategy_name:
-        name = req.strategy_name
-    else:
-        from datetime import datetime
-        ts = datetime.now().strftime("%H%M%S")
-        name = f"AI参考-{task.ts_code}-{task.date}-{ts}"
-    strategy = Strategy(
-        name=name,
-        description=f"由AI基于 {task.ts_code} {task.date} 的K线数据生成",
-        file_path="",
-        factor_config=json.dumps(
-            result["factor_config"], ensure_ascii=False
-        ),
-        generated_code=result["generated_code"],
-        user_id=current_user.id,
-        status="active",
-        version=1,
-    )
-    db.add(strategy)
+    # 标记为生成中
+    task.status = "generating"
     await db.commit()
-    await db.refresh(strategy)
+
+    # 后台异步生成
+    asyncio.create_task(
+        _run_generation(
+            task_id=req.task_id,
+            indicators=req.indicators,
+            strategy_name=req.strategy_name,
+            user_id=current_user.id,
+        )
+    )
 
     return {
         "code": 0,
-        "data": {
-            "strategy_id": strategy.id,
-            "factor_config": result["factor_config"],
-            "generated_factors": result["generated_factors"],
-            "failed_factors": result["failed_factors"],
-        },
+        "data": {"status": "generating"},
     }
+
+
+async def _run_generation(
+    task_id: str,
+    indicators: list[dict],
+    strategy_name: str,
+    user_id: int,
+):
+    """后台执行策略生成（调用 DeepSeek 生成每个指标的代码）"""
+    from ..database import async_session
+
+    session = await async_session()
+    try:
+        task = (
+            await session.execute(
+                select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+            )
+        ).scalar_one()
+
+        result = await match_and_generate(
+            task=task,
+            indicators=indicators,
+            strategy_name=strategy_name,
+            buy_logic="OR",
+            user_id=user_id,
+        )
+
+        # 保存策略
+        if strategy_name:
+            name = strategy_name
+        else:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H%M%S")
+            name = f"AI参考-{task.ts_code}-{task.date}-{ts}"
+        strategy = Strategy(
+            name=name,
+            description=f"由AI基于 {task.ts_code} {task.date} 的K线数据生成",
+            file_path="",
+            factor_config=json.dumps(
+                result["factor_config"], ensure_ascii=False
+            ),
+            generated_code=result["generated_code"],
+            user_id=user_id,
+            status="active",
+            version=1,
+        )
+        session.add(strategy)
+        await session.commit()
+        await session.refresh(strategy)
+
+        # 更新任务状态
+        task.status = "completed"
+        task.result_json = json.dumps(
+            {"strategy_id": strategy.id, "generated_factors": result["generated_factors"],
+             "failed_factors": result["failed_factors"]},
+            ensure_ascii=False,
+        )
+        await session.commit()
+
+    except Exception as e:
+        import traceback
+        print(f"[Generation ERROR] task={task_id}: {e}")
+        traceback.print_exc()
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = str(e)
+            await session.commit()
+        except Exception:
+            pass
+    finally:
+        await session.close()

@@ -136,20 +136,41 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
 
   confirmAndGenerate: async (strategyName) => {
     const { taskId, indicators, buyLogic } = get();
-    set({ submitting: true });
+    set({ submitting: true, status: 'polling' });
     try {
       const res = await aiService.confirmStrategy({
         task_id: taskId!,
         strategy_name: strategyName,
         indicators: indicators as unknown as Record<string, unknown>[],
-        buy_logic: buyLogic,
       });
 
-      if (res.code === 0) {
-        set({
-          generatedStrategyId: res.data.strategy_id,
-          submitting: false,
+      if (res.code === 0 && res.data.status === 'generating') {
+        // 后台生成中，轮询等待完成
+        return new Promise<number>((resolve, reject) => {
+          const poll = async () => {
+            try {
+              const r = await aiService.getAnalysisResult(taskId!);
+              if (r.data.status === 'completed' && r.data.strategy_id) {
+                set({
+                  generatedStrategyId: r.data.strategy_id,
+                  submitting: false,
+                  status: 'completed',
+                });
+                resolve(r.data.strategy_id);
+              } else if (r.data.status === 'failed') {
+                set({ submitting: false, status: 'failed', error: r.data.error_message || '生成失败' });
+                reject(new Error(r.data.error_message));
+              } else {
+                setTimeout(poll, 2000);
+              }
+            } catch {
+              setTimeout(poll, 3000);
+            }
+          };
+          setTimeout(poll, 2000);
         });
+      } else if (res.code === 0 && res.data.strategy_id) {
+        set({ generatedStrategyId: res.data.strategy_id, submitting: false });
         return res.data.strategy_id;
       } else {
         set({ submitting: false, error: res.message || '生成策略失败' });
