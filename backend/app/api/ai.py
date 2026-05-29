@@ -397,7 +397,12 @@ async def confirm_strategy(
     )
 
     # 保存策略
-    name = req.strategy_name or f"AI参考-{task.ts_code}-{task.date}"
+    if req.strategy_name:
+        name = req.strategy_name
+    else:
+        from datetime import datetime
+        ts = datetime.now().strftime("%H%M%S")
+        name = f"AI参考-{task.ts_code}-{task.date}-{ts}"
     strategy = Strategy(
         name=name,
         description=f"由AI基于 {task.ts_code} {task.date} 的K线数据生成",
