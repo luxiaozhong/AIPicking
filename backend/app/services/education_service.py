@@ -1,7 +1,6 @@
 """教育内容服务 — 读取 Markdown 文件，解析 frontmatter，内存缓存"""
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -119,7 +118,11 @@ class EducationService:
         if index_file.exists():
             try:
                 data = yaml.safe_load(index_file.read_text(encoding="utf-8"))
-                self._categories = data.get("categories", [])
+                cats = data.get("categories", [])
+                if isinstance(cats, list) and all(isinstance(c, dict) for c in cats):
+                    self._categories = cats
+                else:
+                    logger.warning("index.yaml categories 格式错误")
             except Exception:
                 logger.warning("index.yaml 解析失败，使用默认分类")
 
@@ -141,7 +144,11 @@ class EducationService:
             if parsed is None:
                 continue
             article = ArticleFull(**parsed)
-            self._articles[article.slug] = article
+            # 使用 category/slug 作为 key，避免不同分类下同名文件冲突
+            key = f"{article.category}/{article.slug}"
+            if key in self._articles:
+                logger.warning("slug 冲突，后加载的文件覆盖: %s", key)
+            self._articles[key] = article
 
     @property
     def loaded(self) -> bool:
@@ -158,7 +165,12 @@ class EducationService:
         return [a.to_dict() for a in items]
 
     def get_article(self, slug: str) -> Optional[dict]:
+        # slug 可以是 "macd"（纯文件名）或 "indicators/macd"（含分类前缀）
         article = self._articles.get(slug)
-        if article is None:
-            return None
-        return article.to_dict()
+        if article is not None:
+            return article.to_dict()
+        # 按纯 slug 搜索
+        for key, a in self._articles.items():
+            if key.endswith(f"/{slug}"):
+                return a.to_dict()
+        return None
