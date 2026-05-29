@@ -3,7 +3,7 @@ import authService from './authService';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
-  timeout: 30000,
+  timeout: 300000,
 });
 
 // 请求拦截器：自动注入 Token

@@ -48,7 +48,7 @@ class Settings:
         self.DEEPSEEK_BASE_URL = os.getenv(
             "DEEPSEEK_BASE_URL", "https://api.deepseek.com"
         )
-        self.DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "60"))
+        self.DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
 
 
 settings = Settings()
