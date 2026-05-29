@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Tabs, Tag, Empty, Spin } from 'antd';
 import { ReadOutlined, LineChartOutlined, BulbOutlined, BookOutlined } from '@ant-design/icons';
-import educationService, { Category, ArticlePreview } from '@/services/educationService';
+import educationService from '@/services/educationService';
+import type { Category, ArticlePreview } from '@/services/educationService';
 
 const iconMap: Record<string, React.ReactNode> = {
   LineChartOutlined: <LineChartOutlined />,
