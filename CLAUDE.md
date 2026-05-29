@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Backend
 cd backend && source venv/bin/activate
+pip install -r requirements.txt        # First time / after pull
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 pytest                               # Run all tests
 pytest tests/test_strategies.py -v   # Single test file
@@ -18,7 +19,10 @@ cd frontend && npm run dev           # Dev server (port 5173, proxies /api to :8
 npm run build                        # TypeScript check + Vite build
 npm run lint                         # ESLint
 npm run test:e2e                     # Playwright E2E tests
-npm run test:e2e:ui                  # Playwright in UI mode
+
+# Full dev restart
+./restart.sh                         # Backend :8000 + Frontend :5173
+nohup bash restart.sh > /tmp/aipicking.log 2>&1 &  # Run in background
 ```
 
 ## Architecture
@@ -33,59 +37,128 @@ npm run test:e2e:ui                  # Playwright in UI mode
 - `app/middleware/auth.py::get_current_user` — validates JWT, loads User, injects into route
 - `app/middleware/auth.py::require_admin` — chains get_current_user + checks `role == "admin"`
 
-**Data isolation:** `strategies`, `backtest_reports`, `strategy_runs` have `user_id` FK → `users.id`. Service layer filters by `user_id` for regular users; admin sees all.
+**Data isolation:** `strategies`, `backtest_reports`, `strategy_runs`, `ai_strategy_tasks` have `user_id` FK → `users.id`. Service layer filters by `user_id` for regular users; admin sees all.
 
 **Default admin:** `admin` / `admin123` (seeded on startup if no admin exists).
 
-**Migration:** `python migrate_add_auth.py` (idempotent).
-
-**API response format**: Custom envelope `{code: int, message: str, data: ...}`. `code: 0` means success. Auth endpoints follow same format. User management endpoints return unwrapped responses (Pydantic models).
-
 ### Backend (FastAPI + SQLAlchemy async + SQLite via aiosqlite)
+
+**Dependencies:** `httpx` (DeepSeek API calls), `python-dotenv` (.env loading).
 
 **Data flow**: `API routes` → `Services` → `Models/Engine` → `SQLite`
 
+**Key modules:**
+
 - `app/main.py` — App entry point, CORS config, route registration
-- `app/config.py` — Settings via env vars (`DATABASE_URL`, `STOCK_DB_PATH`, etc.). `STOCK_DB_PATH` points to an external SQLite DB with `stocks` and `daily` tables (A-share market data).
-- `app/database.py` — Async SQLAlchemy engine + `get_db` dependency injection
-- `app/models/` — SQLAlchemy models: `Strategy` (core entity), `BacktestReport` (associated by `strategy_id` FK), `StrategyRun`
-- `app/api/` — REST routers: `strategies`, `backtests`, `factors`, `ai`, `auth` (login/refresh/me), `users` (admin CRUD)
-- `app/middleware/auth.py` — `get_current_user` and `require_admin` FastAPI dependencies
-- `app/services/` — Business logic layer. `strategy_service.py` handles both file-upload and factor-config creation paths. `backtest_service.py` creates backtests as async background tasks.
-- `app/strategies/examples/` — Uploaded/built strategy `.py` files (naming: `{id}_{name}.py`)
+- `app/config.py` — Settings via env vars loaded by `python-dotenv`. New keys: `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT`.
+- `app/database.py` — Async SQLAlchemy engine + `get_db` / `async_session` for background tasks
+- `app/models/` — `Strategy`, `BacktestReport`, `StrategyRun`, `AIStrategyTask`
+- `app/api/` — Routers: `strategies`, `backtests`, `factors`, `ai`, `auth`, `users`, `stocks`
+- `app/middleware/auth.py` — `get_current_user`, `require_admin`
+- `app/services/` — Business logic:
+  - `strategy_service.py` — Upload & factor-config strategy creation
+  - `backtest_service.py` — Backtests run in **thread pool** (`loop.run_in_executor`) to avoid blocking event loop
+  - `backtest_engine.py` — AST sandbox + strategy execution + performance tracking
+  - `llm_service.py` — DeepSeek API calls for K-line analysis and indicator code generation
+  - `ai_strategy_service.py` — Similarity-based strategy code generator with **runtime validation** of AI-generated code
+  - `code_generator.py` — Legacy factor-config strategy code generator (buy/sell signals)
 
-**Strategy creation has two paths**:
-1. **Upload** (`POST /api/v1/strategies/upload`): User uploads a `.py` file; validated for syntax + required functions
-2. **Factor builder** (`POST /api/v1/strategies`): User selects factors via `FactorConfig` JSON; `code_generator.py` auto-generates Python strategy code from the factor combination
+### AI Reference Stock Strategy (`/ai/analyze-stock`)
 
-**Backtest engine** (`app/services/backtest_engine.py`):
-- Sandboxes strategy code via AST validation (blocks `os`, `sys`, `exec`, `eval`, etc.) + restricted builtins
-- Supports both `run(data)` function interface (new) and `Strategy` class with `generate_signals(df)` (legacy, wrapped)
-- Loads stock data from external `STOCK_DB_PATH`, runs strategy at a cutoff date, then tracks recommended stocks' performance over `[3, 7, 15]` days
+**Flow:**
+1. User submits stock code + date → backend fetches K-line data
+2. `_run_analysis` (async background task) sends data to DeepSeek
+3. DeepSeek extracts **50+ quantitative indicator VALUES** (not buy/sell signals):
+   - RSI, MACD, KDJ, OBV, Bollinger Bands, ATR, ADX, CCI, etc.
+4. Frontend polls `GET /ai/analyze-stock/{task_id}` until complete
+5. User reviews indicators on `/strategies/ai-builder`, can filter/add
+6. User confirms → backend generates indicator compute functions via DeepSeek
+7. Each function (`compute_value(df, params) -> float`) passes **runtime validation**:
+   - AST syntax check
+   - Execute against mock 30-row data
+   - Must return non-NaN, non-zero values
+8. Strategy code assembled: for each candidate stock, computes all indicators, scores by **normalized similarity distance** to reference values
 
-**Factor library** (`app/factors/`) — Organized by category:
+**Strategy type:** Similarity matching (not buy/sell signals). Returns top 10 closest stocks.
+
+**API endpoints:**
+- `POST /ai/analyze-stock` — Submit analysis task
+- `GET /ai/analyze-stock/{task_id}` — Poll task status/result
+- `GET /ai/analyze-stock/tasks` — User's task history
+- `POST /ai/confirm-strategy` — Confirm indicators, generate strategy
+- `POST /ai/generate-strategy` — Legacy keyword-based strategy (rule parsing, not LLM)
+
+### Strategy Code Display
+
+`GET /strategies/{id}` returns `code_content` via fallback: `file_path` file → `generated_code` field. AI-generated strategies have empty `file_path` and show from `generated_code`.
+
+### Backtest Engine
+
+- Runs in thread pool (`loop.run_in_executor`) to prevent event loop blocking from CPU-intensive pandas operations
+- Sandboxes strategy code via AST validation (blocks `os`, `sys`, `exec`, `eval`, etc.)
+- Supports `run(data)` function interface for both buy/sell and similarity strategies
+- Recommendation must include `signal` field
+
+### Volume Column Compatibility
+
+Factor functions should handle both `volume` and `vol` column names. Existing volume factors (OBV, turnover, volume_ratio) updated to try `volume` first, fall back to `vol`.
+
+### Factor Library (`app/factors/`)
+
 - `momentum/` — KDJ, MACD, RSI
 - `trend/` — Breakout, MA cross, MA support
 - `volume/` — OBV, turnover, volume ratio
 - `pattern/` — Engulfing, hammer, morning star
 - `risk/` — Fixed stop, take profit, trailing stop
 
-**API response format**: Custom envelope `{code: int, message: str, data: ...}`. `code: 0` means success.
+### API Response Format
 
-### Frontend (React 18 + TypeScript + Vite + Ant Design 6 + Zustand + ECharts + Monaco Editor)
+Custom envelope `{code: int, message: str, data: ...}`. `code: 0` means success.
 
-- `src/App.tsx` — Routes: `/login`, `/dashboard`, `/strategies` (list), `/strategies/builder` (visual factor builder), `/strategies/:id` (detail), `/strategies/:id/edit` (code editor), `/strategies/:id/backtest`, `/backtests` (list), `/backtests/:id` (detail), `/users` (admin-only user management)
-- `src/services/api.ts` — Shared Axios instance with auth interceptors (auto token injection + 401 refresh)
-- `src/services/` — API clients: `authService`, `userService`, `strategyService`, `backtestService`, `factorService`, `aiService`
-- `src/stores/` — Zustand stores: `authStore` (login/logout/init), `strategyStore`, `backtestStore`, `themeStore`
-- `src/types/` — TypeScript interfaces: `auth.ts` (UserInfo, LoginRequest, etc.), `strategy.ts`, `backtest.ts`, `factor.ts`
-- `src/pages/LoginPage.tsx` — Centered login form, bypasses AppLayout
-- `src/pages/UserManagement.tsx` — Admin CRUD table for user accounts
-- `src/components/Auth/ProtectedRoute.tsx` — Auth guard component with optional `requireAdmin` prop
-- `src/pages/StrategyBuilder.tsx` — Visual factor combination UI where users pick factors by category and configure parameters to generate strategies
-- Vite proxies `/api` to `localhost:8000` in dev mode
+### Frontend (React 18 + TypeScript + Vite + Ant Design 6 + Zustand + ECharts)
+
+**Routes:**
+- `/login` — Login page (bypasses AppLayout)
+- `/dashboard` — Dashboard
+- `/strategies` — Strategy list (with "可视化构建" and "AI 参考选股" buttons)
+- `/strategies/builder` — Visual factor builder (factor combination UI)
+- `/strategies/ai-builder` — **AI Reference Stock Strategy** (multi-step wizard)
+- `/strategies/:id` — Strategy detail with code viewer
+- `/strategies/:id/edit` — Code editor (Monaco)
+- `/strategies/:id/backtest` — Backtest form
+- `/backtests` — Backtest list
+- `/backtests/:id` — Backtest detail
+- `/users` — Admin user management
+
+**Key files:**
+- `src/App.tsx` — Route definitions
+- `src/services/api.ts` — Shared Axios with auth interceptors + auto-refresh
+- `src/services/` — `authService`, `userService`, `strategyService`, `backtestService`, `factorService`, `aiService`, `stockService`
+- `src/stores/` — `authStore`, `strategyStore`, `backtestStore`, `themeStore`, `aiStrategyStore`
+- `src/types/` — `aiStrategy.ts` (new), `auth.ts`, `strategy.ts`, `backtest.ts`, `factor.ts`
+- `src/pages/AIStrategyBuilder.tsx` — New: two-column layout, submit form → polling → indicator review
 
 ### Environment
 
-- Backend `.env` sets `DEBUG`, `CORS_ORIGINS`, `STOCK_DB_PATH`
-- Frontend `.env.development` sets `VITE_API_BASE_URL`
+- Backend `.env` — `DATABASE_URL`, `STOCK_DB_PATH`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT`, `CORS_ORIGINS`
+- Frontend `.env.development` / `.env.production` — `VITE_API_BASE_URL`
+- `.env` is loaded by `python-dotenv` in `config.py`, NOT auto-loaded by uvicorn. Must install `python-dotenv`.
+
+### Server Deployment
+
+```bash
+# systemd
+systemctl restart aipicking
+
+# manual update
+cd /opt/AIpicking
+git pull
+pip install -r backend/requirements.txt    # includes httpx, python-dotenv
+cd frontend && npm install --silent && npm run build
+systemctl restart aipicking
+
+# Check .env has:
+#   DEEPSEEK_API_KEY=sk-xxx
+#   DEEPSEEK_BASE_URL=https://api.deepseek.com
+#   DEEPSEEK_TIMEOUT=60
+```

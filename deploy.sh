@@ -133,16 +133,20 @@ if [[ ! -f .env ]]; then
 APP_NAME=AIpicking
 DEBUG=False
 DATABASE_URL=sqlite+aiosqlite:///./data/database/aipicking.db
-CORS_ORIGINS=["http://DOMAIN_PLACEHOLDER"]
+CORS_ORIGINS=http://DOMAIN_PLACEHOLDER
 BACKTEST_DATA_DIR=./data/market_data
 JWT_SECRET_KEY=JWT_PLACEHOLDER
 STOCK_DB_PATH=/opt/stock_data/stock_db.sqlite
+DEEPSEEK_API_KEY=sk-your-key-here
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_TIMEOUT=60
 DOTENV
     sed -i "s/DOMAIN_PLACEHOLDER/${DOMAIN_OR_IP}/" .env
     sed -i "s/JWT_PLACEHOLDER/${JWT_SECRET}/" .env
-    log ".env 已生成（JWT_SECRET 已随机生成）"
+    log ".env 已生成（JWT_SECRET 已随机生成，请修改 DEEPSEEK_API_KEY）"
 else
     log ".env 已存在，跳过"
+    warn "若刚升级，请确保 .env 包含: DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_TIMEOUT"
 fi
 
 # ============================================================
@@ -272,5 +276,5 @@ echo "常用:"
 echo "  systemctl restart aipicking     # 重启后端"
 echo "  journalctl -u aipicking -f      # 后端日志"
 echo "  nginx -t && systemctl reload nginx"
-echo "  cd ${PROJECT_DIR} && git pull && cd frontend && npm install --silent && npm run build && systemctl restart aipicking  # 更新"
+echo "  cd ${PROJECT_DIR} && git pull && cd backend && ./venv/bin/pip install -r requirements.txt -q && cd ../frontend && npm install --silent && npm run build && systemctl restart aipicking  # 更新"
 echo ""
