@@ -381,18 +381,52 @@ const AIStrategyBuilder: React.FC = () => {
         </Col>
         <Col span={8}>
           <Card title="历史分析" size="small">
-            <List
-              size="small"
-              dataSource={tasks}
-              renderItem={(t) => (
-                <List.Item>
-                  <List.Item.Meta
-                    title={<Text>{t.ts_code}</Text>}
-                    description={`${t.date} · ${t.created_at?.slice(0, 16)}`}
-                  />
-                </List.Item>
-              )}
-            />
+            {tasksLoading ? (
+              <Spin style={{ display: 'block', textAlign: 'center' }} />
+            ) : tasks.length === 0 ? (
+              <Empty description="暂无分析记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <List
+                size="small"
+                dataSource={tasks}
+                renderItem={(t) => (
+                  <List.Item
+                    style={{
+                      cursor: t.status === 'completed' ? 'pointer' : 'default',
+                      background:
+                        t.task_id === taskId ? '#f0f5ff' : undefined,
+                    }}
+                    onClick={() => {
+                      if (t.status === 'completed') loadTask(t.task_id);
+                    }}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <Text strong>{t.ts_code}</Text>
+                          <Tag
+                            color={
+                              t.status === 'completed'
+                                ? 'green'
+                                : t.status === 'processing'
+                                ? 'blue'
+                                : 'red'
+                            }
+                          >
+                            {t.status === 'completed'
+                              ? '已完成'
+                              : t.status === 'processing'
+                              ? '分析中'
+                              : '失败'}
+                          </Tag>
+                        </Space>
+                      }
+                      description={`${t.date} · ${t.created_at?.slice(0, 16)}`}
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
           </Card>
         </Col>
       </Row>
