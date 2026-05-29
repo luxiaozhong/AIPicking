@@ -134,6 +134,7 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       error: null,
       result: null,
       indicators: [],
+      submitting: false,
     });
   },
 
@@ -224,21 +225,28 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       const res = await aiService.getAnalysisResult(taskId);
       const data = res.data;
       if (res.code === 0 && data.status === 'completed') {
-        set({ status: 'completed', result: data, indicators: data.indicators || [], error: null });
+        set({
+          status: 'completed',
+          result: data,
+          indicators: data.indicators || [],
+          error: null,
+          submitting: false,
+        });
       } else if (data.status === 'failed') {
-        set({ status: 'failed', error: data.error_message });
+        set({ status: 'failed', error: data.error_message, submitting: false });
       } else if (data.status === 'processing' || data.status === 'generating') {
         set({ status: 'polling' });
         get().pollResult(taskId);
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
-      set({ status: 'failed', error: err.response?.data?.message || '加载任务失败' });
+      set({ status: 'failed', error: err.response?.data?.message || '加载任务失败', submitting: false });
     }
   },
 
   resumeInProgressTask: async () => {
-    // 页面加载时，检查是否有进行中的任务并自动恢复轮询
+    // 页面加载时，检查是否有进行中的任务并自动恢复轮询；
+    // 同时处理导航离开后 store 残留的 stale polling 状态。
     try {
       const res = await aiService.getTasks();
       if (res.code !== 0) return;
@@ -248,6 +256,26 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       );
       if (inProgress) {
         get().loadTask(inProgress.task_id);
+        return;
+      }
+
+      // 没有进行中的任务，但如果 store 仍处于 polling 且 taskId 对应
+      // 的任务已 completed，自动加载已完成结果（恢复 stale 状态）
+      const { taskId, status, submitting } = get();
+      if (
+        (status === 'polling' || submitting) &&
+        taskId
+      ) {
+        const currentTask = tasks.find((t) => t.task_id === taskId);
+        if (currentTask?.status === 'completed') {
+          get().loadTask(taskId);
+        } else if (currentTask?.status === 'failed') {
+          set({ status: 'failed', error: '任务执行失败', submitting: false });
+        } else if (!currentTask) {
+          // taskId 已不存在于历史列表中，重置状态
+          set({ status: 'idle', taskId: null, submitting: false, error: null });
+        }
+        // 如果仍在 processing/generating，上面的 inProgress 已处理
       }
     } catch {
       // silent
