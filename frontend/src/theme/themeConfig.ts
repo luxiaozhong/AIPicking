@@ -27,7 +27,7 @@ export const themeConfig: ThemeConfig = {
       paddingLG: 24,
     },
     Table: {
-      headerBg: '#fafafa',
+      // headerBg 由 ConfigProvider 的 algorithm 自动处理，避免硬编码导致黑夜模式不可见
     },
   },
 };
