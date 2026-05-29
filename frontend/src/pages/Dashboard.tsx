@@ -78,8 +78,8 @@ export default function Dashboard() {
           <Card title="快捷操作">
             <Row gutter={[8, 8]}>
               {[
+                { label: 'AI 参考选股', path: '/strategies/ai-builder' },
                 { label: '可视化构建策略', path: '/strategies/builder' },
-                { label: '上传策略脚本', path: '/strategies/upload' },
                 { label: '查看策略列表', path: '/strategies' },
                 { label: '查看回测报告', path: '/backtests' },
               ].map((action) => (
@@ -102,7 +102,8 @@ export default function Dashboard() {
             <ol style={{ paddingLeft: 20, lineHeight: 2 }}>
               <li>在「策略管理」中创建或上传量化策略</li>
               <li>使用可视化构建器选择因子组合策略</li>
-              <li>提交回测任务，验证策略在历史数据上的表现</li>
+              <li>提交回测任务，验证策略在某一天的选股表现</li>
+              <li>使用批量回测，一键验证策略在多个历史时间段的表现</li>
               <li>查看回测报告，分析推荐股票的后续涨跌</li>
               <li>执行策略获取当前市场推荐</li>
             </ol>
