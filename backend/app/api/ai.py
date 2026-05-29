@@ -288,6 +288,43 @@ async def _run_analysis(
         await session.close()
 
 
+@router.get("/ai/analyze-stock/tasks")
+async def list_tasks(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 20,
+    offset: int = 0,
+):
+    """获取当前用户的 AI 分析任务历史"""
+    tasks = (
+        await db.execute(
+            select(AIStrategyTask)
+            .where(AIStrategyTask.user_id == current_user.id)
+            .order_by(AIStrategyTask.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    return {
+        "code": 0,
+        "data": {
+            "tasks": [
+                {
+                    "task_id": t.task_id,
+                    "ts_code": t.ts_code,
+                    "date": t.date,
+                    "status": t.status,
+                    "created_at": t.created_at.isoformat()
+                    if t.created_at
+                    else "",
+                }
+                for t in tasks
+            ]
+        },
+    }
+
+
 @router.get("/ai/analyze-stock/{task_id}")
 async def get_analysis_result(
     task_id: str,
@@ -335,43 +372,6 @@ async def get_analysis_result(
             "strategy_id": strategy_id,
             "generated_factors": result.get("generated_factors", []),
             "failed_factors": result.get("failed_factors", []),
-        },
-    }
-
-
-@router.get("/ai/analyze-stock/tasks")
-async def list_tasks(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    limit: int = 20,
-    offset: int = 0,
-):
-    """获取当前用户的 AI 分析任务历史"""
-    tasks = (
-        await db.execute(
-            select(AIStrategyTask)
-            .where(AIStrategyTask.user_id == current_user.id)
-            .order_by(AIStrategyTask.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
-    ).scalars().all()
-
-    return {
-        "code": 0,
-        "data": {
-            "tasks": [
-                {
-                    "task_id": t.task_id,
-                    "ts_code": t.ts_code,
-                    "date": t.date,
-                    "status": t.status,
-                    "created_at": t.created_at.isoformat()
-                    if t.created_at
-                    else "",
-                }
-                for t in tasks
-            ]
         },
     }
 
