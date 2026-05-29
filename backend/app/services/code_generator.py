@@ -175,4 +175,8 @@ def _gen_risk_code(index: int, factor: Dict[str, Any]) -> str:
     fid = factor["factor_id"]
     params = factor.get("params", {})
     params_str = json.dumps(params, ensure_ascii=False)
-    return f"        risk_sell_{index} = {fid}_compute(df, {params_str}) == -1\\n        if risk_sell_{index}.iloc[-1] == 1:\\n            continue"
+    return (
+        f"        risk_sell_{index} = {fid}_compute(df, {params_str}) == -1\n"
+        f"        if risk_sell_{index}.iloc[-1] == 1:\n"
+        f"            continue"
+    )

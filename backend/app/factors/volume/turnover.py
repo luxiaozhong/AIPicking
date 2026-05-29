@@ -31,7 +31,8 @@ def compute(df: pd.DataFrame, params: dict) -> pd.Series:
 
     # 使用成交量模拟换手率（实际应用中应除以流通股本）
     # 这里简单用 volume / 1e6 作为模拟换手率
-    turnover = df["volume"] / 1e6 * 100  # 转为百分比
+    vol_col = "volume" if "volume" in df.columns else "vol"
+    turnover = df[vol_col] / 1e6 * 100  # 转为百分比
 
     in_range = (turnover >= min_turnover) & (turnover <= max_turnover)
     buy_signal = in_range

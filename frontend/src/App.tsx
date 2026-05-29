@@ -8,6 +8,7 @@ import StrategyUpload from '@/pages/StrategyUpload';
 import StrategyEdit from '@/pages/StrategyEdit';
 import StrategyDetail from '@/pages/StrategyDetail';
 import StrategyBuilder from '@/pages/StrategyBuilder';
+import AIStrategyBuilder from '@/pages/AIStrategyBuilder';
 import BacktestList from '@/pages/BacktestList';
 import BacktestDetail from '@/pages/BacktestDetail';
 import BacktestForm from '@/pages/BacktestForm';
@@ -83,6 +84,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <StrategyBuilder />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategies/ai-builder"
+          element={
+            <ProtectedRoute>
+              <AIStrategyBuilder />
             </ProtectedRoute>
           }
         />

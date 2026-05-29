@@ -28,7 +28,8 @@ def compute(df: pd.DataFrame, params: dict) -> pd.Series:
     threshold = params.get("threshold", 2.0)
     require_price_up = params.get("require_price_up", True)
 
-    volume = df["volume"]
+    vol_col = "volume" if "volume" in df.columns else "vol"
+    volume = df[vol_col]
     avg_volume = volume.shift(1).rolling(window=lookback).mean()
     volume_ratio = volume / avg_volume
 

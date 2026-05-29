@@ -86,13 +86,15 @@ async def get_strategy(
         db, strategy_id, user_id=current_user.id, user_role=current_user.role
     )
 
-    # 获取策略代码（如果文件存在）
+    # 获取策略代码
     code_content = ""
     if strategy.file_path and os.path.exists(strategy.file_path):
         try:
             code_content = await StrategyService.get_strategy_code(strategy.file_path)
         except Exception:
-            code_content = strategy.generated_code or ""
+            pass
+    if not code_content:
+        code_content = strategy.generated_code or ""
 
     # 使用 Pydantic 模型序列化策略对象
     from ..schemas.strategy import StrategyResponse

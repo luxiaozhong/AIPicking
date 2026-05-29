@@ -2,6 +2,12 @@
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载 .env 文件（优先找 backend/.env）
+_env_path = Path(__file__).parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
 
 
 class Settings:
@@ -36,6 +42,13 @@ class Settings:
             "STOCK_DB_PATH",
             "/opt/stock_data/stock_db.sqlite"
         )
+
+        # DeepSeek API 配置
+        self.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+        self.DEEPSEEK_BASE_URL = os.getenv(
+            "DEEPSEEK_BASE_URL", "https://api.deepseek.com"
+        )
+        self.DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "60"))
 
 
 settings = Settings()

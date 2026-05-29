@@ -27,7 +27,7 @@ def compute(df: pd.DataFrame, params: dict) -> pd.Series:
     lookback = params.get("lookback", 20)
 
     close = df["close"]
-    volume = df["volume"]
+    volume = df["volume"] if "volume" in df.columns else df["vol"]
 
     # 计算OBV
     obv = pd.Series(0, index=df.index, dtype=float)

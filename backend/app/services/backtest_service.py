@@ -147,15 +147,20 @@ class BacktestService:
         # Attach pre-loaded strategy to avoid lazy-load in async context
         db_backtest.strategy = strategy
 
-        # 异步执行回测任务
-        asyncio.create_task(
-            BacktestService._run_backtest(db_backtest.id, backtest.cutoff_date, backtest.track_days)
+        # 丢线程池执行（CPU密集，避免阻塞事件循环）
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(
+            None,
+            BacktestService._run_backtest,
+            db_backtest.id,
+            backtest.cutoff_date,
+            backtest.track_days,
         )
 
         return db_backtest
 
     @staticmethod
-    async def _run_backtest(backtest_id: int, cutoff_date: str, track_days: List[int]):
+    def _run_backtest(backtest_id: int, cutoff_date: str, track_days: List[int]):
         """执行回测（异步任务，使用独立的同步 Session）"""
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
@@ -357,13 +362,14 @@ class BacktestService:
 
         db_backtest.strategy = strategy
 
-        asyncio.create_task(
-            BacktestService._run_batch_backtest(
-                db_backtest.id,
-                backtest.start_date,
-                backtest.end_date,
-                backtest.track_days,
-            )
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(
+            None,
+            BacktestService._run_batch_backtest,
+            db_backtest.id,
+            backtest.start_date,
+            backtest.end_date,
+            backtest.track_days,
         )
 
         return db_backtest
@@ -445,7 +451,7 @@ class BacktestService:
         await db.commit()
 
     @staticmethod
-    async def _run_batch_backtest(
+    def _run_batch_backtest(
         backtest_id: int,
         start_date: str,
         end_date: str,

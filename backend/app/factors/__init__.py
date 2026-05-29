@@ -56,16 +56,46 @@ def compute_factor(factor_id: str, df, params: dict):
 _factor_dir = os.path.dirname(__file__)
 _subdirs = ["trend", "momentum", "volume", "pattern", "risk"]
 
-for _subdir in _subdirs:
-    _subdir_path = os.path.join(_factor_dir, _subdir)
-    if not os.path.isdir(_subdir_path):
-        continue
-    for _filename in os.listdir(_subdir_path):
-        if _filename.endswith(".py") and not _filename.startswith("__"):
-            _module_name = f"app.factors.{_subdir}.{_filename[:-3]}"
-            try:
-                _module = importlib.import_module(_module_name)
-                if hasattr(_module, "FACTOR_META"):
-                    register_factor(_module.FACTOR_META, _module)
-            except Exception as e:
-                print(f"加载因子失败 {_module_name}: {e}")
+
+def _discover_and_register():
+    """扫描并注册所有因子模块"""
+    for _subdir in _subdirs:
+        _subdir_path = os.path.join(_factor_dir, _subdir)
+        if not os.path.isdir(_subdir_path):
+            continue
+        for _filename in os.listdir(_subdir_path):
+            if _filename.endswith(".py") and not _filename.startswith("__"):
+                _module_name = f"app.factors.{_subdir}.{_filename[:-3]}"
+                try:
+                    _module = importlib.import_module(_module_name)
+                    if hasattr(_module, "FACTOR_META"):
+                        register_factor(_module.FACTOR_META, _module)
+                except Exception as e:
+                    print(f"加载因子失败 {_module_name}: {e}")
+
+
+def reload_factors():
+    """重新加载所有因子（AI 生成新因子后热加载）"""
+    FACTOR_REGISTRY.clear()
+    FACTOR_MODULES.clear()
+    for _subdir in _subdirs:
+        _subdir_path = os.path.join(_factor_dir, _subdir)
+        if not os.path.isdir(_subdir_path):
+            continue
+        for _filename in os.listdir(_subdir_path):
+            if _filename.endswith(".py") and not _filename.startswith("__"):
+                _module_name = f"app.factors.{_subdir}.{_filename[:-3]}"
+                try:
+                    _module = importlib.import_module(_module_name)
+                    try:
+                        importlib.reload(_module)
+                    except Exception:
+                        pass
+                    if hasattr(_module, "FACTOR_META"):
+                        register_factor(_module.FACTOR_META, _module)
+                except Exception as e:
+                    print(f"加载因子失败 {_module_name}: {e}")
+
+
+# 初始加载
+_discover_and_register()

@@ -5,6 +5,7 @@ from .base import Base, BaseModel
 from .user import User
 from .strategy import Strategy
 from .backtest import BacktestReport, StrategyRun, BatchBacktestReport
+from .ai_task import AIStrategyTask
 
 # 设置关系
 Strategy.backtest_reports = relationship("BacktestReport", back_populates="strategy")
