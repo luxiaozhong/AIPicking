@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { aiService } from '@/services/aiService';
+import strategyService from '@/services/strategyService';
 import type {
   AnalysisResult,
   AnalysisTask,
@@ -151,12 +152,20 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
             try {
               const r = await aiService.getAnalysisResult(taskId!);
               if (r.data.status === 'completed' && r.data.strategy_id) {
+                const sid = r.data.strategy_id;
+                // 验证策略已落盘再跳转
+                try {
+                  await strategyService.getStrategy(sid);
+                } catch {
+                  setTimeout(poll, 1500);
+                  return;
+                }
                 set({
-                  generatedStrategyId: r.data.strategy_id,
+                  generatedStrategyId: sid,
                   submitting: false,
                   status: 'completed',
                 });
-                resolve(r.data.strategy_id);
+                resolve(sid);
               } else if (r.data.status === 'failed') {
                 set({ submitting: false, status: 'failed', error: r.data.error_message || '生成失败' });
                 reject(new Error(r.data.error_message));
