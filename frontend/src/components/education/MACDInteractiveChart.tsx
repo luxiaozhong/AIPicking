@@ -90,14 +90,37 @@ export default function MACDInteractiveChart({
       },
     }));
 
-    return {
+    const legendNames = ['K 线', ...MA_LINES.map((m) => m.name), `DIF(${fast},${slow})`, `DEA(${signal})`, 'MACD 柱'];
+
+    const option: EChartsOption = {
+      color: ['#ef5350', ...MA_LINES.map((m) => m.color), '#1677ff', '#fa8c16', '#ef5350'],
+      legend: {
+        data: legendNames,
+        top: 0,
+        right: 0,
+        textStyle: { fontSize: 10 },
+        itemWidth: 14,
+        itemHeight: 8,
+      },
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'cross' },
       },
+      graphic: [
+        {
+          type: 'text',
+          left: '5%',
+          top: '68%',
+          style: {
+            text: '━ DIF 快线（蓝）  ━ DEA 信号线（橙）  ▊ MACD 柱（红多绿空）  ·· 零轴',
+            fontSize: 10,
+            fill: '#888',
+          },
+        },
+      ],
       grid: [
-        { left: '5%', right: '3%', top: '5%', height: '56%' },
-        { left: '5%', right: '3%', top: '66%', height: '22%' },
+        { left: '5%', right: '3%', top: '6%', height: '56%' },
+        { left: '5%', right: '3%', top: '70%', height: '20%' },
       ],
       xAxis: [
         {
@@ -230,6 +253,7 @@ export default function MACDInteractiveChart({
         },
       ],
     };
+    return option;
   }, [data, fast, slow, signal, showComparison, defaultFast, defaultSlow, defaultSignal]);
 
   return <EChartsWrapper options={option} height={height} empty={!data.length} />;
