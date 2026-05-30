@@ -238,7 +238,7 @@ async def _run_analysis(
     stock_name: str,
     req: AnalyzeStockRequest,
 ):
-    """后台执行 DeepSeek 分析"""
+    """后台执行 DeepSeek 分析（120s 超时）"""
     from ..database import async_session
     from ..services.llm_service import analyze_kline as _llm_analyze
 
@@ -252,20 +252,38 @@ async def _run_analysis(
             )
         ).scalar_one()
 
-        # 调用 DeepSeek
-        result = await _llm_analyze(
-            df_rows=items,
-            ts_code=req.ts_code,
-            stock_name=stock_name,
-            date=req.date,
-            model=req.model,
-            user_prompt=req.prompt,
+        # 调用 DeepSeek（120 秒超时）
+        result = await asyncio.wait_for(
+            _llm_analyze(
+                df_rows=items,
+                ts_code=req.ts_code,
+                stock_name=stock_name,
+                date=req.date,
+                model=req.model,
+                user_prompt=req.prompt,
+            ),
+            timeout=120,
         )
 
         task.result_json = json.dumps(result, ensure_ascii=False)
         task.status = "completed"
         await session.commit()
 
+    except asyncio.TimeoutError:
+        print(f"[AI Analysis TIMEOUT] task={task_id}")
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(
+                        AIStrategyTask.task_id == task_id
+                    )
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = "分析超时（120 秒），请重试"
+            await session.commit()
+        except Exception as inner_e:
+            print(f"[AI Analysis ERROR] Failed to update timeout status: {inner_e}")
     except Exception as e:
         import traceback
         err_msg = f"{type(e).__name__}: {e}"
@@ -430,7 +448,7 @@ async def _run_generation(
     strategy_name: str,
     user_id: int,
 ):
-    """后台执行策略生成（并发调用 DeepSeek 生成每个指标的代码，带进度）"""
+    """后台执行策略生成（并发调用 DeepSeek，300s 超时，带进度）"""
     from ..database import async_session
     from ..services.ai_strategy_service import match_and_generate_with_progress
 
@@ -452,13 +470,17 @@ async def _run_generation(
             )
             await session.commit()
 
-        result = await match_and_generate_with_progress(
-            task=task,
-            indicators=indicators,
-            strategy_name=strategy_name,
-            buy_logic="OR",
-            user_id=user_id,
-            on_progress=update_progress,
+        # 300 秒超时（50+ 个指标并发生成）
+        result = await asyncio.wait_for(
+            match_and_generate_with_progress(
+                task=task,
+                indicators=indicators,
+                strategy_name=strategy_name,
+                buy_logic="OR",
+                user_id=user_id,
+                on_progress=update_progress,
+            ),
+            timeout=300,
         )
 
         # 保存策略
@@ -493,6 +515,19 @@ async def _run_generation(
         )
         await session.commit()
 
+    except asyncio.TimeoutError:
+        print(f"[Generation TIMEOUT] task={task_id}")
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = "策略生成超时（300 秒），请重试或减少指标数量"
+            await session.commit()
+        except Exception:
+            pass
     except Exception as e:
         import traceback
         print(f"[Generation ERROR] task={task_id}: {e}")

@@ -2,6 +2,12 @@
 import json
 import re
 import httpx
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 from ..config import settings
 
 ANALYSIS_SYSTEM_PROMPT = """你是一位资深量化分析师。分析给定的股票K线数据，提取该股票在截止日期的量化指标的实际计算值。
@@ -114,8 +120,18 @@ def _format_kline(df_rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type((
+        httpx.HTTPStatusError,
+        httpx.ConnectError,
+        httpx.ReadTimeout,
+    )),
+    reraise=True,
+)
 async def _call_deepseek(system_prompt: str, user_msg: str, model: str) -> str:
-    """调用 DeepSeek API"""
+    """调用 DeepSeek API（自动重试 3 次，指数退避 2s→4s→8s）"""
     if not settings.DEEPSEEK_API_KEY:
         raise ValueError("DEEPSEEK_API_KEY 未配置")
 
