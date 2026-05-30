@@ -218,6 +218,7 @@ export default function MACDInteractiveChart({
           xAxisIndex: 0,
           yAxisIndex: 0,
           smooth: true,
+          itemStyle: { color: m.color },
           lineStyle: { color: m.color, width: 1 },
           symbol: 'none' as const,
         })),
@@ -229,6 +230,7 @@ export default function MACDInteractiveChart({
           xAxisIndex: 1,
           yAxisIndex: 1,
           symbol: 'none',
+          itemStyle: { color: '#1677ff' },
           lineStyle: { color: '#1677ff', width: 1.5 },
         },
         // DEA
@@ -239,6 +241,7 @@ export default function MACDInteractiveChart({
           xAxisIndex: 1,
           yAxisIndex: 1,
           symbol: 'none',
+          itemStyle: { color: '#fa8c16' },
           lineStyle: { color: '#fa8c16', width: 1.5 },
         },
         // MACD Bar
@@ -265,6 +268,7 @@ export default function MACDInteractiveChart({
                 xAxisIndex: 1,
                 yAxisIndex: 1,
                 symbol: 'none',
+                itemStyle: { color: '#1677ff', opacity: 0.4 },
                 lineStyle: { color: '#1677ff', width: 1, type: 'dashed' as const, opacity: 0.4 },
               },
               {
@@ -274,6 +278,7 @@ export default function MACDInteractiveChart({
                 xAxisIndex: 1,
                 yAxisIndex: 1,
                 symbol: 'none',
+                itemStyle: { color: '#fa8c16', opacity: 0.4 },
                 lineStyle: { color: '#fa8c16', width: 1, type: 'dashed' as const, opacity: 0.4 },
               },
             ]
