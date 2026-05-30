@@ -9,10 +9,11 @@ export interface IndicatorItem {
   name: string;
   category: string;
   description: string;
-  signal_type: 'buy' | 'sell' | 'both';
-  reason: string;
+  signal_type?: 'buy' | 'sell' | 'both';
+  reason?: string;
+  ref_value?: number;
   params: Record<string, number>;
-  code_required: boolean;
+  code_required?: boolean;
   matched_factor_id: string | null;
   code_reference?: string;
 }
@@ -62,4 +63,36 @@ export type AnalysisPhase =
 export interface GenerationProgress {
   completed: number;
   total: number;
+}
+
+/** NL 分类指示器 */
+export interface NLClassified {
+  matched: IndicatorItem[];
+  new: IndicatorItem[];
+}
+
+/** NL 分析请求 */
+export interface AnalyzeNLRequest {
+  prompt: string;
+  model?: string;
+}
+
+/** NL 分析结果 */
+export interface NLAnalysisResult {
+  status: string;
+  summary?: string;
+  indicators?: IndicatorItem[];
+  classified?: NLClassified;
+  strategy_id?: number;
+  generated_factors?: string[];
+  failed_factors?: { name: string; error: string }[];
+  error_message?: string;
+  progress?: GenerationProgress;
+}
+
+/** NL 确认请求 */
+export interface ConfirmNLStrategyRequest {
+  task_id: string;
+  strategy_name?: string;
+  indicators: Record<string, unknown>[];
 }

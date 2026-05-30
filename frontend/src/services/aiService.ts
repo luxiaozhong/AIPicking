@@ -4,11 +4,32 @@ import authService from './authService';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 /**
+ * SSE 连接：监听 NL 任务状态变化
+ */
+export function connectNLSSE(
+  taskId: string,
+  onEvent: (data: Record<string, unknown>) => void,
+  onDone: () => void,
+  onError: (err: Error) => void,
+): () => void {
+  return _createSSE(`/ai/analyze-nl/${taskId}/stream`, onEvent, onDone, onError);
+}
+
+/**
  * SSE 连接：监听任务状态变化
  * 返回 abort 函数用于取消连接
  */
 export function connectAnalysisSSE(
   taskId: string,
+  onEvent: (data: Record<string, unknown>) => void,
+  onDone: () => void,
+  onError: (err: Error) => void,
+): () => void {
+  return _createSSE(`/ai/analyze-stock/${taskId}/stream`, onEvent, onDone, onError);
+}
+
+function _createSSE(
+  path: string,
   onEvent: (data: Record<string, unknown>) => void,
   onDone: () => void,
   onError: (err: Error) => void,
@@ -19,7 +40,7 @@ export function connectAnalysisSSE(
   (async () => {
     try {
       const response = await fetch(
-        `${API_BASE}/ai/analyze-stock/${taskId}/stream`,
+        `${API_BASE}${path}`,
         {
           headers: {
             Authorization: token ? `Bearer ${token}` : '',
@@ -111,6 +132,30 @@ export const aiService = {
     indicators: Record<string, unknown>[];
   }) {
     const response = await api.post('/ai/confirm-strategy', data);
+    return response.data;
+  },
+
+  // === NL Strategy endpoints ===
+
+  async analyzeNL(data: {
+    prompt: string;
+    model?: string;
+  }) {
+    const response = await api.post('/ai/analyze-nl', data);
+    return response.data;
+  },
+
+  async getNLAnalysisResult(taskId: string) {
+    const response = await api.get(`/ai/analyze-nl/${taskId}`);
+    return response.data;
+  },
+
+  async confirmNLStrategy(data: {
+    task_id: string;
+    strategy_name?: string;
+    indicators: Record<string, unknown>[];
+  }) {
+    const response = await api.post('/ai/confirm-nl-strategy', data);
     return response.data;
   },
 };

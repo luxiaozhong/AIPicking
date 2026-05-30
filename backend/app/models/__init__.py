@@ -6,6 +6,7 @@ from .user import User
 from .strategy import Strategy
 from .backtest import BacktestReport, StrategyRun, BatchBacktestReport
 from .ai_task import AIStrategyTask
+from .ai_factor import AIFactor
 
 # 设置关系
 Strategy.backtest_reports = relationship("BacktestReport", back_populates="strategy")

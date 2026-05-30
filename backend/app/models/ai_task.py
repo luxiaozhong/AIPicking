@@ -15,6 +15,9 @@ class AIStrategyTask(BaseModel):
         default=lambda: str(uuid.uuid4()),
     )
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    task_type = Column(
+        String(20), default="stock_reference", index=True
+    )  # "stock_reference" | "natural_language"
     status = Column(String(20), default="processing", index=True)
     ts_code = Column(String(20), nullable=False)
     date = Column(String(10), nullable=False)

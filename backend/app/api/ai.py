@@ -669,3 +669,405 @@ async def _run_generation(
             pass
     finally:
         await session.close()
+
+
+# ============================================================
+# 自然语言策略（DeepSeek 因子识别 + 相似度策略生成）
+# ============================================================
+
+class AnalyzeNLRequest(BaseModel):
+    prompt: str
+    model: str = "deepseek-chat"
+
+
+class ConfirmNLStrategyRequest(BaseModel):
+    task_id: str
+    strategy_name: str = ""
+    indicators: list[dict]
+
+
+@router.post("/ai/analyze-nl")
+async def analyze_nl(
+    req: AnalyzeNLRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交自然语言分析任务"""
+    if len(req.prompt.strip()) < 5:
+        return {"code": 400, "message": "请至少输入5个字符描述策略思路", "data": None}
+
+    cutoff = datetime.now() - timedelta(minutes=1)
+    existing = await db.execute(
+        select(AIStrategyTask).where(
+            AIStrategyTask.user_id == current_user.id,
+            AIStrategyTask.task_type == "natural_language",
+            AIStrategyTask.user_prompt == req.prompt.strip(),
+            AIStrategyTask.created_at >= cutoff,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {
+            "code": 400,
+            "message": "请勿重复提交，1 分钟内已有相同请求",
+            "data": None,
+        }
+
+    task = AIStrategyTask(
+        user_id=current_user.id,
+        status="processing",
+        task_type="natural_language",
+        user_prompt=req.prompt.strip(),
+        model=req.model,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    asyncio.create_task(
+        _run_nl_analysis(task.task_id, req.prompt.strip(), req.model)
+    )
+
+    return {
+        "code": 0,
+        "data": {"task_id": task.task_id, "status": "processing"},
+    }
+
+
+async def _run_nl_analysis(task_id: str, prompt: str, model: str):
+    """后台执行自然语言 DeepSeek 分析（120s 超时）"""
+    from ..database import async_session
+    from ..services.ai_nl_service import analyze_natural_language as _nl_analyze
+
+    session = await async_session()
+    try:
+        task = (
+            await session.execute(
+                select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+            )
+        ).scalar_one()
+
+        result = await asyncio.wait_for(
+            _nl_analyze(prompt=prompt, model=model),
+            timeout=120,
+        )
+
+        task.result_json = json.dumps(result, ensure_ascii=False)
+        task.status = "review"
+        await session.commit()
+
+    except asyncio.TimeoutError:
+        print(f"[NL Analysis TIMEOUT] task={task_id}")
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = "分析超时（120 秒），请重试"
+            await session.commit()
+        except Exception as inner_e:
+            print(f"[NL Analysis ERROR] Failed to update timeout: {inner_e}")
+    except Exception as e:
+        import traceback
+        err_msg = f"{type(e).__name__}: {e}"
+        print(f"[NL Analysis ERROR] task={task_id}: {err_msg}")
+        traceback.print_exc()
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = err_msg
+            await session.commit()
+        except Exception as inner_e:
+            print(f"[NL Analysis ERROR] Failed to update task: {inner_e}")
+    finally:
+        await session.close()
+
+
+@router.get("/ai/analyze-nl/{task_id}")
+async def get_nl_analysis_result(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询 NL 分析结果"""
+    task = (
+        await db.execute(
+            select(AIStrategyTask).where(
+                AIStrategyTask.task_id == task_id,
+                AIStrategyTask.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status == "processing":
+        return {"code": 0, "data": {"status": "processing"}}
+
+    if task.status == "generating":
+        progress_data = None
+        try:
+            raw = json.loads(task.result_json or "{}")
+            progress_data = raw.get("progress")
+        except Exception:
+            pass
+        return {"code": 0, "data": {"status": "generating", "progress": progress_data}}
+
+    if task.status == "failed":
+        return {
+            "code": 0,
+            "data": {"status": "failed", "error_message": task.error_message},
+        }
+
+    result = json.loads(task.result_json or "{}")
+    classified = result.get("classified", {"matched": [], "new": []})
+    return {
+        "code": 0,
+        "data": {
+            "status": task.status,
+            "summary": result.get("summary", ""),
+            "indicators": result.get("indicators", []),
+            "classified": classified,
+            "strategy_id": result.get("strategy_id"),
+            "generated_factors": result.get("generated_factors", []),
+            "failed_factors": result.get("failed_factors", []),
+        },
+    }
+
+
+@router.get("/ai/analyze-nl/{task_id}/stream")
+async def stream_nl_analysis(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE 实时推送 NL 任务状态和进度"""
+    task = (
+        await db.execute(
+            select(AIStrategyTask).where(
+                AIStrategyTask.task_id == task_id,
+                AIStrategyTask.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    async def event_stream():
+        seen_status = None
+        seen_progress = None
+        while True:
+            await db.refresh(task)
+            status = task.status
+            result_json = task.result_json
+
+            progress = None
+            if result_json:
+                try:
+                    data = json.loads(result_json)
+                    progress = data.get("progress")
+                except Exception:
+                    pass
+
+            if status in ("review", "completed", "failed"):
+                if status != seen_status:
+                    payload = _build_nl_sse_payload(task, status, result_json, progress)
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+
+            if status != seen_status or (progress and progress != seen_progress):
+                payload = _build_nl_sse_payload(task, status, result_json, progress)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                seen_status = status
+                seen_progress = progress
+
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _build_nl_sse_payload(task, status, result_json, progress) -> dict:
+    """构建 NL SSE 推送 payload"""
+    payload: dict = {"status": status}
+
+    if status == "generating" and progress:
+        payload["progress"] = progress
+
+    if status in ("review", "completed") and result_json:
+        try:
+            data = json.loads(result_json)
+            if status == "review":
+                payload["summary"] = data.get("summary", "")
+                payload["indicators"] = data.get("indicators", [])
+                payload["classified"] = data.get("classified", {})
+            if data.get("strategy_id"):
+                payload["strategy_id"] = data["strategy_id"]
+            if data.get("generated_factors"):
+                payload["generated_factors"] = data["generated_factors"]
+            if data.get("failed_factors"):
+                payload["failed_factors"] = data["failed_factors"]
+        except Exception:
+            pass
+
+    if status == "failed":
+        payload["error_message"] = task.error_message
+
+    return payload
+
+
+@router.post("/ai/confirm-nl-strategy")
+async def confirm_nl_strategy(
+    req: ConfirmNLStrategyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """确认 NL 因子列表 → 后台生成相似度策略"""
+    task = (
+        await db.execute(
+            select(AIStrategyTask).where(
+                AIStrategyTask.task_id == req.task_id,
+                AIStrategyTask.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status not in ("completed", "review"):
+        return {"code": 400, "message": "分析尚未完成", "data": None}
+
+    task.status = "generating"
+    await db.commit()
+
+    asyncio.create_task(
+        _run_nl_generation(
+            task_id=req.task_id,
+            indicators=req.indicators,
+            strategy_name=req.strategy_name,
+            user_id=current_user.id,
+        )
+    )
+
+    return {"code": 0, "data": {"status": "generating"}}
+
+
+async def _run_nl_generation(
+    task_id: str,
+    indicators: list[dict],
+    strategy_name: str,
+    user_id: int,
+):
+    """后台执行 NL 策略生成（300s 超时，带进度）"""
+    from ..database import async_session
+    from ..services.ai_strategy_service import match_and_generate_with_progress
+
+    session = await async_session()
+    try:
+        task = (
+            await session.execute(
+                select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+            )
+        ).scalar_one()
+
+        total = len(indicators)
+
+        async def update_progress(completed: int):
+            task.result_json = json.dumps(
+                {"progress": {"completed": completed, "total": total}},
+                ensure_ascii=False,
+            )
+            await session.commit()
+
+        result = await asyncio.wait_for(
+            match_and_generate_with_progress(
+                task=task,
+                indicators=indicators,
+                strategy_name=strategy_name,
+                buy_logic="OR",
+                user_id=user_id,
+                on_progress=update_progress,
+            ),
+            timeout=300,
+        )
+
+        if strategy_name:
+            name = strategy_name
+        else:
+            from datetime import datetime as dt
+            ts = dt.now().strftime("%H%M%S")
+            name = f"AI策略-{ts}"
+
+        strategy = Strategy(
+            name=name,
+            description=f"由AI根据自然语言描述生成: {task.user_prompt or ''}",
+            file_path="",
+            factor_config=json.dumps(
+                result["factor_config"], ensure_ascii=False
+            ),
+            generated_code=result["generated_code"],
+            user_id=user_id,
+            status="active",
+            version=1,
+        )
+        session.add(strategy)
+        await session.commit()
+        await session.refresh(strategy)
+
+        task.status = "completed"
+        task.result_json = json.dumps(
+            {
+                "strategy_id": strategy.id,
+                "generated_factors": result["generated_factors"],
+                "failed_factors": result["failed_factors"],
+            },
+            ensure_ascii=False,
+        )
+        await session.commit()
+
+    except asyncio.TimeoutError:
+        print(f"[NL Generation TIMEOUT] task={task_id}")
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = "策略生成超时（300 秒），请重试或减少指标数量"
+            await session.commit()
+        except Exception:
+            pass
+    except Exception as e:
+        import traceback
+        print(f"[NL Generation ERROR] task={task_id}: {e}")
+        traceback.print_exc()
+        try:
+            task = (
+                await session.execute(
+                    select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
+                )
+            ).scalar_one()
+            task.status = "failed"
+            task.error_message = str(e)
+            await session.commit()
+        except Exception:
+            pass
+    finally:
+        await session.close()
