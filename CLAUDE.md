@@ -67,25 +67,39 @@ nohup bash restart.sh > /tmp/aipicking.log 2>&1 &  # Run in background
 
 **Flow:**
 1. User submits stock code + date → backend fetches K-line data
-2. `_run_analysis` (async background task) sends data to DeepSeek
+2. `_run_analysis` (async background task, **120s timeout**) sends data to DeepSeek
 3. DeepSeek extracts **50+ quantitative indicator VALUES** (not buy/sell signals):
    - RSI, MACD, KDJ, OBV, Bollinger Bands, ATR, ADX, CCI, etc.
-4. Frontend polls `GET /ai/analyze-stock/{task_id}` until complete
-5. User reviews indicators on `/strategies/ai-builder`, can filter/add
-6. User confirms → backend generates indicator compute functions via DeepSeek
-7. Each function (`compute_value(df, params) -> float`) passes **runtime validation**:
-   - AST syntax check
-   - Execute against mock 30-row data
-   - Must return non-NaN, non-zero values
-8. Strategy code assembled: for each candidate stock, computes all indicators, scores by **normalized similarity distance** to reference values
+4. Frontend polls `GET /ai/analyze-stock/{task_id}` until complete (phase: `analyzing`)
+5. User reviews indicators on `/strategies/ai-builder` (phase: `review`), can filter/add
+6. User confirms → backend marks task "generating", starts `_run_generation`
+7. `_run_generation` calls DeepSeek **concurrently** (Semaphore 5, **300s timeout**) for each indicator's compute function
+8. Progress tracked in `result_json.progress` → frontend shows "正在生成第 X/N 个指标..."
+9. Each function (`compute_value(df, params) -> float`) passes **runtime validation**
+10. Strategy assembled: similarity-matching via normalized distance to reference values
+
+**DeepSeek calls:** Auto-retry 3x with exponential backoff (2s→4s→8s) via tenacity; covers HTTPStatusError, ConnectError, ReadTimeout.
+
+**Frontend phase states (single source of truth):**
+- `idle` → `submitting` → `analyzing` → `review` → `generating` → `completed`
+- Any state → `failed` on error
+- `resumeInProgressTask` recovers stale `analyzing`/`generating` state on page revisit
+
+**Key components:**
+- `frontend/src/pages/AIStrategyBuilder.tsx` — multi-phase wizard with shared `<TaskHistoryPanel/>`
+- `frontend/src/components/TaskHistoryPanel.tsx` — reusable task history sidebar (loading/empty/list states)
+- `frontend/src/stores/aiStrategyStore.ts` — Zustand store with single `phase` enum (no `submitting` boolean)
+- `backend/app/services/llm_service.py` — DeepSeek API with retry (tenacity)
+- `backend/app/services/ai_strategy_service.py` — concurrent code generation + runtime validation
+- `backend/app/api/ai.py` — route handlers + background tasks with timeout
 
 **Strategy type:** Similarity matching (not buy/sell signals). Returns top 10 closest stocks.
 
 **API endpoints:**
 - `POST /ai/analyze-stock` — Submit analysis task
-- `GET /ai/analyze-stock/{task_id}` — Poll task status/result
-- `GET /ai/analyze-stock/tasks` — User's task history
-- `POST /ai/confirm-strategy` — Confirm indicators, generate strategy
+- `GET /ai/analyze-stock/{task_id}` — Poll task status/result (includes `progress` field during generation)
+- `GET /ai/analyze-stock/tasks` — User's task history (MUST be defined before `/{task_id}` route)
+- `POST /ai/confirm-strategy` — Confirm indicators, trigger async generation
 - `POST /ai/generate-strategy` — Legacy keyword-based strategy (rule parsing, not LLM)
 
 ### Strategy Code Display
