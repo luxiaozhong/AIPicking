@@ -93,7 +93,6 @@ export default function MACDInteractiveChart({
     const legendNames = ['K 线', ...MA_LINES.map((m) => m.name), `DIF(${fast},${slow})`, `DEA(${signal})`, 'MACD 柱'];
 
     const option: EChartsOption = {
-      color: ['#ef5350', ...MA_LINES.map((m) => m.color), '#1677ff', '#fa8c16', '#ef5350'],
       legend: {
         data: legendNames,
         top: 0,
@@ -104,7 +103,24 @@ export default function MACDInteractiveChart({
       },
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'cross' },
+        formatter: (params: any) => {
+          if (!Array.isArray(params)) return '';
+          const grid0 = params.filter((p: any) => p.seriesIndex <= 4); // K-line + MA
+          const grid1 = params.filter((p: any) => p.seriesIndex >= 5); // MACD
+          // 判断鼠标在哪个面板
+          const hasGrid1Active = grid1.some((p: any) => p.value != null);
+          const active = hasGrid1Active ? grid1 : grid0;
+          const marker = (p: any) =>
+            p.seriesIndex === 7
+              ? `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.value >= 0 ? '#ef5350' : '#26a69a'};margin-right:4px"></span>`
+              : p.marker;
+          const label = (p: any) =>
+            p.seriesIndex <= 4
+              ? `${marker(p)}${p.seriesName}: ${typeof p.data === 'number' ? p.data.toFixed(2) : '—'}`
+              : `${marker(p)}${p.seriesName}: ${p.value != null ? Number(p.value).toFixed(4) : '—'}`;
+          return `<div style="font-size:12px">${params[0].axisValue}</div>` +
+            active.map(label).join('<br/>');
+        },
       },
       graphic: [
         {
