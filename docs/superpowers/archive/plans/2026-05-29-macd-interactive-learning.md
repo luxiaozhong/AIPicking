@@ -1222,8 +1222,8 @@ const InteractiveMACDPage: React.FC = () => {
       const days = Math.ceil(
         (new Date(end).getTime() - new Date(start).getTime()) / (86400000)
       ) + 30;
-      const items = await stockService.getKLine(tsCode, Math.min(days, 365));
-      // 过滤日期范围
+      const result = await stockService.getKLine(tsCode, Math.min(days, 365));
+      const items = result.items || [];
       const filtered = items.filter(
         (item) => item.trade_date >= startDate && item.trade_date <= endDate
       );
