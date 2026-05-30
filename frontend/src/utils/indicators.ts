@@ -173,3 +173,33 @@ export function calcRSI(closes: number[], period: number = 14): (number | null)[
   }
   return result;
 }
+
+/** 计算 KDJ（随机指标） */
+export function calcKDJ(
+  highs: number[], lows: number[], closes: number[],
+  period: number = 9
+): { k: (number | null)[]; d: (number | null)[]; j: (number | null)[] } {
+  const n = closes.length;
+  const k: (number | null)[] = new Array(n).fill(null);
+  const d: (number | null)[] = new Array(n).fill(null);
+  const j: (number | null)[] = new Array(n).fill(null);
+  if (n < period) return { k, d, j };
+  let prevK = 50, prevD = 50;
+  for (let i = period - 1; i < n; i++) {
+    let h = -Infinity, l = Infinity;
+    for (let t = i - period + 1; t <= i; t++) {
+      if (highs[t] > h) h = highs[t];
+      if (lows[t] < l) l = lows[t];
+    }
+    const rsv = h === l ? 50 : ((closes[i] - l) / (h - l)) * 100;
+    const curK = (2 / 3) * prevK + (1 / 3) * rsv;
+    const curD = (2 / 3) * prevD + (1 / 3) * curK;
+    const curJ = 3 * curK - 2 * curD;
+    k[i] = curK;
+    d[i] = curD;
+    j[i] = curJ;
+    prevK = curK;
+    prevD = curD;
+  }
+  return { k, d, j };
+}

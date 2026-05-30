@@ -85,6 +85,11 @@ const educationService = {
     return res.data.data;
   },
 
+  async getKDJCases(): Promise<MACDCasesData> {
+    const res = await api.get('/education/kdj-interactive/cases');
+    return res.data.data;
+  },
+
   async getRSICases(): Promise<MACDCasesData> {
     const res = await api.get('/education/rsi-interactive/cases');
     return res.data.data;

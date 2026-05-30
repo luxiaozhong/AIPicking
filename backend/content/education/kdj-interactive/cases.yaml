@@ -1,0 +1,33 @@
+default_params:
+  period: 9
+
+cases:
+  - id: "maotai-golden-cross"
+    title: "贵州茅台 · KDJ 金叉买入"
+    stock: { ts_code: "600519.SH", name: "贵州茅台" }
+    date_range: { start: "2020-03-01", end: "2020-07-31" }
+    annotations: [{ id: "gc1", date: "2020-03-20", type: "golden_cross", label: "KDJ 金叉", desc: "K 线上穿 D 线形成金叉" }]
+    steps:
+      - { step: 1, title: "认识 KDJ 三条线", content_file: "kdj-case-1-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "发现金叉信号", content_file: "kdj-case-1-step-2.md", visible_annotations: ["gc1"], highlight_params: null }
+      - { step: 3, title: "调整周期参数", content_file: "kdj-case-1-step-3.md", visible_annotations: ["gc1"], highlight_params: "period" }
+
+  - id: "ningde-oversold"
+    title: "宁德时代 · KDJ 超卖反弹"
+    stock: { ts_code: "300750.SZ", name: "宁德时代" }
+    date_range: { start: "2022-01-01", end: "2022-07-31" }
+    annotations: [{ id: "os1", date: "2022-04-26", type: "oversold", label: "超卖区", desc: "K/D 值跌入 20 以下超卖区后反弹" }]
+    steps:
+      - { step: 1, title: "认识超卖信号", content_file: "kdj-case-2-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "观察超卖反弹", content_file: "kdj-case-2-step-2.md", visible_annotations: ["os1"], highlight_params: null }
+      - { step: 3, title: "调整周期对比", content_file: "kdj-case-2-step-3.md", visible_annotations: ["os1"], highlight_params: "period" }
+
+  - id: "byd-j-signal"
+    title: "比亚迪 · J 线极端信号"
+    stock: { ts_code: "002594.SZ", name: "比亚迪" }
+    date_range: { start: "2022-03-01", end: "2022-09-30" }
+    annotations: [{ id: "j1", date: "2022-04-27", type: "oversold", label: "J 线极端值", desc: "J 线跌破 0 后急速反弹，形成极端超卖信号" }]
+    steps:
+      - { step: 1, title: "认识 J 线的特性", content_file: "kdj-case-3-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "捕捉 J 线极端信号", content_file: "kdj-case-3-step-2.md", visible_annotations: ["j1"], highlight_params: null }
+      - { step: 3, title: "调整参数看变化", content_file: "kdj-case-3-step-3.md", visible_annotations: ["j1"], highlight_params: "period" }

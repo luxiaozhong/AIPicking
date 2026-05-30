@@ -10,6 +10,7 @@ import educationService from '@/services/educationService';
 import type { Article } from '@/services/educationService';
 import InteractiveMACDPage from '@/pages/InteractiveMACDPage';
 import InteractiveRSIPage from '@/pages/InteractiveRSIPage';
+import InteractiveKDJPage from '@/pages/InteractiveKDJPage';
 
 const difficultyColors: Record<string, string> = {
   '入门': 'green',
@@ -24,6 +25,7 @@ const EducationDetailPage: React.FC = () => {
   // 当访问交互指标文章时，渲染对应的交互学习页面
   if (category === 'indicators' && slug === 'macd') return <InteractiveMACDPage />;
   if (category === 'indicators' && slug === 'rsi') return <InteractiveRSIPage />;
+  if (category === 'indicators' && slug === 'kdj') return <InteractiveKDJPage />;
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
