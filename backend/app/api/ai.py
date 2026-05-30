@@ -344,6 +344,30 @@ async def list_tasks(
     }
 
 
+@router.delete("/ai/analyze-stock/{task_id}")
+async def delete_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除分析任务"""
+    task = (
+        await db.execute(
+            select(AIStrategyTask).where(
+                AIStrategyTask.task_id == task_id,
+                AIStrategyTask.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    await db.delete(task)
+    await db.commit()
+    return {"code": 0, "message": "已删除"}
+
+
 @router.get("/ai/analyze-stock/{task_id}")
 async def get_analysis_result(
     task_id: str,

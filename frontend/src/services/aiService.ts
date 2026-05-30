@@ -88,6 +88,11 @@ export const aiService = {
     return response.data;
   },
 
+  async deleteTask(taskId: string) {
+    const response = await api.delete(`/ai/analyze-stock/${taskId}`);
+    return response.data;
+  },
+
   async getAnalysisResult(taskId: string) {
     const response = await api.get(`/ai/analyze-stock/${taskId}`);
     return response.data;

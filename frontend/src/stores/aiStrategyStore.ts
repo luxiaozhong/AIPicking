@@ -48,6 +48,7 @@ interface AIStrategyState {
   addIndicator: (indicator: IndicatorItem) => void;
   setBuyLogic: (logic: 'AND' | 'OR') => void;
   confirmAndGenerate: (strategyName?: string) => Promise<number>;
+  deleteTask: (taskId: string) => Promise<void>;
   fetchTasks: () => Promise<void>;
   loadTask: (taskId: string) => Promise<void>;
   resumeInProgressTask: () => Promise<void>;
@@ -239,6 +240,28 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       const err = e as { response?: { data?: { message?: string } } };
       set({ phase: 'failed', error: err.response?.data?.message || '生成策略失败', progress: null });
       throw e;
+    }
+  },
+
+  deleteTask: async (taskId: string) => {
+    try {
+      await aiService.deleteTask(taskId);
+      // 如果删除的是当前任务，重置状态
+      if (get().taskId === taskId) {
+        _disconnectSSE();
+        set({
+          taskId: null,
+          phase: 'idle',
+          error: null,
+          result: null,
+          indicators: [],
+          progress: null,
+        });
+      }
+      // 刷新列表
+      get().fetchTasks();
+    } catch {
+      // silent
     }
   },
 

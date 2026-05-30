@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Card, Button, Descriptions, Tag, Space, message, Popconfirm, Tabs, Table, Input, AutoComplete, Spin, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { Card, Button, Descriptions, Tag, Space, message, Popconfirm, Tabs, Table, Input } from 'antd';
 import {
   EditOutlined,
   DownloadOutlined,
@@ -14,10 +14,9 @@ import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
 import CodeBlock from '@/components/shared/CodeBlock';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
+import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import type { RecommendationItem } from '@/types/backtest';
-import stockService from '@/services/stockService';
-import type { StockItem } from '@/types/stock';
 
 export default function StrategyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -35,9 +34,6 @@ export default function StrategyDetail() {
 
   const { executeStrategy, loading: executeLoading } = useBacktestStore();
   const [stockCode, setStockCode] = useState('');
-  const [stockOptions, setStockOptions] = useState<{ value: string; label: React.ReactNode }[]>([]);
-  const [stockSearching, setStockSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [executeResult, setExecuteResult] = useState<{
     strategy_name: string;
     cutoff_date: string;
@@ -56,29 +52,6 @@ export default function StrategyDetail() {
       clearError();
     }
   }, [error, clearError]);
-
-  const handleStockSearch = useCallback((keyword: string) => {
-    if (!keyword) {
-      setStockOptions([]);
-      return;
-    }
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      setStockSearching(true);
-      try {
-        const items: StockItem[] = await stockService.search(keyword);
-        setStockOptions(items.map((s) => ({
-          value: s.ts_code,
-          label: <span>{s.ts_code}  <Typography.Text type="secondary">{s.name}</Typography.Text></span>,
-        })));
-      } catch (err) {
-        console.error('Stock search failed:', err);
-        setStockOptions([]);
-      } finally {
-        setStockSearching(false);
-      }
-    }, 300);
-  }, []);
 
   const handleExecute = async () => {
     if (!currentStrategy) return;
@@ -126,16 +99,11 @@ export default function StrategyDetail() {
       <Button icon={<BarChartOutlined />} onClick={() => navigate(`/strategies/${currentStrategy.id}/backtest`)}>
         运行回测
       </Button>
-      <AutoComplete
+      <StockSearchLookup
         value={stockCode}
-        options={stockOptions}
-        onSearch={handleStockSearch}
-        onSelect={(value: string) => setStockCode(value)}
-        onChange={(value: string) => setStockCode(value)}
+        onChange={setStockCode}
         placeholder="股票代码（可选）"
         style={{ width: 200 }}
-        allowClear
-        notFoundContent={stockSearching ? <Spin size="small" /> : null}
       />
       <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleExecute} loading={executeLoading}>
         执行策略
@@ -185,16 +153,11 @@ export default function StrategyDetail() {
       children: (
         <>
           <Space style={{ marginBottom: 16 }}>
-            <AutoComplete
+            <StockSearchLookup
               value={stockCode}
-              options={stockOptions}
-              onSearch={handleStockSearch}
-              onSelect={(value: string) => setStockCode(value)}
-              onChange={(value: string) => setStockCode(value)}
+              onChange={setStockCode}
               placeholder="输入股票代码或名称搜索（留空则全市场扫描）"
               style={{ width: 280 }}
-              allowClear
-              notFoundContent={stockSearching ? <Spin size="small" /> : null}
             />
             <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleExecute} loading={executeLoading}>
               {executeResult ? '重新执行' : '执行策略'}

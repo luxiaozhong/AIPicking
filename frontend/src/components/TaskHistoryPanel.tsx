@@ -1,5 +1,6 @@
 import React from 'react';
-import { Card, List, Tag, Space, Typography, Spin, Empty } from 'antd';
+import { Card, List, Tag, Space, Typography, Spin, Empty, Button, Popconfirm } from 'antd';
+import { DeleteOutlined } from '@ant-design/icons';
 import type { AnalysisTask } from '@/types/aiStrategy';
 
 const { Text } = Typography;
@@ -9,6 +10,7 @@ interface TaskHistoryPanelProps {
   loading: boolean;
   currentTaskId: string | null;
   onTaskClick: (taskId: string) => void;
+  onTaskDelete: (taskId: string) => void;
 }
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
@@ -19,7 +21,6 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   failed: { color: 'red', label: '失败' },
 };
 
-// "review" 和 "completed" 都可以点击查看
 const CLICKABLE_STATUSES = new Set(['completed', 'review']);
 
 const TaskHistoryPanel: React.FC<TaskHistoryPanelProps> = ({
@@ -27,6 +28,7 @@ const TaskHistoryPanel: React.FC<TaskHistoryPanelProps> = ({
   loading,
   currentTaskId,
   onTaskClick,
+  onTaskDelete,
 }) => {
   return (
     <Card title="历史分析" size="small">
@@ -54,6 +56,27 @@ const TaskHistoryPanel: React.FC<TaskHistoryPanelProps> = ({
                 onClick={() => {
                   if (isClickable) onTaskClick(t.task_id);
                 }}
+                actions={[
+                  <Popconfirm
+                    key="delete"
+                    title="确定删除此分析记录？"
+                    onConfirm={(e) => {
+                      e?.stopPropagation();
+                      onTaskDelete(t.task_id);
+                    }}
+                    onCancel={(e) => e?.stopPropagation()}
+                    okText="删除"
+                    cancelText="取消"
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Popconfirm>,
+                ]}
               >
                 <List.Item.Meta
                   title={

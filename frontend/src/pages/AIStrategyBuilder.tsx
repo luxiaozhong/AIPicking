@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Card, Form, Input, DatePicker, Select, Button, Typography, Alert, AutoComplete,
+  Card, Form, Input, DatePicker, Select, Button, Typography, Alert,
   Table, InputNumber, Space, Row, Col, Spin, Tag, message,
 } from 'antd';
 import {
@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useAIStrategyStore } from '@/stores/aiStrategyStore';
-import stockService from '@/services/stockService';
+import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import TaskHistoryPanel from '@/components/TaskHistoryPanel';
 import type { IndicatorItem } from '@/types/aiStrategy';
 
@@ -35,17 +35,12 @@ const AIStrategyBuilder: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [form] = Form.useForm();
   const [stockCode, setStockCode] = useState('');
-  const [stockOptions, setStockOptions] = useState<
-    { value: string; label: React.ReactNode }[]
-  >([]);
-  const [stockSearching, setStockSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   const {
     phase, error, result, indicators, buyLogic,
     taskId, tasks, tasksLoading, generatedStrategyId, progress,
     submitAnalysis, updateIndicator, removeIndicator, addIndicator,
-    setBuyLogic, confirmAndGenerate, fetchTasks, loadTask, clearAnalysis,
+    setBuyLogic, confirmAndGenerate, deleteTask, fetchTasks, loadTask, clearAnalysis,
     cancelPolling, resumeInProgressTask,
   } = useAIStrategyStore();
 
@@ -53,19 +48,20 @@ const AIStrategyBuilder: React.FC = () => {
   const [newIndicatorForm] = Form.useForm();
 
   useEffect(() => {
+    const tid = searchParams.get('task_id');
+    if (tid) {
+      // URL 带 task_id → 加载指定任务
+      loadTask(tid);
+    } else if (phase === 'review' || phase === 'completed' || phase === 'failed') {
+      // SPA 导航回来时 store 残留上次的展示状态，重置为表单
+      clearAnalysis();
+    }
     fetchTasks();
     resumeInProgressTask();
     return () => {
       cancelPolling();
     };
   }, []);
-
-  useEffect(() => {
-    const tid = searchParams.get('task_id');
-    if (tid) {
-      loadTask(tid);
-    }
-  }, [searchParams]);
 
   useEffect(() => {
     if (generatedStrategyId) {
@@ -75,30 +71,6 @@ const AIStrategyBuilder: React.FC = () => {
       navigate(`/strategies/${sid}`);
     }
   }, [generatedStrategyId]);
-
-  const handleStockSearch = useCallback((keyword: string) => {
-    if (!keyword) {
-      setStockOptions([]);
-      return;
-    }
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      setStockSearching(true);
-      try {
-        const items = await stockService.search(keyword);
-        setStockOptions(
-          items.map((s: { ts_code: string; name: string }) => ({
-            value: s.ts_code,
-            label: <span>{s.ts_code}  <Text type="secondary">{s.name}</Text></span>,
-          }))
-        );
-      } catch {
-        setStockOptions([]);
-      } finally {
-        setStockSearching(false);
-      }
-    }, 300);
-  }, []);
 
   const handleSubmit = async (values: {
     date: dayjs.Dayjs;
@@ -255,15 +227,10 @@ const AIStrategyBuilder: React.FC = () => {
             )}
             <Form form={form} layout="vertical" onFinish={handleSubmit}>
               <Form.Item label="股票代码" required>
-                <AutoComplete
+                <StockSearchLookup
                   value={stockCode}
-                  options={stockOptions}
-                  onSearch={handleStockSearch}
-                  onSelect={(value: string) => setStockCode(value)}
-                  onChange={(value: string) => setStockCode(value)}
+                  onChange={setStockCode}
                   placeholder="输入股票代码或名称搜索"
-                  allowClear
-                  notFoundContent={stockSearching ? <Spin size="small" /> : null}
                 />
               </Form.Item>
 
@@ -321,6 +288,7 @@ const AIStrategyBuilder: React.FC = () => {
             loading={tasksLoading}
             currentTaskId={taskId}
             onTaskClick={loadTask}
+            onTaskDelete={deleteTask}
           />
         </Col>
       </Row>
@@ -349,6 +317,7 @@ const AIStrategyBuilder: React.FC = () => {
             loading={tasksLoading}
             currentTaskId={taskId}
             onTaskClick={loadTask}
+            onTaskDelete={deleteTask}
           />
         </Col>
       </Row>
@@ -386,6 +355,7 @@ const AIStrategyBuilder: React.FC = () => {
             loading={tasksLoading}
             currentTaskId={taskId}
             onTaskClick={loadTask}
+            onTaskDelete={deleteTask}
           />
         </Col>
       </Row>
@@ -494,6 +464,7 @@ const AIStrategyBuilder: React.FC = () => {
           loading={tasksLoading}
           currentTaskId={taskId}
           onTaskClick={loadTask}
+          onTaskDelete={deleteTask}
         />
       </Col>
     </Row>
