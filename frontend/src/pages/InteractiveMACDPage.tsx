@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Spin, Switch, Radio } from 'antd';
+import { Spin, Switch, Radio, Collapse } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import educationService from '@/services/educationService';
 import { stockService } from '@/services/stockService';
@@ -231,6 +231,70 @@ const InteractiveMACDPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Glossary / 术语说明 */}
+      <Collapse
+        style={{ marginTop: 24 }}
+        size="small"
+        items={[
+          {
+            key: 'glossary',
+            label: '📖 术语说明',
+            children: (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px 24px', fontSize: 13 }}>
+                <div>
+                  <strong>EMA（指数移动平均）</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    一种加权移动平均算法，近期价格权重更高，比简单均线（MA）更灵敏地反映价格变化。
+                  </p>
+                </div>
+                <div>
+                  <strong>DIF（差离值）</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    DIF = 快线 EMA - 慢线 EMA。代表短期与长期趋势的差值。默认快线=12日，慢线=26日。
+                  </p>
+                </div>
+                <div>
+                  <strong>DEA（信号线）</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    DEA = DIF 的 EMA（默认9日）。对 DIF 做平滑处理，作为信号参考线。
+                  </p>
+                </div>
+                <div>
+                  <strong>MACD 柱</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    MACD 柱 = 2 × (DIF - DEA)。柱子在零轴上方为红色（多头），下方为绿色（空头）。
+                  </p>
+                </div>
+                <div>
+                  <strong>金叉（Golden Cross）</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    DIF 从下方向上穿过 DEA，视为买入信号。
+                  </p>
+                </div>
+                <div>
+                  <strong>死叉（Death Cross）</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    DIF 从上方向下穿过 DEA，视为卖出信号。
+                  </p>
+                </div>
+                <div>
+                  <strong>顶背离</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    股价创出新高，但 MACD 的 DIF 未能同步创出新高，预示上涨动能减弱，可能见顶。
+                  </p>
+                </div>
+                <div>
+                  <strong>底背离</strong>
+                  <p style={{ margin: '4px 0 0', color: '#666' }}>
+                    股价创出新低，但 MACD 的 DIF 未能同步创出新低，预示下跌动能减弱，可能见底。
+                  </p>
+                </div>
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 };
