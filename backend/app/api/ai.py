@@ -862,22 +862,27 @@ async def stream_nl_analysis(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     async def event_stream():
+        from ..database import async_session
         seen_status = None
         seen_progress = None
         while True:
-            # Re-query task each loop to avoid session expiration issues
-            task_fresh = (
-                await db.execute(
-                    select(AIStrategyTask).where(
-                        AIStrategyTask.task_id == task_id,
-                        AIStrategyTask.user_id == current_user.id,
+            # Use a fresh session each poll to see changes from background tasks
+            s = await async_session()
+            try:
+                task_fresh = (
+                    await s.execute(
+                        select(AIStrategyTask).where(
+                            AIStrategyTask.task_id == task_id,
+                            AIStrategyTask.user_id == current_user.id,
+                        )
                     )
-                )
-            ).scalar_one_or_none()
-            if not task_fresh:
-                break
-            status = task_fresh.status
-            result_json = task_fresh.result_json
+                ).scalar_one_or_none()
+                if not task_fresh:
+                    break
+                status = task_fresh.status
+                result_json = task_fresh.result_json
+            finally:
+                await s.close()
 
             progress = None
             if result_json:
