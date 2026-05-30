@@ -5,6 +5,7 @@ import ast
 import os
 import hashlib
 import traceback
+import asyncio
 import pandas as pd
 import numpy as np
 
@@ -41,32 +42,97 @@ async def match_and_generate(
     user_id: int,
 ) -> dict:
     """
-    为每个指标生成 compute_value 代码，组装成相似度策略
+    为每个指标生成 compute_value 代码，组装成相似度策略。
+    委托给带进度回调的并发版本。
+    """
+    return await match_and_generate_with_progress(
+        task=task,
+        indicators=indicators,
+        strategy_name=strategy_name,
+        buy_logic=buy_logic,
+        user_id=user_id,
+        on_progress=None,
+    )
+
+
+async def match_and_generate_with_progress(
+    task: AIStrategyTask,
+    indicators: list[dict],
+    strategy_name: str,
+    buy_logic: str,
+    user_id: int,
+    on_progress=None,
+) -> dict:
+    """
+    并发为每个指标生成 compute_value 代码（Semaphore 限流），并通过
+    on_progress 回调报告进度。组装成相似度策略。
     """
     generated = []
     failed = []
-    indicator_fns = []  # [(name, ref_value, params, fn_name), ...]
+    indicator_fns = []
+    completed_count = 0
+    lock = asyncio.Lock()
 
-    for ind in indicators:
+    sem = asyncio.Semaphore(5)  # 限制并发 DeepSeek 调用数
+
+    async def generate_one(ind: dict, idx: int):
+        nonlocal completed_count
         name = ind.get("name", "")
         ref_value = ind.get("value", 0)
         params = ind.get("params", {})
 
-        try:
-            code = await generate_indicator_code(
-                name=name,
-                description=ind.get("description", ""),
-                params=params,
-                computation=ind.get("computation", ""),
-            )
-            _validate_code(code)
-            fn_name = _name_to_fn(name)
-            indicator_fns.append((name, ref_value, params, fn_name, code))
-            generated.append(name)
-        except Exception as e:
-            failed.append({"name": name, "error": str(e)})
+        async with sem:
+            try:
+                code = await generate_indicator_code(
+                    name=name,
+                    description=ind.get("description", ""),
+                    params=params,
+                    computation=ind.get("computation", ""),
+                )
+                _validate_code(code)
+                fn_name = _name_to_fn(name)
+                result_item = {
+                    "name": name,
+                    "ref_value": ref_value,
+                    "params": params,
+                    "fn_name": fn_name,
+                    "code": code,
+                    "index": idx,
+                    "ok": True,
+                }
+            except Exception as e:
+                result_item = {
+                    "name": name,
+                    "error": str(e),
+                    "index": idx,
+                    "ok": False,
+                }
 
-    strategy_code = _assemble_similarity_strategy(strategy_name, task.ts_code, indicator_fns)
+            async with lock:
+                completed_count += 1
+                if on_progress:
+                    await on_progress(completed_count)
+
+            return result_item
+
+    tasks_coros = [generate_one(ind, i) for i, ind in enumerate(indicators)]
+    results = await asyncio.gather(*tasks_coros)
+
+    # 按原始顺序排序
+    results.sort(key=lambda r: r["index"])
+
+    for r in results:
+        if r["ok"]:
+            indicator_fns.append((
+                r["name"], r["ref_value"], r["params"], r["fn_name"], r["code"]
+            ))
+            generated.append(r["name"])
+        else:
+            failed.append({"name": r["name"], "error": r["error"]})
+
+    strategy_code = _assemble_similarity_strategy(
+        strategy_name, task.ts_code, indicator_fns
+    )
 
     return {
         "factor_config": {

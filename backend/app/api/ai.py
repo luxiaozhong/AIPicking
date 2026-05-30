@@ -348,7 +348,13 @@ async def get_analysis_result(
         return {"code": 0, "data": {"status": "processing"}}
 
     if task.status == "generating":
-        return {"code": 0, "data": {"status": "generating"}}
+        progress_data = None
+        try:
+            raw = json.loads(task.result_json or "{}")
+            progress_data = raw.get("progress")
+        except Exception:
+            pass
+        return {"code": 0, "data": {"status": "generating", "progress": progress_data}}
 
     if task.status == "failed":
         return {
@@ -424,8 +430,9 @@ async def _run_generation(
     strategy_name: str,
     user_id: int,
 ):
-    """后台执行策略生成（调用 DeepSeek 生成每个指标的代码）"""
+    """后台执行策略生成（并发调用 DeepSeek 生成每个指标的代码，带进度）"""
     from ..database import async_session
+    from ..services.ai_strategy_service import match_and_generate_with_progress
 
     session = await async_session()
     try:
@@ -435,12 +442,23 @@ async def _run_generation(
             )
         ).scalar_one()
 
-        result = await match_and_generate(
+        total = len(indicators)
+
+        async def update_progress(completed: int):
+            """将进度写入任务的 result_json"""
+            task.result_json = json.dumps(
+                {"progress": {"completed": completed, "total": total}},
+                ensure_ascii=False,
+            )
+            await session.commit()
+
+        result = await match_and_generate_with_progress(
             task=task,
             indicators=indicators,
             strategy_name=strategy_name,
             buy_logic="OR",
             user_id=user_id,
+            on_progress=update_progress,
         )
 
         # 保存策略
