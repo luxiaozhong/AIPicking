@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { aiService } from '@/services/aiService';
 import strategyService from '@/services/strategyService';
 import type {
+  AnalysisPhase,
   AnalysisResult,
   AnalysisTask,
+  GenerationProgress,
   IndicatorItem,
 } from '@/types/aiStrategy';
 
@@ -24,7 +26,7 @@ function _schedulePoll(fn: () => void, delay: number) {
 
 interface AIStrategyState {
   taskId: string | null;
-  status: 'idle' | 'submitting' | 'polling' | 'completed' | 'failed';
+  phase: AnalysisPhase;
   error: string | null;
   result: AnalysisResult | null;
 
@@ -34,8 +36,8 @@ interface AIStrategyState {
   tasks: AnalysisTask[];
   tasksLoading: boolean;
 
-  submitting: boolean;
   generatedStrategyId: number | null;
+  progress: GenerationProgress | null;
 
   submitAnalysis: (
     tsCode: string,
@@ -58,18 +60,18 @@ interface AIStrategyState {
 
 export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
   taskId: null,
-  status: 'idle',
+  phase: 'idle',
   error: null,
   result: null,
   indicators: [],
   buyLogic: 'OR',
   tasks: [],
   tasksLoading: false,
-  submitting: false,
   generatedStrategyId: null,
+  progress: null,
 
   submitAnalysis: async (tsCode, date, model, prompt) => {
-    set({ status: 'submitting', error: null });
+    set({ phase: 'submitting', error: null });
     try {
       const res = await aiService.analyzeStock({
         ts_code: tsCode,
@@ -79,14 +81,14 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       });
       if (res.code === 0) {
         const taskId = res.data.task_id;
-        set({ taskId, status: 'polling' });
+        set({ taskId, phase: 'analyzing' });
         get().pollResult(taskId);
       } else {
-        set({ status: 'idle', error: res.message || '提交失败' });
+        set({ phase: 'idle', error: res.message || '提交失败' });
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
-      set({ status: 'failed', error: err.response?.data?.message || '提交分析失败' });
+      set({ phase: 'failed', error: err.response?.data?.message || '提交分析失败' });
     }
   },
 
@@ -101,17 +103,30 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
 
         const data = res.data;
         if (data.status === 'completed') {
-          set({
-            status: 'completed',
-            result: data,
-            indicators: data.indicators || [],
-            error: null,
-          });
+          // 有 strategy_id → 策略已生成；否则 → 分析完成等待确认
+          if (data.strategy_id) {
+            set({ phase: 'completed', generatedStrategyId: data.strategy_id });
+          } else {
+            set({
+              phase: 'review',
+              result: data,
+              indicators: data.indicators || [],
+              error: null,
+            });
+          }
           get().fetchTasks();
         } else if (data.status === 'failed') {
-          set({ status: 'failed', error: data.error_message || '分析失败' });
+          set({ phase: 'failed', error: data.error_message || '分析失败' });
           get().fetchTasks();
+        } else if (data.status === 'generating') {
+          // 正在生成策略代码，更新进度
+          set({ phase: 'generating' });
+          if (data.progress) {
+            set({ progress: data.progress });
+          }
+          _schedulePoll(poll, 2000);
         } else {
+          // processing → 仍在分析 K 线
           _schedulePoll(poll, 2000);
         }
       } catch {
@@ -123,18 +138,17 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
 
   cancelPolling: () => {
     _clearPollTimer();
-    // 不重置 status, 这样回到页面时可以恢复
   },
 
   clearAnalysis: () => {
     _clearPollTimer();
     set({
       taskId: null,
-      status: 'idle',
+      phase: 'idle',
       error: null,
       result: null,
       indicators: [],
-      submitting: false,
+      progress: null,
     });
   },
 
@@ -156,7 +170,7 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
 
   confirmAndGenerate: async (strategyName) => {
     const { taskId, indicators, buyLogic } = get();
-    set({ submitting: true, status: 'polling' });
+    set({ phase: 'generating', progress: null });
     try {
       const res = await aiService.confirmStrategy({
         task_id: taskId!,
@@ -169,6 +183,10 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
           const poll = async () => {
             try {
               const r = await aiService.getAnalysisResult(taskId!);
+              // 更新进度
+              if (r.data.progress) {
+                set({ progress: r.data.progress });
+              }
               if (r.data.status === 'completed' && r.data.strategy_id) {
                 const sid = r.data.strategy_id;
                 try {
@@ -177,10 +195,10 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
                   _schedulePoll(poll, 1500);
                   return;
                 }
-                set({ generatedStrategyId: sid, submitting: false, status: 'completed' });
+                set({ generatedStrategyId: sid, phase: 'completed', progress: null });
                 resolve(sid);
               } else if (r.data.status === 'failed') {
-                set({ submitting: false, status: 'failed', error: r.data.error_message || '生成失败' });
+                set({ phase: 'failed', error: r.data.error_message || '生成失败', progress: null });
                 reject(new Error(r.data.error_message));
               } else {
                 _schedulePoll(poll, 2000);
@@ -192,15 +210,15 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
           _schedulePoll(poll, 2000);
         });
       } else if (res.code === 0 && res.data.strategy_id) {
-        set({ generatedStrategyId: res.data.strategy_id, submitting: false });
+        set({ generatedStrategyId: res.data.strategy_id, phase: 'completed' });
         return res.data.strategy_id;
       } else {
-        set({ submitting: false, error: res.message || '生成策略失败' });
+        set({ phase: 'failed', error: res.message || '生成策略失败' });
         throw new Error(res.message);
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
-      set({ submitting: false, error: err.response?.data?.message || '生成策略失败' });
+      set({ phase: 'failed', error: err.response?.data?.message || '生成策略失败', progress: null });
       throw e;
     }
   },
@@ -213,7 +231,7 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
         set({ tasks: res.data.tasks || [] });
       }
     } catch {
-      // silent
+      // silent — 非关键路径，静默失败
     } finally {
       set({ tasksLoading: false });
     }
@@ -225,28 +243,34 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       const res = await aiService.getAnalysisResult(taskId);
       const data = res.data;
       if (res.code === 0 && data.status === 'completed') {
-        set({
-          status: 'completed',
-          result: data,
-          indicators: data.indicators || [],
-          error: null,
-          submitting: false,
-        });
+        if (data.strategy_id) {
+          set({ phase: 'completed', generatedStrategyId: data.strategy_id });
+        } else {
+          set({
+            phase: 'review',
+            result: data,
+            indicators: data.indicators || [],
+            error: null,
+          });
+        }
       } else if (data.status === 'failed') {
-        set({ status: 'failed', error: data.error_message, submitting: false });
-      } else if (data.status === 'processing' || data.status === 'generating') {
-        set({ status: 'polling' });
+        set({ phase: 'failed', error: data.error_message });
+      } else if (data.status === 'processing') {
+        set({ phase: 'analyzing' });
+        get().pollResult(taskId);
+      } else if (data.status === 'generating') {
+        set({ phase: 'generating', progress: data.progress || null });
         get().pollResult(taskId);
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
-      set({ status: 'failed', error: err.response?.data?.message || '加载任务失败', submitting: false });
+      set({ phase: 'failed', error: err.response?.data?.message || '加载任务失败' });
     }
   },
 
   resumeInProgressTask: async () => {
     // 页面加载时，检查是否有进行中的任务并自动恢复轮询；
-    // 同时处理导航离开后 store 残留的 stale polling 状态。
+    // 同时处理导航离开后 store 残留的 stale 状态。
     try {
       const res = await aiService.getTasks();
       if (res.code !== 0) return;
@@ -259,21 +283,17 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
         return;
       }
 
-      // 没有进行中的任务，但如果 store 仍处于 polling 且 taskId 对应
-      // 的任务已 completed，自动加载已完成结果（恢复 stale 状态）
-      const { taskId, status, submitting } = get();
-      if (
-        (status === 'polling' || submitting) &&
-        taskId
-      ) {
+      // 没有进行中的任务，但如果 store 仍处于 analyzing/generating
+      // 且 taskId 对应的任务已 completed，自动加载结果（恢复 stale 状态）
+      const { taskId, phase } = get();
+      if ((phase === 'analyzing' || phase === 'generating') && taskId) {
         const currentTask = tasks.find((t) => t.task_id === taskId);
         if (currentTask?.status === 'completed') {
           get().loadTask(taskId);
         } else if (currentTask?.status === 'failed') {
-          set({ status: 'failed', error: '任务执行失败', submitting: false });
+          set({ phase: 'failed', error: '任务执行失败' });
         } else if (!currentTask) {
-          // taskId 已不存在于历史列表中，重置状态
-          set({ status: 'idle', taskId: null, submitting: false, error: null });
+          set({ phase: 'idle', taskId: null, error: null });
         }
         // 如果仍在 processing/generating，上面的 inProgress 已处理
       }

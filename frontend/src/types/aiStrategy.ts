@@ -18,7 +18,7 @@ export interface IndicatorItem {
 }
 
 export interface AnalysisResult {
-  status: 'processing' | 'completed' | 'failed';
+  status: 'processing' | 'completed' | 'failed' | 'generating';
   summary?: string;
   indicators?: IndicatorItem[];
   kline_summary?: {
@@ -27,6 +27,10 @@ export interface AnalysisResult {
     trading_days: number;
   };
   error_message?: string;
+  strategy_id?: number;
+  generated_factors?: string[];
+  failed_factors?: { name: string; error: string }[];
+  progress?: GenerationProgress;
 }
 
 export interface AnalysisTask {
@@ -42,4 +46,20 @@ export interface ConfirmStrategyResponse {
   factor_config: Record<string, unknown>;
   generated_factors: string[];
   failed_factors: { name: string; error: string }[];
+}
+
+/** 前端状态机 phase 枚举 */
+export type AnalysisPhase =
+  | 'idle'
+  | 'submitting'
+  | 'analyzing'
+  | 'review'
+  | 'generating'
+  | 'completed'
+  | 'failed';
+
+/** 策略生成进度 */
+export interface GenerationProgress {
+  completed: number;
+  total: number;
 }

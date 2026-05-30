@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Form, Input, DatePicker, Select, Button, Typography, Alert, AutoComplete,
-  Table, InputNumber, Space, Row, Col, Spin, message,
+  Table, InputNumber, Space, Row, Col, Spin, Tag, message,
 } from 'antd';
 import {
   RobotOutlined, PlusOutlined, DeleteOutlined, CheckCircleOutlined,
@@ -42,8 +42,8 @@ const AIStrategyBuilder: React.FC = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   const {
-    status, error, result, indicators, buyLogic,
-    taskId, tasks, tasksLoading, submitting, generatedStrategyId,
+    phase, error, result, indicators, buyLogic,
+    taskId, tasks, tasksLoading, generatedStrategyId, progress,
     submitAnalysis, updateIndicator, removeIndicator, addIndicator,
     setBuyLogic, confirmAndGenerate, fetchTasks, loadTask, clearAnalysis,
     cancelPolling, resumeInProgressTask,
@@ -236,8 +236,8 @@ const AIStrategyBuilder: React.FC = () => {
     },
   ];
 
-  // === State: idle / submitting / failed ===
-  if (status === 'idle' || status === 'submitting' || status === 'failed') {
+  // === Phase: idle / submitting / failed ===
+  if (phase === 'idle' || phase === 'submitting' || phase === 'failed') {
     return (
       <Row gutter={24}>
         <Col span={16}>
@@ -301,7 +301,7 @@ const AIStrategyBuilder: React.FC = () => {
               <Button
                 type="primary"
                 htmlType="submit"
-                loading={status === 'submitting'}
+                loading={phase === 'submitting'}
                 icon={<RobotOutlined />}
                 size="large"
                 block
@@ -324,8 +324,8 @@ const AIStrategyBuilder: React.FC = () => {
     );
   }
 
-  // === State: polling ===
-  if (status === 'polling') {
+  // === Phase: analyzing (DeepSeek 正在分析 K 线) ===
+  if (phase === 'analyzing') {
     return (
       <Row gutter={24}>
         <Col span={16}>
@@ -352,7 +352,44 @@ const AIStrategyBuilder: React.FC = () => {
     );
   }
 
-  // === State: completed - confirm indicators ===
+  // === Phase: generating (DeepSeek 正在生成策略代码) ===
+  if (phase === 'generating') {
+    return (
+      <Row gutter={24}>
+        <Col span={16}>
+          <Card>
+            <div style={{ textAlign: 'center', padding: '80px 0' }}>
+              <Spin size="large" />
+              <Paragraph style={{ marginTop: 24, fontSize: 16 }}>
+                <RobotOutlined style={{ marginRight: 8 }} />
+                DeepSeek 正在生成策略代码...
+              </Paragraph>
+              {progress && progress.total > 0 ? (
+                <Text type="secondary">
+                  正在生成第 {Math.min(progress.completed + 1, progress.total)}/
+                  {progress.total} 个指标的计算代码...
+                </Text>
+              ) : (
+                <Text type="secondary">
+                  正在为每个指标生成计算代码，最长可能需要 2-3 分钟
+                </Text>
+              )}
+            </div>
+          </Card>
+        </Col>
+        <Col span={8}>
+          <TaskHistoryPanel
+            tasks={tasks}
+            loading={tasksLoading}
+            currentTaskId={taskId}
+            onTaskClick={loadTask}
+          />
+        </Col>
+      </Row>
+    );
+  }
+
+  // === Phase: review (确认量化指标) ===
   return (
     <Row gutter={24}>
       <Col span={16}>
@@ -363,7 +400,6 @@ const AIStrategyBuilder: React.FC = () => {
               <Button onClick={clearAnalysis}>返回重新分析</Button>
               <Button
                 type="primary"
-                loading={submitting}
                 icon={<RobotOutlined />}
                 onClick={handleConfirm}
               >
@@ -446,17 +482,6 @@ const AIStrategyBuilder: React.FC = () => {
               )
             }
           />
-
-          {submitting && (
-            <div style={{ textAlign: 'center', padding: '80px 0' }}>
-              <Spin size="large" />
-              <Paragraph style={{ marginTop: 24, fontSize: 16 }}>
-                <RobotOutlined style={{ marginRight: 8 }} />
-                DeepSeek 正在生成策略代码...
-              </Paragraph>
-              <Text type="secondary">正在为每个指标生成计算代码，最长可能需要 2-3 分钟</Text>
-            </div>
-          )}
         </Card>
       </Col>
 
