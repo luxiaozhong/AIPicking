@@ -146,14 +146,20 @@ export default function MACDInteractiveChart({
       },
       graphic: [
         {
-          type: 'text',
-          left: '5%',
-          top: '68%',
-          style: {
-            text: '━ DIF 快线（蓝）  ━ DEA 信号线（橙）  ▊ MACD 柱（红多绿空）  ·· 零轴',
-            fontSize: 10,
-            fill: '#888',
-          },
+          type: 'group',
+          left: '1%',
+          top: '66%',
+          children: [
+            { type: 'rect', shape: { width: 14, height: 2 }, style: { fill: '#1677ff' } },
+            { type: 'text', left: 18, style: { text: 'DIF 快线', fontSize: 10, fill: '#1677ff' } },
+            { type: 'rect', left: 72, shape: { width: 14, height: 2 }, style: { fill: '#fa8c16' } },
+            { type: 'text', left: 90, style: { text: 'DEA 信号线', fontSize: 10, fill: '#fa8c16' } },
+            { type: 'rect', left: 160, shape: { width: 8, height: 8 }, style: { fill: '#ef5350' } },
+            { type: 'rect', left: 168, shape: { width: 8, height: 8 }, style: { fill: '#26a69a' } },
+            { type: 'text', left: 180, style: { text: 'MACD 柱（红多绿空）', fontSize: 10, fill: '#888' } },
+            { type: 'rect', left: 328, shape: { width: 14, height: 1 }, style: { fill: '#999' } },
+            { type: 'text', left: 346, style: { text: '零轴', fontSize: 10, fill: '#999' } },
+          ],
         },
       ],
       grid: [
