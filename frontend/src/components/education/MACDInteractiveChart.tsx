@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 import EChartsWrapper from '@/components/charts/EChartsWrapper';
 import type { KLineItem } from '@/types/stock';
-import { calcMACD, detectCrosses, detectDivergences } from '@/utils/indicators';
+import { calcMA, calcMACD, detectCrosses, detectDivergences, MA_LINES } from '@/utils/indicators';
 
 export interface ChartAnnotation {
   id: string;
@@ -149,6 +149,17 @@ export default function MACDInteractiveChart({
             symbolOffset: [0, '-30%'],
           },
         },
+        // MA 均线叠加
+        ...MA_LINES.map((m) => ({
+          name: m.name,
+          type: 'line' as const,
+          data: calcMA(closes, m.period),
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          smooth: true,
+          lineStyle: { color: m.color, width: 1 },
+          symbol: 'none' as const,
+        })),
         // DIF
         {
           name: `DIF(${fast},${slow})`,

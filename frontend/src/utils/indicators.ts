@@ -12,6 +12,28 @@ export interface DivergencePoint {
   type: 'top' | 'bottom'; // 顶背离 / 底背离
 }
 
+/** MA 均线配置 */
+export const MA_LINES = [
+  { period: 5, name: 'MA5', color: '#757575' },
+  { period: 10, name: 'MA10', color: '#f5a623' },
+  { period: 20, name: 'MA20', color: '#e040fb' },
+  { period: 60, name: 'MA60', color: '#1e88e5' },
+] as const;
+
+/** 计算 SMA（简单移动平均） */
+export function calcMA(data: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += data[i];
+    if (i >= period) {
+      sum -= data[i - period];
+    }
+    result.push(i >= period - 1 ? sum / period : null);
+  }
+  return result;
+}
+
 /** 计算 EMA 序列 */
 export function calcEMA(data: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];

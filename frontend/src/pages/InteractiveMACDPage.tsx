@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Spin, Switch } from 'antd';
+import { Spin, Switch, Radio } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import educationService from '@/services/educationService';
 import { stockService } from '@/services/stockService';
@@ -23,6 +23,15 @@ const InteractiveMACDPage: React.FC = () => {
   const [params, setParams] = useState<MACDParams>({ fast: 12, slow: 26, signal: 9 });
   const [currentStep, setCurrentStep] = useState(1);
   const [showComparison, setShowComparison] = useState(false);
+  const [periodMonths, setPeriodMonths] = useState<number>(6);
+
+  const PERIOD_OPTIONS = [
+    { label: '1月', value: 1 },
+    { label: '3月', value: 3 },
+    { label: '6月', value: 6 },
+    { label: '1年', value: 12 },
+    { label: '2年', value: 24 },
+  ];
 
   // Load case configs
   useEffect(() => {
@@ -67,12 +76,40 @@ const InteractiveMACDPage: React.FC = () => {
     setParams({ ...defaultParams });
     setCurrentStep(1);
     setMode('preset');
+    // 用 periodMonths 调整 start，保持 end 不变
+    const end = new Date(activeCase.date_range.end);
+    const start = new Date(end);
+    start.setMonth(start.getMonth() - periodMonths);
     loadKline(
       activeCase.stock.ts_code,
-      activeCase.date_range.start,
+      start.toISOString().slice(0, 10),
       activeCase.date_range.end
     );
   }, [activeCaseId]);
+
+  // Period change → reload with adjusted range
+  useEffect(() => {
+    if (mode === 'free') {
+      const today = new Date();
+      const start = new Date(today);
+      start.setMonth(start.getMonth() - periodMonths);
+      loadKline(
+        activeCase?.stock.ts_code || '',
+        start.toISOString().slice(0, 10),
+        today.toISOString().slice(0, 10)
+      );
+      return;
+    }
+    if (!activeCase) return;
+    const end = new Date(activeCase.date_range.end);
+    const start = new Date(end);
+    start.setMonth(start.getMonth() - periodMonths);
+    loadKline(
+      activeCase.stock.ts_code,
+      start.toISOString().slice(0, 10),
+      activeCase.date_range.end
+    );
+  }, [periodMonths]);
 
   const currentStepData = activeCase?.steps?.find((s) => s.step === currentStep);
 
@@ -103,12 +140,23 @@ const InteractiveMACDPage: React.FC = () => {
           setParams({ ...defaultParams });
           const today = new Date();
           const start = new Date(today);
-          start.setFullYear(start.getFullYear() - 1);
-          const s = start.toISOString().slice(0, 10);
-          const e = today.toISOString().slice(0, 10);
-          loadKline(code, s, e);
+          start.setMonth(start.getMonth() - periodMonths);
+          loadKline(code, start.toISOString().slice(0, 10), today.toISOString().slice(0, 10));
         }}
       />
+
+      {/* Period Selector */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+        <span style={{ fontSize: 12, color: '#666' }}>📅 K 线周期：</span>
+        <Radio.Group
+          value={periodMonths}
+          onChange={(e) => setPeriodMonths(e.target.value)}
+          size="small"
+          optionType="button"
+          buttonStyle="solid"
+          options={PERIOD_OPTIONS}
+        />
+      </div>
 
       {/* Zone 2: Interactive Chart */}
       {chartLoading ? (
