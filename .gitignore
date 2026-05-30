@@ -63,3 +63,4 @@ htmlcov/
 .superpowers/brainstorm/
 .worktrees/
 .playwright-mcp/
+.claude/worktrees/
