@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Form, Input, DatePicker, Select, Button, Typography, Alert, AutoComplete,
-  Table, InputNumber, Space, Row, Col, Spin, List, Empty, Tag, message,
+  Table, InputNumber, Space, Row, Col, Spin, message,
 } from 'antd';
 import {
   RobotOutlined, PlusOutlined, DeleteOutlined, CheckCircleOutlined,
@@ -10,6 +10,7 @@ import {
 import dayjs from 'dayjs';
 import { useAIStrategyStore } from '@/stores/aiStrategyStore';
 import stockService from '@/services/stockService';
+import TaskHistoryPanel from '@/components/TaskHistoryPanel';
 import type { IndicatorItem } from '@/types/aiStrategy';
 
 const { Title, Text, Paragraph } = Typography;
@@ -312,52 +313,12 @@ const AIStrategyBuilder: React.FC = () => {
         </Col>
 
         <Col span={8}>
-          <Card title="历史分析" size="small">
-            {tasksLoading ? (
-              <Spin style={{ display: 'block', textAlign: 'center' }} />
-            ) : tasks.length === 0 ? (
-              <Empty description="暂无分析记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            ) : (
-              <List
-                size="small"
-                dataSource={tasks}
-                renderItem={(t) => (
-                  <List.Item
-                    style={{
-                      cursor: t.status === 'completed' ? 'pointer' : 'default',
-                    }}
-                    onClick={() => {
-                      if (t.status === 'completed') loadTask(t.task_id);
-                    }}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <Space>
-                          <Text strong>{t.ts_code}</Text>
-                          <Tag
-                            color={
-                              t.status === 'completed'
-                                ? 'green'
-                                : t.status === 'processing'
-                                ? 'blue'
-                                : 'red'
-                            }
-                          >
-                            {t.status === 'completed'
-                              ? '已完成'
-                              : t.status === 'processing'
-                              ? '分析中'
-                              : '失败'}
-                          </Tag>
-                        </Space>
-                      }
-                      description={`${t.date} · ${t.created_at?.slice(0, 16)}`}
-                    />
-                  </List.Item>
-                )}
-              />
-            )}
-          </Card>
+          <TaskHistoryPanel
+            tasks={tasks}
+            loading={tasksLoading}
+            currentTaskId={taskId}
+            onTaskClick={loadTask}
+          />
         </Col>
       </Row>
     );
@@ -380,54 +341,12 @@ const AIStrategyBuilder: React.FC = () => {
           </Card>
         </Col>
         <Col span={8}>
-          <Card title="历史分析" size="small">
-            {tasksLoading ? (
-              <Spin style={{ display: 'block', textAlign: 'center' }} />
-            ) : tasks.length === 0 ? (
-              <Empty description="暂无分析记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            ) : (
-              <List
-                size="small"
-                dataSource={tasks}
-                renderItem={(t) => (
-                  <List.Item
-                    style={{
-                      cursor: t.status === 'completed' ? 'pointer' : 'default',
-                      background:
-                        t.task_id === taskId ? '#f0f5ff' : undefined,
-                    }}
-                    onClick={() => {
-                      if (t.status === 'completed') loadTask(t.task_id);
-                    }}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <Space>
-                          <Text strong>{t.ts_code}</Text>
-                          <Tag
-                            color={
-                              t.status === 'completed'
-                                ? 'green'
-                                : t.status === 'processing'
-                                ? 'blue'
-                                : 'red'
-                            }
-                          >
-                            {t.status === 'completed'
-                              ? '已完成'
-                              : t.status === 'processing'
-                              ? '分析中'
-                              : '失败'}
-                          </Tag>
-                        </Space>
-                      }
-                      description={`${t.date} · ${t.created_at?.slice(0, 16)}`}
-                    />
-                  </List.Item>
-                )}
-              />
-            )}
-          </Card>
+          <TaskHistoryPanel
+            tasks={tasks}
+            loading={tasksLoading}
+            currentTaskId={taskId}
+            onTaskClick={loadTask}
+          />
         </Col>
       </Row>
     );
@@ -542,54 +461,12 @@ const AIStrategyBuilder: React.FC = () => {
       </Col>
 
       <Col span={8}>
-        <Card title="历史分析" size="small">
-          {tasksLoading ? (
-            <Spin style={{ display: 'block', textAlign: 'center' }} />
-          ) : tasks.length === 0 ? (
-            <Empty description="暂无分析记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          ) : (
-            <List
-              size="small"
-              dataSource={tasks}
-              renderItem={(t) => (
-                <List.Item
-                  style={{
-                    cursor: t.status === 'completed' ? 'pointer' : 'default',
-                    background:
-                      t.task_id === taskId ? '#f0f5ff' : undefined,
-                  }}
-                  onClick={() => {
-                    if (t.status === 'completed') loadTask(t.task_id);
-                  }}
-                >
-                  <List.Item.Meta
-                    title={
-                      <Space>
-                        <Text>{t.ts_code}</Text>
-                        <Tag
-                          color={
-                            t.status === 'completed'
-                              ? 'green'
-                              : t.status === 'processing'
-                              ? 'blue'
-                              : 'red'
-                          }
-                        >
-                          {t.status === 'completed'
-                            ? '已完成'
-                            : t.status === 'processing'
-                            ? '分析中'
-                            : '失败'}
-                        </Tag>
-                      </Space>
-                    }
-                    description={`${t.date} · ${t.created_at?.slice(0, 16)}`}
-                  />
-                </List.Item>
-              )}
-            />
-          )}
-        </Card>
+        <TaskHistoryPanel
+          tasks={tasks}
+          loading={tasksLoading}
+          currentTaskId={taskId}
+          onTaskClick={loadTask}
+        />
       </Col>
     </Row>
   );
