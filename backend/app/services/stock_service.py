@@ -1,67 +1,53 @@
-"""股票搜索服务 — 查询外部 SQLite stocks 表"""
-
-import aiosqlite
-
-from ..config import settings
+"""股票搜索服务 — 通过 SQLAlchemy ORM 查询 PostgreSQL"""
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from ..models.stock_tables import Stock, Daily
 
 
 class StockService:
-    """股票搜索（外部数据库只读查询）"""
+    """股票搜索和 K 线数据查询"""
 
     @staticmethod
-    async def search(q: str, limit: int = 10) -> dict:
-        async with aiosqlite.connect(settings.STOCK_DB_PATH) as conn:
-            conn.row_factory = aiosqlite.Row
-            like_q = f"%{q}%"
-            cursor = await conn.execute(
-                """
-                SELECT ts_code, symbol, name, market
-                FROM stocks
-                WHERE ts_code LIKE ? OR name LIKE ?
-                ORDER BY
-                  CASE
-                    WHEN ts_code = ? THEN 0
-                    WHEN name = ? THEN 1
-                    WHEN ts_code LIKE ? THEN 2
-                    ELSE 3
-                  END,
-                  ts_code
-                LIMIT ?
-                """,
-                (like_q, like_q, q, q, f"{q}%", limit),
+    async def search(db: AsyncSession, q: str, limit: int = 10) -> dict:
+        like_q = f"%{q}%"
+        stmt = (
+            select(Stock.ts_code, Stock.symbol, Stock.name, Stock.market)
+            .where(
+                (Stock.ts_code.ilike(like_q)) | (Stock.name.ilike(like_q))
             )
-            rows = await cursor.fetchall()
-            return {
-                "items": [dict(r) for r in rows],
-                "total": len(rows),
+            .order_by(Stock.ts_code)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+        items = [
+            {"ts_code": r.ts_code, "symbol": r.symbol, "name": r.name, "market": r.market}
+            for r in rows
+        ]
+        return {"items": items, "total": len(items)}
+
+    @staticmethod
+    async def get_kline(db: AsyncSession, ts_code: str, days: int = 365) -> dict:
+        stock_stmt = select(Stock.name).where(Stock.ts_code == ts_code)
+        stock_result = await db.execute(stock_stmt)
+        stock_name = stock_result.scalar()
+
+        stmt = (
+            select(
+                Daily.trade_date, Daily.open, Daily.high, Daily.low,
+                Daily.close, Daily.vol, Daily.amount
+            )
+            .where(Daily.ts_code == ts_code)
+            .order_by(Daily.trade_date.desc())
+            .limit(days)
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+        items = [
+            {
+                "trade_date": r.trade_date, "open": r.open, "high": r.high,
+                "low": r.low, "close": r.close, "vol": r.vol, "amount": r.amount,
             }
-
-    @staticmethod
-    async def get_kline(ts_code: str, days: int = 365) -> dict:
-        """获取单只股票的日 K 线数据"""
-        async with aiosqlite.connect(settings.STOCK_DB_PATH) as conn:
-            conn.row_factory = aiosqlite.Row
-
-            stock_cursor = await conn.execute(
-                "SELECT name FROM stocks WHERE ts_code = ?", (ts_code,)
-            )
-            stock = await stock_cursor.fetchone()
-
-            cursor = await conn.execute(
-                """
-                SELECT trade_date, open, high, low, close, vol, amount
-                FROM daily
-                WHERE ts_code = ?
-                ORDER BY trade_date DESC
-                LIMIT ?
-                """,
-                (ts_code, days),
-            )
-            rows = await cursor.fetchall()
-
-        items = [dict(r) for r in reversed(rows)]
-        return {
-            "ts_code": ts_code,
-            "name": stock["name"] if stock else "",
-            "items": items,
-        }
+            for r in reversed(rows)
+        ]
+        return {"ts_code": ts_code, "name": stock_name or "", "items": items}

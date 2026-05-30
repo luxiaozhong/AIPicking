@@ -28,20 +28,6 @@ async def startup_event():
     """应用启动时执行"""
     await init_db()
 
-    # 数据库迁移：为现有 users 表添加 last_login 列
-    from .database import engine
-    async with engine.begin() as conn:
-        try:
-            await conn.run_sync(
-                lambda sync_conn: sync_conn.execute(
-                    __import__("sqlalchemy").text(
-                        "ALTER TABLE users ADD COLUMN last_login DATETIME"
-                    )
-                )
-            )
-        except Exception:
-            pass  # 列已存在则忽略
-
     # 创建默认管理员账号
     from .database import async_session
     from .services.auth_service import seed_default_admin

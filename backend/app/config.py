@@ -22,11 +22,14 @@ class Settings:
         self.APP_NAME = os.getenv("APP_NAME", "AIpicking")
         self.DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 
-        # 数据库配置 — 默认路径相对于 backend 目录
-        _default_db = _env_dir / "data" / "database" / "aipicking.db"
-        self.DATABASE_URL = os.getenv(
-            "DATABASE_URL",
-            f"sqlite+aiosqlite:///{_default_db}"
+        # 数据库配置 — 默认连接本地 PostgreSQL
+        _default_db_url = (
+            "postgresql+asyncpg://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
+        )
+        self.DATABASE_URL = os.getenv("DATABASE_URL", _default_db_url)
+        self.SYNC_DATABASE_URL = os.getenv(
+            "SYNC_DATABASE_URL",
+            self.DATABASE_URL.replace("+asyncpg", "+psycopg2"),
         )
 
         # CORS 配置
@@ -40,12 +43,6 @@ class Settings:
         self.JWT_SECRET_KEY = os.getenv(
             "JWT_SECRET_KEY",
             "aipicking-dev-secret-key-change-in-production"
-        )
-
-        # 股票历史数据库路径
-        self.STOCK_DB_PATH = os.getenv(
-            "STOCK_DB_PATH",
-            "/opt/stock_data/stock_db.sqlite"
         )
 
         # DeepSeek API 配置

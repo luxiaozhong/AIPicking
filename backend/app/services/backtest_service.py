@@ -31,7 +31,7 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super().default(obj)
 from ..utils.validator import StrategyValidator
-from .backtest_engine import BacktestEngine, STOCK_DB_PATH
+from .backtest_engine import BacktestEngine
 
 
 class BacktestService:
@@ -167,7 +167,7 @@ class BacktestService:
         from ..config import settings
 
         # 创建同步 Session（异步任务中无法使用 AsyncSession）
-        engine = create_engine(settings.DATABASE_URL.replace("+aiosqlite", ""))
+        engine = create_engine(settings.SYNC_DATABASE_URL)
         Session = sessionmaker(bind=engine)
 
         with Session() as db:
@@ -463,7 +463,7 @@ class BacktestService:
         from ..config import settings
         from ..models.backtest import BatchBacktestReport
 
-        engine = create_engine(settings.DATABASE_URL.replace("+aiosqlite", ""))
+        engine = create_engine(settings.SYNC_DATABASE_URL)
         Session = sessionmaker(bind=engine)
 
         with Session() as db:
