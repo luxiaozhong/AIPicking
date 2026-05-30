@@ -13,10 +13,14 @@ interface TaskHistoryPanelProps {
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   completed: { color: 'green', label: '已完成' },
+  review: { color: 'blue', label: '待生成' },
   processing: { color: 'blue', label: '分析中' },
   generating: { color: 'blue', label: '生成中' },
   failed: { color: 'red', label: '失败' },
 };
+
+// "review" 和 "completed" 都可以点击查看
+const CLICKABLE_STATUSES = new Set(['completed', 'review']);
 
 const TaskHistoryPanel: React.FC<TaskHistoryPanelProps> = ({
   tasks,
@@ -39,7 +43,7 @@ const TaskHistoryPanel: React.FC<TaskHistoryPanelProps> = ({
               color: 'default',
               label: t.status,
             };
-            const isClickable = t.status === 'completed';
+            const isClickable = CLICKABLE_STATUSES.has(t.status);
             const isActive = t.task_id === currentTaskId;
             return (
               <List.Item

@@ -69,7 +69,10 @@ const AIStrategyBuilder: React.FC = () => {
 
   useEffect(() => {
     if (generatedStrategyId) {
-      navigate(`/strategies/${generatedStrategyId}`);
+      const sid = generatedStrategyId;
+      // 立即清除，防止浏览器回退时再次触发跳转
+      useAIStrategyStore.setState({ generatedStrategyId: null });
+      navigate(`/strategies/${sid}`);
     }
   }, [generatedStrategyId]);
 

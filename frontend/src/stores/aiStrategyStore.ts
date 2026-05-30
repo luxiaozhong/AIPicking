@@ -102,8 +102,8 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
         }
 
         const data = res.data;
-        if (data.status === 'completed') {
-          // 有 strategy_id → 策略已生成；否则 → 分析完成等待确认
+        if (data.status === 'completed' || data.status === 'review') {
+          // 有 strategy_id → 策略已生成；否则 → 分析完成等待确认（review）
           if (data.strategy_id) {
             set({ phase: 'completed', generatedStrategyId: data.strategy_id });
           } else {
@@ -242,7 +242,7 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
     try {
       const res = await aiService.getAnalysisResult(taskId);
       const data = res.data;
-      if (res.code === 0 && data.status === 'completed') {
+      if (res.code === 0 && (data.status === 'completed' || data.status === 'review')) {
         if (data.strategy_id) {
           set({ phase: 'completed', generatedStrategyId: data.strategy_id });
         } else {

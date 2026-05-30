@@ -266,7 +266,7 @@ async def _run_analysis(
         )
 
         task.result_json = json.dumps(result, ensure_ascii=False)
-        task.status = "completed"
+        task.status = "review"  # 指标已提取，待生成策略
         await session.commit()
 
     except asyncio.TimeoutError:
@@ -383,13 +383,14 @@ async def get_analysis_result(
             },
         }
 
+    # review（指标就绪）或 completed（策略已生成）
     result = json.loads(task.result_json or "{}")
     strategy_id = result.get("strategy_id")
     kline_summary = json.loads(task.kline_summary or "{}")
     return {
         "code": 0,
         "data": {
-            "status": "completed",
+            "status": task.status,  # "review" 或 "completed"
             "summary": result.get("summary", ""),
             "indicators": result.get("indicators", []),
             "kline_summary": kline_summary,
@@ -419,7 +420,7 @@ async def confirm_strategy(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status != "completed":
+    if task.status not in ("completed", "review"):
         return {"code": 400, "message": "分析尚未完成", "data": None}
 
     # 标记为生成中
