@@ -12,6 +12,9 @@ import InteractiveMACDPage from '@/pages/InteractiveMACDPage';
 import InteractiveRSIPage from '@/pages/InteractiveRSIPage';
 import InteractiveKDJPage from '@/pages/InteractiveKDJPage';
 import InteractiveBollingerPage from '@/pages/InteractiveBollingerPage';
+import InteractiveMAPage from '@/pages/InteractiveMAPage';
+import InteractiveVolumePage from '@/pages/InteractiveVolumePage';
+import InteractiveWRPage from '@/pages/InteractiveWRPage';
 
 const difficultyColors: Record<string, string> = {
   '入门': 'green',
@@ -28,6 +31,9 @@ const EducationDetailPage: React.FC = () => {
   if (category === 'indicators' && slug === 'rsi') return <InteractiveRSIPage />;
   if (category === 'indicators' && slug === 'kdj') return <InteractiveKDJPage />;
   if (category === 'indicators' && slug === 'bollinger') return <InteractiveBollingerPage />;
+  if (category === 'indicators' && slug === 'ma') return <InteractiveMAPage />;
+  if (category === 'indicators' && slug === 'volume') return <InteractiveVolumePage />;
+  if (category === 'indicators' && slug === 'wr') return <InteractiveWRPage />;
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);

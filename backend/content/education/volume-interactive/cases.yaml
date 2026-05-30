@@ -1,0 +1,11 @@
+default_params: {}
+cases:
+  - id: "maotai-breakout"
+    title: "贵州茅台 · 放量突破"
+    stock: { ts_code: "600519.SH", name: "贵州茅台" }
+    date_range: { start: "2020-01-01", end: "2020-07-31" }
+    annotations: []
+    steps:
+      - { step: 1, title: "量价关系基础", content_file: "vol-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "放量突破识别", content_file: "vol-step-2.md", visible_annotations: [], highlight_params: null }
+      - { step: 3, title: "量价背离信号", content_file: "vol-step-3.md", visible_annotations: [], highlight_params: null }

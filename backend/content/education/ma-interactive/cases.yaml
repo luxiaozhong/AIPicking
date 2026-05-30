@@ -1,0 +1,11 @@
+default_params: { fast: 5, slow: 20 }
+cases:
+  - id: "maotai-golden"
+    title: "贵州茅台 · 均线金叉买入"
+    stock: { ts_code: "600519.SH", name: "贵州茅台" }
+    date_range: { start: "2020-01-01", end: "2020-07-31" }
+    annotations: []
+    steps:
+      - { step: 1, title: "认识均线系统", content_file: "ma-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "观察金叉信号", content_file: "ma-step-2.md", visible_annotations: [], highlight_params: "fast" }
+      - { step: 3, title: "调整均线周期", content_file: "ma-step-3.md", visible_annotations: [], highlight_params: "slow" }

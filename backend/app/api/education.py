@@ -157,3 +157,47 @@ async def get_bollinger_cases(current_user: User = Depends(get_current_user)):
                 except Exception: step["content"] = ""
             else: step["content"] = ""
     return {"code": 0, "message": "ok", "data": data}
+
+MA_CASES_DIR = Path(__file__).resolve().parent.parent.parent / "content" / "education" / "ma-interactive"
+VOLUME_CASES_DIR = Path(__file__).resolve().parent.parent.parent / "content" / "education" / "volume-interactive"
+WR_CASES_DIR = Path(__file__).resolve().parent.parent.parent / "content" / "education" / "wr-interactive"
+
+
+@router.get("/ma-interactive/cases")
+async def get_ma_cases(current_user: User = Depends(get_current_user)):
+    cases_file = MA_CASES_DIR / "cases.yaml"
+    if not cases_file.exists(): return {"code": 1, "message": "案例配置不存在", "data": None}
+    try: data = yaml.safe_load(cases_file.read_text(encoding="utf-8"))
+    except Exception: return {"code": 1, "message": "解析失败", "data": None}
+    for case in data.get("cases", []):
+        for step in case.get("steps", []):
+            fp = MA_CASES_DIR / "steps" / step.get("content_file", "")
+            try: step["content"] = fp.read_text(encoding="utf-8") if fp.exists() else ""
+            except Exception: step["content"] = ""
+    return {"code": 0, "message": "ok", "data": data}
+
+@router.get("/volume-interactive/cases")
+async def get_volume_cases(current_user: User = Depends(get_current_user)):
+    cases_file = VOLUME_CASES_DIR / "cases.yaml"
+    if not cases_file.exists(): return {"code": 1, "message": "案例配置不存在", "data": None}
+    try: data = yaml.safe_load(cases_file.read_text(encoding="utf-8"))
+    except Exception: return {"code": 1, "message": "解析失败", "data": None}
+    for case in data.get("cases", []):
+        for step in case.get("steps", []):
+            fp = VOLUME_CASES_DIR / "steps" / step.get("content_file", "")
+            try: step["content"] = fp.read_text(encoding="utf-8") if fp.exists() else ""
+            except Exception: step["content"] = ""
+    return {"code": 0, "message": "ok", "data": data}
+
+@router.get("/wr-interactive/cases")
+async def get_wr_cases(current_user: User = Depends(get_current_user)):
+    cases_file = WR_CASES_DIR / "cases.yaml"
+    if not cases_file.exists(): return {"code": 1, "message": "案例配置不存在", "data": None}
+    try: data = yaml.safe_load(cases_file.read_text(encoding="utf-8"))
+    except Exception: return {"code": 1, "message": "解析失败", "data": None}
+    for case in data.get("cases", []):
+        for step in case.get("steps", []):
+            fp = WR_CASES_DIR / "steps" / step.get("content_file", "")
+            try: step["content"] = fp.read_text(encoding="utf-8") if fp.exists() else ""
+            except Exception: step["content"] = ""
+    return {"code": 0, "message": "ok", "data": data}

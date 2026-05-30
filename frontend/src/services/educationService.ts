@@ -95,6 +95,19 @@ const educationService = {
     return res.data.data;
   },
 
+  async getMACases(): Promise<MACDCasesData> {
+    const res = await api.get('/education/ma-interactive/cases');
+    return res.data.data;
+  },
+  async getVolumeCases(): Promise<MACDCasesData> {
+    const res = await api.get('/education/volume-interactive/cases');
+    return res.data.data;
+  },
+  async getWRCases(): Promise<MACDCasesData> {
+    const res = await api.get('/education/wr-interactive/cases');
+    return res.data.data;
+  },
+
   async getRSICases(): Promise<MACDCasesData> {
     const res = await api.get('/education/rsi-interactive/cases');
     return res.data.data;

@@ -1,0 +1,11 @@
+default_params: { period: 10 }
+cases:
+  - id: "maotai-overbought"
+    title: "贵州茅台 · WR 超买超卖"
+    stock: { ts_code: "600519.SH", name: "贵州茅台" }
+    date_range: { start: "2020-01-01", end: "2020-07-31" }
+    annotations: []
+    steps:
+      - { step: 1, title: "认识 WR 指标", content_file: "wr-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "识别超买超卖", content_file: "wr-step-2.md", visible_annotations: [], highlight_params: null }
+      - { step: 3, title: "调整周期参数", content_file: "wr-step-3.md", visible_annotations: [], highlight_params: "period" }

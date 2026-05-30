@@ -222,3 +222,25 @@ export function calcBollinger(
   }
   return { middle, upper, lower };
 }
+
+/** 检测均线金叉死叉 */
+export function detectMACrosses(dates: string[], closes: number[], fastPeriod: number, slowPeriod: number): CrossPoint[] {
+  const fastLine = calcMA(closes, fastPeriod);
+  const slowLine = calcMA(closes, slowPeriod);
+  return detectCrosses(dates, fastLine, slowLine);
+}
+
+/** 计算 WR（威廉指标）*/
+export function calcWR(highs: number[], lows: number[], closes: number[], period: number = 10): (number | null)[] {
+  const n = closes.length;
+  const result: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    let h = -Infinity, l = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (highs[j] > h) h = highs[j];
+      if (lows[j] < l) l = lows[j];
+    }
+    result[i] = h === l ? 0 : ((h - closes[i]) / (h - l)) * 100;
+  }
+  return result;
+}
