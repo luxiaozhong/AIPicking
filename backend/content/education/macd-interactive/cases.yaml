@@ -1,0 +1,113 @@
+default_params:
+  fast: 12
+  slow: 26
+  signal: 9
+
+cases:
+  - id: "maotai-golden-cross"
+    title: "贵州茅台 · 金叉买入信号"
+    stock:
+      ts_code: "600519.SH"
+      name: "贵州茅台"
+    date_range:
+      start: "2020-01-01"
+      end: "2020-06-30"
+    annotations:
+      - id: "gc1"
+        date: "2020-03-20"
+        type: "golden_cross"
+        label: "金叉买入"
+        desc: "DIF 从下方上穿 DEA，形成金叉买入信号"
+    steps:
+      - step: 1
+        title: "观察默认 MACD 走势"
+        content_file: "case-1-step-1.md"
+        visible_annotations: []
+        highlight_params: null
+      - step: 2
+        title: "发现金叉信号"
+        content_file: "case-1-step-2.md"
+        visible_annotations: ["gc1"]
+        highlight_params: null
+      - step: 3
+        title: "调整参数观察灵敏度变化"
+        content_file: "case-1-step-3.md"
+        visible_annotations: ["gc1"]
+        highlight_params: "fast"
+      - step: 4
+        title: "对比默认参数与自定义参数"
+        content_file: "case-1-step-4.md"
+        visible_annotations: ["gc1"]
+        highlight_params: null
+
+  - id: "ningde-top-divergence"
+    title: "宁德时代 · 顶背离卖出信号"
+    stock:
+      ts_code: "300750.SZ"
+      name: "宁德时代"
+    date_range:
+      start: "2021-09-01"
+      end: "2022-03-31"
+    annotations:
+      - id: "td1"
+        date: "2021-12-03"
+        type: "top_divergence"
+        label: "顶背离"
+        desc: "股价创新高但 MACD DIF 未创新高，顶背离卖出信号"
+    steps:
+      - step: 1
+        title: "观察股价与 MACD 的关系"
+        content_file: "case-2-step-1.md"
+        visible_annotations: []
+        highlight_params: null
+      - step: 2
+        title: "识别顶背离信号"
+        content_file: "case-2-step-2.md"
+        visible_annotations: ["td1"]
+        highlight_params: null
+      - step: 3
+        title: "调整慢线观察背离变化"
+        content_file: "case-2-step-3.md"
+        visible_annotations: ["td1"]
+        highlight_params: "slow"
+      - step: 4
+        title: "总结背离交易策略"
+        content_file: "case-2-step-4.md"
+        visible_annotations: ["td1"]
+        highlight_params: null
+
+  - id: "byd-bottom-divergence"
+    title: "比亚迪 · 底背离反弹信号"
+    stock:
+      ts_code: "002594.SZ"
+      name: "比亚迪"
+    date_range:
+      start: "2022-03-01"
+      end: "2022-08-31"
+    annotations:
+      - id: "bd1"
+        date: "2022-04-27"
+        type: "bottom_divergence"
+        label: "底背离"
+        desc: "股价创新低但 MACD DIF 未创新低，底背离反弹信号"
+    steps:
+      - step: 1
+        title: "观察下跌趋势中的 MACD"
+        content_file: "case-3-step-1.md"
+        visible_annotations: []
+        highlight_params: null
+      - step: 2
+        title: "发现底背离信号"
+        content_file: "case-3-step-2.md"
+        visible_annotations: ["bd1"]
+        highlight_params: null
+      - step: 3
+        title: "调整快线观察信号灵敏度"
+        content_file: "case-3-step-3.md"
+        visible_annotations: ["bd1"]
+        highlight_params: "fast"
+      - step: 4
+        title: "综合运用 MACD 信号"
+        content_file: "case-3-step-4.md"
+        visible_annotations: ["bd1"]
+        highlight_params: null
