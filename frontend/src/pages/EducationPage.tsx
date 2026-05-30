@@ -81,7 +81,7 @@ const EducationPage: React.FC = () => {
           {filteredArticles.length === 0 ? (
             <Empty description="该分类下暂无文章" style={{ marginTop: 40 }} />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
               {filteredArticles.map((article) => (
                 <Card
                   key={article.slug}

@@ -30,7 +30,7 @@ const InteractiveBollingerPage: React.FC = () => {
   const activeCase = casesData?.cases.find(c => c.id === activeCaseId);
   const defaultParams: any = casesData?.default_params || { period: 20, multiplier: 2 };
   const loadKline = useCallback(async (tsCode: string, start: string, end: string) => {
-    setChartLoading(true); try { const s = start.replace(/-/g, ''); const e = end.replace(/-/g, ''); const days = Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 30; const result = await stockService.getKLine(tsCode, Math.min(days, 365)); const items = result.items || []; setKlineData(items.filter((item: KLineItem) => item.trade_date >= s && item.trade_date <= e)); } finally { setChartLoading(false); }
+    setChartLoading(true); try { const s = start.replace(/-/g, ''); const e = end.replace(/-/g, ''); const days = Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 30; const result = await stockService.getKLine(tsCode, Math.min(days, 365)); const items = result.items || []; const filtered = items.filter((item: KLineItem) => item.trade_date >= s && item.trade_date <= e); setKlineData(filtered.length > 0 ? filtered : items); } finally { setChartLoading(false); }
   }, []);
   useEffect(() => { if (!activeCase) return; setPeriod(defaultParams.period); setMultiplier(defaultParams.multiplier); setCurrentStep(1); setMode('preset'); const e = new Date(activeCase.date_range.end); const s = new Date(e); s.setMonth(s.getMonth() - periodMonths); loadKline(activeCase.stock.ts_code, s.toISOString().slice(0, 10), activeCase.date_range.end); }, [activeCaseId]);
   useEffect(() => {
