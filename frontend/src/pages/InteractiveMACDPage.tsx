@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Spin, Switch, Radio, Collapse } from 'antd';
+import { Spin, Switch, Radio, Collapse, Slider, Button } from 'antd';
+import { UndoOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import educationService from '@/services/educationService';
 import { stockService } from '@/services/stockService';
@@ -9,7 +10,6 @@ import type { MACDParams } from '@/components/education/ParameterPanel';
 import CaseSelector from '@/components/education/CaseSelector';
 import MACDInteractiveChart from '@/components/education/MACDInteractiveChart';
 import StepNavigator from '@/components/education/StepNavigator';
-import ParameterPanel from '@/components/education/ParameterPanel';
 
 const InteractiveMACDPage: React.FC = () => {
   const [casesData, setCasesData] = useState<MACDCasesData | null>(null);
@@ -190,45 +190,39 @@ const InteractiveMACDPage: React.FC = () => {
         />
       )}
 
-      {/* Zone 4: Content + Parameters */}
-      <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
-        {/* Zone 4a: Step Content */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {currentStepData?.content ? (
-            <ReactMarkdown>{currentStepData.content}</ReactMarkdown>
-          ) : mode === 'free' ? (
-            <div style={{ color: '#666', fontSize: 13 }}>
-              <p>
-                🔍 <strong>自由探索模式</strong> — 图上标注了自动检测到的金叉/死叉/背离信号。
-              </p>
-              <p>调节右侧参数观察 MACD 变化，勾选下方对比开关查看与默认参数的差异。</p>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Zone 4b: Parameter Panel */}
-        <div style={{ width: 260, flexShrink: 0 }}>
-          <ParameterPanel
-            params={params}
-            defaultParams={defaultParams}
-            highlightParam={currentStepData?.highlight_params || null}
-            onChange={setParams}
-          />
-          {/* Comparison Toggle */}
-          <div style={{ marginTop: 12, padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
-            <Switch
-              checked={showComparison}
-              onChange={setShowComparison}
-              size="small"
-            />{' '}
-            <span style={{ fontSize: 12, color: '#666' }}>
-              显示默认参数对比线
-            </span>
-            <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
-              虚线 = 默认参数 ({defaultParams.fast}, {defaultParams.slow},{' '}
-              {defaultParams.signal})
-            </div>
+      {/* Zone 4a: Step Content */}
+      <div style={{ marginTop: 16 }}>
+        {currentStepData?.content ? (
+          <ReactMarkdown>{currentStepData.content}</ReactMarkdown>
+        ) : mode === 'free' ? (
+          <div style={{ color: '#666', fontSize: 13 }}>
+            <p>🔍 <strong>自由探索模式</strong> — 图上标注了自动检测到的金叉/死叉/背离信号。调节下方参数观察 MACD 变化，勾选对比开关查看与默认参数的差异。</p>
           </div>
+        ) : null}
+      </div>
+
+      {/* Zone 4b: Parameter Panel — horizontal below content */}
+      <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 'bold', whiteSpace: 'nowrap' }}>🎚️ 参数</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#666' }}>快线</span>
+          <Slider style={{ width: 100, margin: 0 }} min={2} max={50} value={params.fast} onChange={(v) => setParams({ ...params, fast: v })} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{params.fast}</strong>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#666' }}>慢线</span>
+          <Slider style={{ width: 100, margin: 0 }} min={5} max={100} value={params.slow} onChange={(v) => setParams({ ...params, slow: v })} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{params.slow}</strong>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#666' }}>信号线</span>
+          <Slider style={{ width: 100, margin: 0 }} min={2} max={30} value={params.signal} onChange={(v) => setParams({ ...params, signal: v })} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{params.signal}</strong>
+        </div>
+        <Button size="small" icon={<UndoOutlined />} onClick={() => setParams({ ...defaultParams })}>恢复默认</Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderLeft: '1px solid #ddd', paddingLeft: 16 }}>
+          <Switch checked={showComparison} onChange={setShowComparison} size="small" />
+          <span style={{ fontSize: 11, color: '#666' }}>对比 ({defaultParams.fast},{defaultParams.slow},{defaultParams.signal})</span>
         </div>
       </div>
 

@@ -102,31 +102,31 @@ const InteractiveRSIPage: React.FC = () => {
         <RSIInteractiveChart data={klineData} period={period} overbought={overbought} oversold={oversold} height={mode === 'free' ? 450 : 400} />
       )}
       {mode === 'preset' && activeCase?.steps && <StepNavigator steps={activeCase.steps} currentStep={currentStep} onStepChange={setCurrentStep} />}
-      <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {currentStepData?.content ? <ReactMarkdown>{currentStepData.content}</ReactMarkdown> :
-           mode === 'free' ? <div style={{ color: '#666', fontSize: 13 }}><p>🔍 <strong>自由探索模式</strong> — RSI 超买超卖线已在图中标注。</p><p>调节右侧参数观察 RSI 变化。</p></div> : null}
+      {/* Content */}
+      <div style={{ marginTop: 16 }}>
+        {currentStepData?.content ? <ReactMarkdown>{currentStepData.content}</ReactMarkdown> :
+         mode === 'free' ? <div style={{ color: '#666', fontSize: 13 }}><p>🔍 <strong>自由探索模式</strong> — RSI 超买超卖线已在图中标注。调节下方参数观察 RSI 变化。</p></div> : null}
+      </div>
+
+      {/* Parameter Panel — horizontal below content */}
+      <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 'bold', whiteSpace: 'nowrap' }}>🎚️ 参数</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: currentStepData?.highlight_params === 'period' ? '2px solid #1677ff' : '2px solid transparent', borderRadius: 6, padding: '2px 6px' }}>
+          <span style={{ fontSize: 12, color: '#666' }}>周期</span>
+          <Slider style={{ width: 100, margin: 0 }} min={2} max={50} value={period} onChange={setPeriod} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{period}</strong>
         </div>
-        <div style={{ width: 260, flexShrink: 0 }}>
-          <div style={{ padding: '12px 0' }}>
-            <h4 style={{ marginBottom: 16 }}>🎚️ RSI 参数</h4>
-            <div style={{ border: currentStepData?.highlight_params === 'period' ? '2px solid #1677ff' : '2px solid transparent', borderRadius: 6, padding: '4px 8px', transition: 'border 0.3s' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span>计算周期</span><strong>{period}</strong></div>
-              <Slider min={2} max={50} value={period} onChange={setPeriod} />
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span>超买阈值</span><strong>{overbought}</strong></div>
-              <Slider min={60} max={90} value={overbought} onChange={setOverbought} />
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span>超卖阈值</span><strong>{oversold}</strong></div>
-              <Slider min={10} max={40} value={oversold} onChange={setOversold} />
-            </div>
-            <Button icon={<UndoOutlined />} onClick={() => { setPeriod(defaultParams.period); setOverbought(defaultParams.overbought); setOversold(defaultParams.oversold); }} block style={{ marginTop: 16 }}>
-              恢复默认 ({defaultParams.period}, {defaultParams.overbought}, {defaultParams.oversold})
-            </Button>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#666' }}>超买</span>
+          <Slider style={{ width: 100, margin: 0 }} min={60} max={90} value={overbought} onChange={setOverbought} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{overbought}</strong>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#666' }}>超卖</span>
+          <Slider style={{ width: 100, margin: 0 }} min={10} max={40} value={oversold} onChange={setOversold} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{oversold}</strong>
+        </div>
+        <Button size="small" icon={<UndoOutlined />} onClick={() => { setPeriod(defaultParams.period); setOverbought(defaultParams.overbought); setOversold(defaultParams.oversold); }}>恢复默认</Button>
       </div>
       <Collapse style={{ marginTop: 24 }} size="small" items={[{
         key: 'glossary', label: '📖 术语说明', children: (

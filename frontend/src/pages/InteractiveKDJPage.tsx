@@ -80,21 +80,21 @@ const InteractiveKDJPage: React.FC = () => {
       {chartLoading ? <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div> :
         <KDJInteractiveChart data={klineData} period={period} height={mode === 'free' ? 450 : 400} />}
       {mode === 'preset' && activeCase?.steps && <StepNavigator steps={activeCase.steps} currentStep={currentStep} onStepChange={setCurrentStep} />}
-      <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {currentStepData?.content ? <ReactMarkdown>{currentStepData.content}</ReactMarkdown> :
-           mode === 'free' ? <div style={{ color: '#666', fontSize: 13 }}><p>🔍 <strong>自由探索模式</strong> — K/D/J 线及超买超卖区已在图中标注。</p><p>调节右侧参数观察 KDJ 变化。</p></div> : null}
+      {/* Content */}
+      <div style={{ marginTop: 16 }}>
+        {currentStepData?.content ? <ReactMarkdown>{currentStepData.content}</ReactMarkdown> :
+         mode === 'free' ? <div style={{ color: '#666', fontSize: 13 }}><p>🔍 <strong>自由探索模式</strong> — K/D/J 线及超买超卖区已在图中标注。调节下方参数观察 KDJ 变化。</p></div> : null}
+      </div>
+
+      {/* Parameter Panel — horizontal below content */}
+      <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 'bold', whiteSpace: 'nowrap' }}>🎚️ 参数</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: currentStepData?.highlight_params === 'period' ? '2px solid #1677ff' : '2px solid transparent', borderRadius: 6, padding: '2px 6px' }}>
+          <span style={{ fontSize: 12, color: '#666' }}>周期</span>
+          <Slider style={{ width: 100, margin: 0 }} min={2} max={30} value={period} onChange={setPeriod} />
+          <strong style={{ fontSize: 12, minWidth: 20 }}>{period}</strong>
         </div>
-        <div style={{ width: 260, flexShrink: 0 }}>
-          <div style={{ padding: '12px 0' }}>
-            <h4 style={{ marginBottom: 16 }}>🎚️ KDJ 参数</h4>
-            <div style={{ border: currentStepData?.highlight_params === 'period' ? '2px solid #1677ff' : '2px solid transparent', borderRadius: 6, padding: '4px 8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span>计算周期</span><strong>{period}</strong></div>
-              <Slider min={2} max={30} value={period} onChange={setPeriod} />
-            </div>
-            <Button icon={<UndoOutlined />} onClick={() => setPeriod(defaultParams.period)} block style={{ marginTop: 16 }}>恢复默认 ({defaultParams.period})</Button>
-          </div>
-        </div>
+        <Button size="small" icon={<UndoOutlined />} onClick={() => setPeriod(defaultParams.period)}>恢复默认</Button>
       </div>
       <Collapse style={{ marginTop: 24 }} size="small" items={[{
         key: 'glossary', label: '📖 术语说明', children: (
