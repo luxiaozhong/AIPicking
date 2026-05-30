@@ -84,6 +84,11 @@ const educationService = {
     const res = await api.get('/education/macd-interactive/cases');
     return res.data.data;
   },
+
+  async getRSICases(): Promise<MACDCasesData> {
+    const res = await api.get('/education/rsi-interactive/cases');
+    return res.data.data;
+  },
 };
 
 export default educationService;

@@ -80,3 +80,31 @@ async def get_macd_cases(
             else:
                 step["content"] = ""
     return {"code": 0, "message": "ok", "data": data}
+
+RSI_CASES_DIR = Path(__file__).resolve().parent.parent.parent / "content" / "education" / "rsi-interactive"
+
+
+@router.get("/rsi-interactive/cases")
+async def get_rsi_cases(
+    current_user: User = Depends(get_current_user),
+):
+    """获取 RSI 交互学习案例配置"""
+    cases_file = RSI_CASES_DIR / "cases.yaml"
+    if not cases_file.exists():
+        return {"code": 1, "message": "案例配置不存在", "data": None}
+    try:
+        data = yaml.safe_load(cases_file.read_text(encoding="utf-8"))
+    except Exception:
+        return {"code": 1, "message": "案例配置解析失败", "data": None}
+    for case in data.get("cases", []):
+        for step in case.get("steps", []):
+            content_file = step.get("content_file", "")
+            filepath = RSI_CASES_DIR / "steps" / content_file
+            if filepath.exists():
+                try:
+                    step["content"] = filepath.read_text(encoding="utf-8")
+                except Exception:
+                    step["content"] = ""
+            else:
+                step["content"] = ""
+    return {"code": 0, "message": "ok", "data": data}

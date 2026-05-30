@@ -1,0 +1,98 @@
+default_params:
+  period: 14
+  overbought: 70
+  oversold: 30
+
+cases:
+  - id: "maotai-overbought"
+    title: "贵州茅台 · RSI 超买卖出"
+    stock:
+      ts_code: "600519.SH"
+      name: "贵州茅台"
+    date_range:
+      start: "2020-06-01"
+      end: "2020-10-31"
+    annotations:
+      - id: "ob1"
+        date: "2020-07-13"
+        type: "overbought"
+        label: "超买区"
+        desc: "RSI 突破 70 进入超买区，随后回落跌破 70 为卖出信号"
+    steps:
+      - step: 1
+        title: "认识 RSI 指标"
+        content_file: "rsi-case-1-step-1.md"
+        visible_annotations: []
+        highlight_params: null
+      - step: 2
+        title: "识别超买信号"
+        content_file: "rsi-case-1-step-2.md"
+        visible_annotations: ["ob1"]
+        highlight_params: null
+      - step: 3
+        title: "调整周期观察灵敏度"
+        content_file: "rsi-case-1-step-3.md"
+        visible_annotations: ["ob1"]
+        highlight_params: "period"
+
+  - id: "ningde-oversold"
+    title: "宁德时代 · RSI 超卖买入"
+    stock:
+      ts_code: "300750.SZ"
+      name: "宁德时代"
+    date_range:
+      start: "2022-01-01"
+      end: "2022-07-31"
+    annotations:
+      - id: "os1"
+        date: "2022-04-26"
+        type: "oversold"
+        label: "超卖区"
+        desc: "RSI 跌破 30 进入超卖区，随后反弹突破 30 为买入信号"
+    steps:
+      - step: 1
+        title: "认识超卖信号"
+        content_file: "rsi-case-2-step-1.md"
+        visible_annotations: []
+        highlight_params: null
+      - step: 2
+        title: "观察反弹确认"
+        content_file: "rsi-case-2-step-2.md"
+        visible_annotations: ["os1"]
+        highlight_params: null
+      - step: 3
+        title: "调整超卖阈值"
+        content_file: "rsi-case-2-step-3.md"
+        visible_annotations: ["os1"]
+        highlight_params: "period"
+
+  - id: "byd-divergence"
+    title: "比亚迪 · RSI 顶背离"
+    stock:
+      ts_code: "002594.SZ"
+      name: "比亚迪"
+    date_range:
+      start: "2021-06-01"
+      end: "2021-12-31"
+    annotations:
+      - id: "d1"
+        date: "2021-10-26"
+        type: "top_divergence"
+        label: "RSI 顶背离"
+        desc: "股价新高但 RSI 未创新高，上涨动能减弱"
+    steps:
+      - step: 1
+        title: "认识 RSI 背离"
+        content_file: "rsi-case-3-step-1.md"
+        visible_annotations: []
+        highlight_params: null
+      - step: 2
+        title: "对比价格与 RSI"
+        content_file: "rsi-case-3-step-2.md"
+        visible_annotations: ["d1"]
+        highlight_params: null
+      - step: 3
+        title: "调整 RSI 周期"
+        content_file: "rsi-case-3-step-3.md"
+        visible_annotations: ["d1"]
+        highlight_params: "period"

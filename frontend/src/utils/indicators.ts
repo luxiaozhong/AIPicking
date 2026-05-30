@@ -143,3 +143,33 @@ export function detectDivergences(
   }
   return divergences;
 }
+
+/** 计算 RSI（相对强弱指数） */
+export function calcRSI(closes: number[], period: number = 14): (number | null)[] {
+  const result: (number | null)[] = [];
+  if (closes.length < period + 1) {
+    for (let i = 0; i < closes.length; i++) result.push(null);
+    return result;
+  }
+  // 计算涨跌
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? -diff : 0);
+  }
+  // 首个平均值
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  // 前 period 个值
+  for (let i = 0; i <= period; i++) result.push(null);
+  result[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  // 后续使用平滑算法
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+    result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+  }
+  return result;
+}
