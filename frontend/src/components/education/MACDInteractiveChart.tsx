@@ -105,20 +105,42 @@ export default function MACDInteractiveChart({
         trigger: 'axis',
         formatter: (params: any) => {
           if (!Array.isArray(params)) return '';
-          const grid0 = params.filter((p: any) => p.seriesIndex <= 4); // K-line + MA
-          const grid1 = params.filter((p: any) => p.seriesIndex >= 5); // MACD
-          // 判断鼠标在哪个面板
-          const hasGrid1Active = grid1.some((p: any) => p.value != null);
-          const active = hasGrid1Active ? grid1 : grid0;
-          const marker = (p: any) =>
-            p.seriesIndex === 7
-              ? `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.value >= 0 ? '#ef5350' : '#26a69a'};margin-right:4px"></span>`
-              : p.marker;
-          const label = (p: any) =>
-            p.seriesIndex <= 4
-              ? `${marker(p)}${p.seriesName}: ${typeof p.data === 'number' ? p.data.toFixed(2) : '—'}`
-              : `${marker(p)}${p.seriesName}: ${p.value != null ? Number(p.value).toFixed(4) : '—'}`;
-          return `<div style="font-size:12px">${params[0].axisValue}</div>` +
+          const isMACDPanel = (name: string) =>
+            name.startsWith('DIF') || name.startsWith('DEA') || name === 'MACD 柱' || name === '零轴';
+          // Separate by panel
+          const kline = params.filter((p: any) => !isMACDPanel(p.seriesName));
+          const macd = params.filter((p: any) => isMACDPanel(p.seriesName));
+          // Guess which panel the user is hovering based on MACD bar having a real value
+          const macdBar = macd.find((p: any) => p.seriesName === 'MACD 柱');
+          const isMACDHover = macdBar && macdBar.value !== undefined;
+          const active = isMACDHover ? macd : kline;
+
+          const label = (p: any) => {
+            let marker: string;
+            if (p.seriesName === 'MACD 柱') {
+              const v = Number(p.value) || 0;
+              const bg = v >= 0 ? '#ef5350' : '#26a69a';
+              marker = `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:2px;background:${bg}"></span>`;
+            } else if (p.seriesName === 'K 线') {
+              const ohlc = p.data as number[];
+              marker = `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:50%;background:${ohlc?.[1] >= ohlc?.[0] ? '#ef5350' : '#26a69a'}"></span>`;
+            } else {
+              marker = `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:50%;background:${p.color}"></span>`;
+            }
+
+            let val: string;
+            if (p.seriesName === 'K 线') {
+              const o = p.data as number[];
+              val = o ? `开${o[0]?.toFixed(2)} 收${o[1]?.toFixed(2)} 低${o[2]?.toFixed(2)} 高${o[3]?.toFixed(2)}` : '—';
+            } else if (isMACDPanel(p.seriesName)) {
+              val = p.value != null ? Number(p.value).toFixed(4) : '—';
+            } else {
+              val = p.data != null ? Number(p.data).toFixed(2) : '—';
+            }
+            return `${marker} ${p.seriesName}: ${val}`;
+          };
+
+          return `<div style="font-size:12px;line-height:1.6">${params[0].axisValue}</div>` +
             active.map(label).join('<br/>');
         },
       },
