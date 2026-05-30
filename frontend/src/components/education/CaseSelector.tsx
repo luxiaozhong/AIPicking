@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Select, AutoComplete, Button } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import type { MACDCase } from '@/services/educationService';
+import { stockService } from '@/services/stockService';
 
 interface CaseSelectorProps {
   cases: MACDCase[];
@@ -19,8 +20,42 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({
   onSearchStock,
 }) => {
   const [searchValue, setSearchValue] = React.useState('');
+  const [options, setOptions] = React.useState<{ value: string; label: React.ReactNode }[]>([]);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleSearch = () => {
+  const handleSearch = useCallback((val: string) => {
+    setSearchValue(val);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!val.trim()) {
+      setOptions([]);
+      return;
+    }
+    timerRef.current = setTimeout(async () => {
+      try {
+        const items = await stockService.search(val.trim());
+        setOptions(
+          items.map((s) => ({
+            value: s.ts_code,
+            label: (
+              <span>
+                <strong>{s.ts_code}</strong>
+                <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{s.name}</span>
+              </span>
+            ),
+          }))
+        );
+      } catch {
+        setOptions([]);
+      }
+    }, 300);
+  }, []);
+
+  const handleSelect = (value: string) => {
+    setSearchValue(value);
+    onSearchStock(value);
+  };
+
+  const handleClick = () => {
     const trimmed = searchValue.trim();
     if (trimmed) onSearchStock(trimmed);
   };
@@ -41,15 +76,17 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({
       />
       <span style={{ color: '#999', fontSize: 12 }}>或</span>
       <AutoComplete
-        style={{ width: 160 }}
+        style={{ width: 200 }}
         value={searchValue}
-        onChange={setSearchValue}
-        placeholder="输入股票代码..."
+        options={options}
+        onSearch={handleSearch}
+        onSelect={handleSelect}
+        placeholder="输入股票代码或名称..."
       />
       <Button
         type="primary"
         icon={<SearchOutlined />}
-        onClick={handleSearch}
+        onClick={handleClick}
         size="small"
       >
         查看
