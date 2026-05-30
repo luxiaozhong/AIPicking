@@ -90,11 +90,11 @@ export default function MACDInteractiveChart({
       },
     }));
 
-    const legendNames = ['K 线', ...MA_LINES.map((m) => m.name), `DIF(${fast},${slow})`, `DEA(${signal})`, 'MACD 柱'];
+    const klineLegendNames = ['K 线', ...MA_LINES.map((m) => m.name)];
 
     const option: EChartsOption = {
       legend: {
-        data: legendNames,
+        data: klineLegendNames,
         top: 0,
         right: 0,
         textStyle: { fontSize: 10 },
