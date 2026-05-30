@@ -57,6 +57,7 @@ export default function MACDInteractiveChart({
     // Signal annotations from auto-detection
     const crosses = detectCrosses(dates, macd.dif, macd.dea);
     const crossMarkers = crosses.map((c) => ({
+      name: c.type === 'golden' ? '金叉' : '死叉',
       coord: [c.date, data[c.index].high],
       value: c.type === 'golden' ? '金叉' : '死叉',
       symbol: 'pin',
@@ -73,6 +74,7 @@ export default function MACDInteractiveChart({
 
     const divergences = detectDivergences(dates, closes, macd.dif);
     const divergenceMarkers = divergences.map((d) => ({
+      name: d.type === 'top' ? '顶背离' : '底背离',
       coord: [d.date, data[d.index].high],
       value: d.type === 'top' ? '顶背离' : '底背离',
       symbol: 'triangle',
