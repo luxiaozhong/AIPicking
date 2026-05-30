@@ -94,7 +94,11 @@ export default function StrategyList() {
         key: 'name',
         width: 180,
         render: (text: string, record: { id: number }) => (
-          <Button type="link" onClick={() => navigate(`/strategies/${record.id}`)}>
+          <Button
+            type="link"
+            onClick={() => navigate(`/strategies/${record.id}`)}
+            style={{ whiteSpace: 'normal', wordBreak: 'break-word', textAlign: 'left' }}
+          >
             {text}
           </Button>
         ),
@@ -218,10 +222,18 @@ export default function StrategyList() {
         breadcrumb={[{ title: '策略管理', path: '/strategies' }]}
         extra={
           <>
-            <Button icon={<AppstoreOutlined />} onClick={() => navigate('/strategies/builder')}>
+            <Button
+              icon={<AppstoreOutlined />}
+              onClick={() => navigate('/strategies/builder')}
+              data-tour-id="btn-visual-builder"
+            >
               可视化构建
             </Button>
-            <Button icon={<RobotOutlined />} onClick={() => navigate('/strategies/ai-builder')}>
+            <Button
+              icon={<RobotOutlined />}
+              onClick={() => navigate('/strategies/ai-builder')}
+              data-tour-id="btn-ai-builder"
+            >
               AI 参考选股
             </Button>
             <Button type="primary" icon={<UploadOutlined />} onClick={() => navigate('/strategies/upload')}>

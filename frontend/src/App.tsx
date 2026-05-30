@@ -20,6 +20,7 @@ import UserManagement from '@/pages/UserManagement';
 import EducationPage from '@/pages/EducationPage';
 import EducationDetailPage from '@/pages/EducationDetailPage';
 import NotFound from '@/pages/NotFound';
+import OnboardingWalkthrough from '@/components/OnboardingWalkthrough';
 import { useAuthStore } from '@/stores/authStore';
 
 const App: React.FC = () => {
@@ -46,6 +47,7 @@ const App: React.FC = () => {
 
   return (
     <AppLayout>
+      <OnboardingWalkthrough />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />

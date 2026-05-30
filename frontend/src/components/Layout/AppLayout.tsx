@@ -10,9 +10,11 @@ import {
   TeamOutlined,
   LogoutOutlined,
   ReadOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { useThemeStore } from '@/stores/themeStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useOnboardingStore } from '@/stores/onboardingStore';
 
 const { Header, Sider, Content, Footer } = Layout;
 
@@ -26,6 +28,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { token: themeToken } = theme.useToken();
   const { isDark, toggle } = useThemeStore();
   const { user, logout } = useAuthStore();
+  const startTour = useOnboardingStore((s) => s.startTour);
 
   // 登录页不显示布局
   if (location.pathname === '/login') {
@@ -98,6 +101,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       disabled: true,
     },
     { type: 'divider' as const },
+    {
+      key: 'onboarding',
+      icon: <QuestionCircleOutlined />,
+      label: '操作引导',
+      onClick: () => startTour(),
+    },
     {
       key: 'logout',
       icon: <LogoutOutlined />,
