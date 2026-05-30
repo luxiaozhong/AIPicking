@@ -90,6 +90,11 @@ const educationService = {
     return res.data.data;
   },
 
+  async getBollingerCases(): Promise<MACDCasesData> {
+    const res = await api.get('/education/bollinger-interactive/cases');
+    return res.data.data;
+  },
+
   async getRSICases(): Promise<MACDCasesData> {
     const res = await api.get('/education/rsi-interactive/cases');
     return res.data.data;

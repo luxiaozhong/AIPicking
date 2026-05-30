@@ -1,0 +1,29 @@
+default_params: { period: 20, multiplier: 2 }
+cases:
+  - id: "maotai-squeeze"
+    title: "贵州茅台 · 布林带收窄突破"
+    stock: { ts_code: "600519.SH", name: "贵州茅台" }
+    date_range: { start: "2020-01-01", end: "2020-07-31" }
+    annotations: []
+    steps:
+      - { step: 1, title: "认识布林带结构", content_file: "bb-case-1-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "观察收窄信号", content_file: "bb-case-1-step-2.md", visible_annotations: [], highlight_params: null }
+      - { step: 3, title: "调整参数", content_file: "bb-case-1-step-3.md", visible_annotations: [], highlight_params: "period" }
+  - id: "ningde-touch"
+    title: "宁德时代 · 触及上下轨"
+    stock: { ts_code: "300750.SZ", name: "宁德时代" }
+    date_range: { start: "2021-06-01", end: "2021-12-31" }
+    annotations: []
+    steps:
+      - { step: 1, title: "观察触及上轨", content_file: "bb-case-2-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "观察触及下轨", content_file: "bb-case-2-step-2.md", visible_annotations: [], highlight_params: null }
+      - { step: 3, title: "调整标准差", content_file: "bb-case-2-step-3.md", visible_annotations: [], highlight_params: "multiplier" }
+  - id: "byd-volatility"
+    title: "比亚迪 · 波动率变化"
+    stock: { ts_code: "002594.SZ", name: "比亚迪" }
+    date_range: { start: "2022-01-01", end: "2022-09-30" }
+    annotations: []
+    steps:
+      - { step: 1, title: "观察带宽变化", content_file: "bb-case-3-step-1.md", visible_annotations: [], highlight_params: null }
+      - { step: 2, title: "识别波动信号", content_file: "bb-case-3-step-2.md", visible_annotations: [], highlight_params: null }
+      - { step: 3, title: "调整参数验证", content_file: "bb-case-3-step-3.md", visible_annotations: [], highlight_params: "multiplier" }

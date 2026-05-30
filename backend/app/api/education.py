@@ -134,3 +134,26 @@ async def get_kdj_cases(current_user: User = Depends(get_current_user)):
             else:
                 step["content"] = ""
     return {"code": 0, "message": "ok", "data": data}
+
+BOLLINGER_CASES_DIR = Path(__file__).resolve().parent.parent.parent / "content" / "education" / "bollinger-interactive"
+
+
+@router.get("/bollinger-interactive/cases")
+async def get_bollinger_cases(current_user: User = Depends(get_current_user)):
+    """获取布林带交互学习案例配置"""
+    cases_file = BOLLINGER_CASES_DIR / "cases.yaml"
+    if not cases_file.exists():
+        return {"code": 1, "message": "案例配置不存在", "data": None}
+    try:
+        data = yaml.safe_load(cases_file.read_text(encoding="utf-8"))
+    except Exception:
+        return {"code": 1, "message": "案例配置解析失败", "data": None}
+    for case in data.get("cases", []):
+        for step in case.get("steps", []):
+            content_file = step.get("content_file", "")
+            filepath = BOLLINGER_CASES_DIR / "steps" / content_file
+            if filepath.exists():
+                try: step["content"] = filepath.read_text(encoding="utf-8")
+                except Exception: step["content"] = ""
+            else: step["content"] = ""
+    return {"code": 0, "message": "ok", "data": data}

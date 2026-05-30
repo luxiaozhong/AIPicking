@@ -203,3 +203,22 @@ export function calcKDJ(
   }
   return { k, d, j };
 }
+
+/** 计算布林带 */
+export function calcBollinger(
+  closes: number[], period: number = 20, multiplier: number = 2
+): { middle: (number | null)[]; upper: (number | null)[]; lower: (number | null)[] } {
+  const n = closes.length;
+  const middle = calcMA(closes, period);
+  const upper: (number | null)[] = new Array(n).fill(null);
+  const lower: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    if (middle[i] === null) continue;
+    let sumSq = 0;
+    for (let j = i - period + 1; j <= i; j++) sumSq += Math.pow(closes[j] - middle[i]!, 2);
+    const std = Math.sqrt(sumSq / period);
+    upper[i] = middle[i]! + multiplier * std;
+    lower[i] = middle[i]! - multiplier * std;
+  }
+  return { middle, upper, lower };
+}

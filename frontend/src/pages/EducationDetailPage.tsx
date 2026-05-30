@@ -11,6 +11,7 @@ import type { Article } from '@/services/educationService';
 import InteractiveMACDPage from '@/pages/InteractiveMACDPage';
 import InteractiveRSIPage from '@/pages/InteractiveRSIPage';
 import InteractiveKDJPage from '@/pages/InteractiveKDJPage';
+import InteractiveBollingerPage from '@/pages/InteractiveBollingerPage';
 
 const difficultyColors: Record<string, string> = {
   '入门': 'green',
@@ -26,6 +27,7 @@ const EducationDetailPage: React.FC = () => {
   if (category === 'indicators' && slug === 'macd') return <InteractiveMACDPage />;
   if (category === 'indicators' && slug === 'rsi') return <InteractiveRSIPage />;
   if (category === 'indicators' && slug === 'kdj') return <InteractiveKDJPage />;
+  if (category === 'indicators' && slug === 'bollinger') return <InteractiveBollingerPage />;
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
