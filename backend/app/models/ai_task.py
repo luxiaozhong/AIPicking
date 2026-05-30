@@ -19,8 +19,8 @@ class AIStrategyTask(BaseModel):
         String(20), default="stock_reference", index=True
     )  # "stock_reference" | "natural_language"
     status = Column(String(20), default="processing", index=True)
-    ts_code = Column(String(20), nullable=False)
-    date = Column(String(10), nullable=False)
+    ts_code = Column(String(20), nullable=True)  # stock_reference 必填，natural_language 为空
+    date = Column(String(10), nullable=True)      # stock_reference 必填，natural_language 为空
     model = Column(String(50), default="deepseek-chat")
     user_prompt = Column(Text)
     kline_summary = Column(Text)  # JSON

@@ -739,6 +739,7 @@ async def _run_nl_analysis(task_id: str, prompt: str, model: str):
     from ..services.ai_nl_service import analyze_natural_language as _nl_analyze
 
     session = await async_session()
+    session.expire_on_commit = False
     try:
         task = (
             await session.execute(
@@ -758,13 +759,13 @@ async def _run_nl_analysis(task_id: str, prompt: str, model: str):
     except asyncio.TimeoutError:
         print(f"[NL Analysis TIMEOUT] task={task_id}")
         try:
-            task = (
+            task_tmp = (
                 await session.execute(
                     select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
                 )
             ).scalar_one()
-            task.status = "failed"
-            task.error_message = "分析超时（120 秒），请重试"
+            task_tmp.status = "failed"
+            task_tmp.error_message = "分析超时（120 秒），请重试"
             await session.commit()
         except Exception as inner_e:
             print(f"[NL Analysis ERROR] Failed to update timeout: {inner_e}")
@@ -774,13 +775,13 @@ async def _run_nl_analysis(task_id: str, prompt: str, model: str):
         print(f"[NL Analysis ERROR] task={task_id}: {err_msg}")
         traceback.print_exc()
         try:
-            task = (
+            task_tmp = (
                 await session.execute(
                     select(AIStrategyTask).where(AIStrategyTask.task_id == task_id)
                 )
             ).scalar_one()
-            task.status = "failed"
-            task.error_message = err_msg
+            task_tmp.status = "failed"
+            task_tmp.error_message = err_msg
             await session.commit()
         except Exception as inner_e:
             print(f"[NL Analysis ERROR] Failed to update task: {inner_e}")
@@ -864,9 +865,19 @@ async def stream_nl_analysis(
         seen_status = None
         seen_progress = None
         while True:
-            await db.refresh(task)
-            status = task.status
-            result_json = task.result_json
+            # Re-query task each loop to avoid session expiration issues
+            task_fresh = (
+                await db.execute(
+                    select(AIStrategyTask).where(
+                        AIStrategyTask.task_id == task_id,
+                        AIStrategyTask.user_id == current_user.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if not task_fresh:
+                break
+            status = task_fresh.status
+            result_json = task_fresh.result_json
 
             progress = None
             if result_json:
@@ -878,13 +889,13 @@ async def stream_nl_analysis(
 
             if status in ("review", "completed", "failed"):
                 if status != seen_status:
-                    payload = _build_nl_sse_payload(task, status, result_json, progress)
+                    payload = _build_nl_sse_payload(task_fresh, status, result_json, progress)
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
 
             if status != seen_status or (progress and progress != seen_progress):
-                payload = _build_nl_sse_payload(task, status, result_json, progress)
+                payload = _build_nl_sse_payload(task_fresh, status, result_json, progress)
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 seen_status = status
                 seen_progress = progress
