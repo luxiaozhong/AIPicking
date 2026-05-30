@@ -81,11 +81,18 @@ const TaskHistoryPanel: React.FC<TaskHistoryPanelProps> = ({
                 <List.Item.Meta
                   title={
                     <Space>
-                      <Text strong>{t.ts_code}</Text>
+                      <Text strong>{t.ts_code || 'AI 助手'}</Text>
+                      {t.task_type === 'natural_language' && (
+                        <Tag color="purple" style={{ fontSize: 10 }}>NL</Tag>
+                      )}
                       <Tag color={cfg.color}>{cfg.label}</Tag>
                     </Space>
                   }
-                  description={`${t.date} · ${(t.created_at || '').slice(0, 16)}`}
+                  description={
+                    t.task_type === 'natural_language'
+                      ? `${(t.user_prompt || '').slice(0, 40)} · ${(t.created_at || '').slice(0, 16)}`
+                      : `${t.date || ''} · ${(t.created_at || '').slice(0, 16)}`
+                  }
                 />
               </List.Item>
             );

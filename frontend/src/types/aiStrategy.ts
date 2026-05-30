@@ -40,6 +40,8 @@ export interface AnalysisTask {
   date: string;
   status: string;
   created_at: string;
+  task_type?: string;
+  user_prompt?: string;
 }
 
 export interface ConfirmStrategyResponse {

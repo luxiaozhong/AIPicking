@@ -334,6 +334,8 @@ async def list_tasks(
                     "ts_code": t.ts_code,
                     "date": t.date,
                     "status": t.status,
+                    "task_type": t.task_type or "stock_reference",
+                    "user_prompt": t.user_prompt or "",
                     "created_at": t.created_at.isoformat()
                     if t.created_at
                     else "",
@@ -716,6 +718,7 @@ async def analyze_nl(
         user_id=current_user.id,
         status="processing",
         task_type="natural_language",
+        ts_code=f"AI助手: {req.prompt.strip()[:14]}",
         user_prompt=req.prompt.strip(),
         model=req.model,
     )
