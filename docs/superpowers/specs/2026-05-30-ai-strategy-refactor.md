@@ -1,6 +1,6 @@
 # AI 参考选股 重构 Spec
 
-> 版本: 1.0 | 日期: 2026-05-30 | 状态: 实施中
+> 版本: 1.1 | 日期: 2026-05-30 | 状态: P0/P1 已完成，P2 规划中
 
 ## 背景
 
@@ -12,18 +12,63 @@ AI 参考选股功能经过初始迭代后，存在以下架构问题：
 4. **轮询脆弱**：固定间隔无退避，无超时上限，页面离开后状态残留
 5. **异常处理不足**：DeepSeek 调用无重试，错误静默吞掉，后台任务 fire-and-forget
 
-## 目标
+## 已完成 (P0/P1)
 
-- 改善用户体验：策略生成可见进度，正确的状态提示
-- 提升可靠性：DeepSeek 调用重试，状态机不再进入非法组合
-- 减少技术债：消除重复代码，明确状态语义
-- 降低延迟：策略生成从串行改为并行
+| 优先级 | 项目 | Commit | 说明 |
+|--------|------|--------|------|
+| P0 (a) | 策略生成并行化 + 进度反馈 | `29ed85f` | Semaphore 5 并发，progress 字段实时写入 DB |
+| P0 (b) | 状态机 status→phase 单一枚举 | `f0ba518` | `idle → submitting → analyzing → review → generating → completed` |
+| P1 (c) | 轮询改 SSE | `b8423de` | `GET /ai/analyze-stock/{task_id}/stream` 实时推送 |
+| P1 (d) | TaskHistoryPanel 共享组件 | `6665f89` | 消除三处重复，统一加载/空态/列表渲染 |
+| P1 (e) | DeepSeek 重试 | `7417c12` | tenacity 指数退避 3 次 (2s→4s→8s) |
+| 额外 | 后台任务超时控制 | `7417c12` | 分析 120s / 生成 300s |
+| 额外 | 浏览器回退死循环 | `75f8b72` | 跳转后清除 generatedStrategyId |
+| 额外 | review/completed 状态区分 | `75f8b72` | 指标就绪 vs 策略已生成 |
 
-## 非目标
+## 非目标（本次）
 
-- 不引入 Celery/Redis 任务队列（P2 长期改进，本次不做）
-- 不引入 XState 状态机库（P2 长期改进，本次不做）
-- 不改变策略生成的业务逻辑（相似度匹配算法不变）
+无 — 所有 P0/P1 项目均已完成。
+
+## 未来规划 (P2 — 长期改进)
+
+以下改进已评估但暂不实施，待时机成熟时推进。
+
+### P2 (f): 任务模型独立化
+
+**当前问题：** `AIStrategyTask.result_json` 是一个 Text 字段塞入整个 JSON（50+ 指标 + 进度 + 策略结果），无法结构化查询。
+
+**改进方向：**
+- `indicator_values` 单独建表，每个指标一行，含 `task_id`, `name`, `category`, `value`, `params`
+- `generation_progress` 字段独立到任务表
+- 支持跨任务查询："过去哪些股票 RSI 低于 30？"
+- 支持指标值历史趋势分析
+
+**预估工作量：** 2-3 天
+
+### P2 (g): 任务队列 (Celery / ARQ)
+
+**当前问题：** `asyncio.create_task` fire-and-forget，服务器重启丢失任务，无重试机制，无水平扩展。
+
+**改进方向：**
+- Celery + Redis 或 ARQ（纯 async）替换 `asyncio.create_task`
+- 任务持久化，重启自动恢复
+- 内置重试 + 超时
+- Worker 进程独立管理
+- 支持多 worker 水平扩展
+
+**预估工作量：** 2-3 天
+
+### P2 (h): 前端状态机 (XState)
+
+**当前问题：** Zustand store 中手动管理 `phase` 枚举 + `taskId` + `progress` 组合，虽然已大幅改善，但仍缺少形式化的状态转换约束。
+
+**改进方向：**
+- 用 XState 5 定义正式状态图
+- 明确合法状态转换，防止非法组合
+- 可视化状态图，便于理解和调试
+- 自动生成 TypeScript 类型
+
+**预估工作量：** 1-2 天
 
 ## 详细设计
 
