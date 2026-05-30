@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import educationService from '@/services/educationService';
 import type { Article } from '@/services/educationService';
+import InteractiveMACDPage from '@/pages/InteractiveMACDPage';
 
 const difficultyColors: Record<string, string> = {
   '入门': 'green',
@@ -18,6 +19,11 @@ const difficultyColors: Record<string, string> = {
 const EducationDetailPage: React.FC = () => {
   const { category, slug } = useParams<{ category: string; slug: string }>();
   const navigate = useNavigate();
+
+  // 当访问 MACD 文章时，渲染交互学习页面
+  if (category === 'indicators' && slug === 'macd') {
+    return <InteractiveMACDPage />;
+  }
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
