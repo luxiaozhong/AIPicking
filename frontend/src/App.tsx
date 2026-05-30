@@ -4,7 +4,7 @@ import { Spin } from 'antd';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/Auth/ProtectedRoute';
 import StrategyList from '@/pages/StrategyList';
-import StrategyUpload from '@/pages/StrategyUpload';
+
 import StrategyEdit from '@/pages/StrategyEdit';
 import StrategyDetail from '@/pages/StrategyDetail';
 import StrategyBuilder from '@/pages/StrategyBuilder';
@@ -83,14 +83,7 @@ const App: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/strategies/upload"
-          element={
-            <ProtectedRoute>
-              <StrategyUpload />
-            </ProtectedRoute>
-          }
-        />
+
         <Route
           path="/strategies/new"
           element={

@@ -17,11 +17,6 @@ export const strategyService = {
     return response.data;
   },
 
-  // 上传策略脚本（兼容旧版）
-  async uploadStrategy(formData: FormData) {
-    const response = await api.post<StrategyUploadResponse>('/strategies/upload', formData);
-    return response.data;
-  },
 
   // 通过因子配置创建策略（新方式）
   async createStrategyWithFactors(data: {

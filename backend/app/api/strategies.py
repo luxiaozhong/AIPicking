@@ -49,19 +49,6 @@ async def list_strategies(
     }
 
 
-@router.post("/upload", response_model=StrategyUploadResponse)
-async def upload_strategy(
-    file: UploadFile = File(..., description="策略脚本文件（.py）"),
-    name: Optional[str] = Form(None, description="策略名称（可选，默认使用文件名）"),
-    description: Optional[str] = Form(None, description="策略描述（可选）"),
-    tags: Optional[str] = Form(None, description="标签（逗号分隔，可选）"),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """上传策略脚本"""
-    return await StrategyService.upload_strategy(
-        db, file, name, description, tags, user_id=current_user.id
-    )
 
 
 # ========== 注意：/code 路由必须放在 /{strategy_id} 之前，否则会被错误匹配 ==========

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Button, Table, Input, Select, Space, message, Popconfirm } from 'antd';
-import { UploadOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useStrategyStore } from '@/stores/strategyStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -235,9 +235,6 @@ export default function StrategyList() {
               data-tour-id="btn-ai-builder"
             >
               AI 参考选股
-            </Button>
-            <Button type="primary" icon={<UploadOutlined />} onClick={() => navigate('/strategies/upload')}>
-              上传策略
             </Button>
           </>
         }

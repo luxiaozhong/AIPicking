@@ -4,11 +4,11 @@ import os
 import json
 import shutil
 from typing import List, Optional, Tuple, Dict, Any
-from datetime import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException, status, UploadFile, Form
+from fastapi import HTTPException, status, UploadFile
 from pathlib import Path
 
 from ..models import Strategy
@@ -93,109 +93,6 @@ class StrategyService:
             )
 
         return strategy
-    
-    @staticmethod
-    async def upload_strategy(
-        db: AsyncSession,
-        file: UploadFile,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        tags: Optional[str] = None,
-        user_id: Optional[int] = None,
-    ) -> dict:
-        """上传策略脚本"""
-        # 1. 检查文件类型
-        if not file.filename.endswith('.py'):
-            return {
-                "code": 40001,
-                "message": "策略脚本必须是 .py 文件",
-                "errors": ["文件类型错误"]
-            }
-        
-        # 2. 读取文件内容
-        content = await file.read()
-        code = content.decode('utf-8')
-        
-        # 3. 验证策略代码
-        # 3.1 语法检查
-        is_valid, error_msg = StrategyValidator.validate(code)
-        if not is_valid:
-            return {
-                "code": 40002,
-                "message": "策略脚本验证失败（语法错误）",
-                "errors": [error_msg]
-            }
-        
-        # 3.2 必需函数检查
-        has_required, missing_funcs = StrategyValidator.check_required_functions(code)
-        if not has_required:
-            return {
-                "code": 40003,
-                "message": "策略脚本缺少必需函数",
-                "errors": [f"缺少必需函数: {func}" for func in missing_funcs]
-            }
-        
-        # 4. 检查名称是否已存在
-        strategy_name = name if name else file.filename.replace('.py', '')
-        result = await db.execute(
-            select(Strategy).where(Strategy.name == strategy_name)
-        )
-        if result.scalar_one_or_none():
-            return {
-                "code": 40004,
-                "message": f"Strategy with name '{strategy_name}' already exists"
-            }
-        
-        # 5. 保存策略脚本文件
-        # 确保目录存在
-        os.makedirs(StrategyService.STRATEGY_DIR, exist_ok=True)
-        
-        # 生成文件名（ID 未知，先保存到临时文件）
-        temp_file_path = os.path.join(StrategyService.STRATEGY_DIR, f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py")
-        with open(temp_file_path, 'w', encoding='utf-8') as f:
-            f.write(code)
-        
-        # 6. 创建策略记录
-        db_strategy = Strategy(
-            name=strategy_name,
-            description=description,
-            file_path=temp_file_path,  # 临时路径，稍后更新
-            params_schema=None,  # 可选，从代码中提取
-            tags=tags if tags else None,
-            status="active",
-            version=1,
-            user_id=user_id,
-        )
-        
-        db.add(db_strategy)
-        await db.commit()
-        await db.refresh(db_strategy)
-        
-        # 7. 更新文件路径（使用策略 ID）
-        final_file_path = os.path.join(
-            StrategyService.STRATEGY_DIR,
-            f"{db_strategy.id}_{strategy_name}.py"
-        )
-        os.rename(temp_file_path, final_file_path)
-        db_strategy.file_path = final_file_path
-        
-        await db.commit()
-        await db.refresh(db_strategy)
-        
-        return {
-            "code": 0,
-            "message": "策略上传成功",
-            "data": {
-                "id": db_strategy.id,
-                "name": db_strategy.name,
-                "description": db_strategy.description,
-                "file_path": db_strategy.file_path,
-                "status": db_strategy.status,
-                "created_at": db_strategy.created_at,
-                "updated_at": db_strategy.updated_at,
-                "version": db_strategy.version
-            }
-        }
     
     @staticmethod
     async def get_strategy_code(file_path: str) -> str:

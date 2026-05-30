@@ -23,7 +23,6 @@ interface StrategyState {
     status?: string;
   }) => Promise<void>;
 
-  uploadStrategy: (file: File, name?: string, description?: string, tags?: string) => Promise<StrategyUploadResponse>;
 
   fetchStrategy: (id: number) => Promise<void>;
 
@@ -85,43 +84,6 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
     }
   },
 
-  // 上传策略
-  uploadStrategy: async (file: File, name?: string, description?: string, tags?: string) => {
-    set({ loading: true, error: null });
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      if (name) {
-        formData.append('name', name);
-      }
-
-      if (description) {
-        formData.append('description', description);
-      }
-
-      if (tags) {
-        formData.append('tags', tags);
-      }
-
-      const response = await strategyService.uploadStrategy(formData);
-
-      set({ loading: false });
-
-      // 刷新列表
-      get().fetchStrategies();
-
-      return response;
-    } catch (error: any) {
-      set({
-        loading: false,
-        error: error.response?.data?.message || '上传策略失败',
-      });
-
-      throw error;
-    }
-  },
 
   // 获取策略详情
   fetchStrategy: async (id: number) => {
