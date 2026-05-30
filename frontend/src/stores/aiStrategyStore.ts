@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { aiService } from '@/services/aiService';
+import { aiService, connectAnalysisSSE } from '@/services/aiService';
 import strategyService from '@/services/strategyService';
 import type {
   AnalysisPhase,
@@ -9,19 +9,14 @@ import type {
   IndicatorItem,
 } from '@/types/aiStrategy';
 
-// 模块级变量存储 poll timer，避免 Zustand 不支持 ref 的问题
-let _pollTimer: ReturnType<typeof setTimeout> | null = null;
+// 模块级变量存储 SSE 连接 abort 函数
+let _sseAbort: (() => void) | null = null;
 
-function _clearPollTimer() {
-  if (_pollTimer) {
-    clearTimeout(_pollTimer);
-    _pollTimer = null;
+function _disconnectSSE() {
+  if (_sseAbort) {
+    _sseAbort();
+    _sseAbort = null;
   }
-}
-
-function _schedulePoll(fn: () => void, delay: number) {
-  _clearPollTimer();
-  _pollTimer = setTimeout(fn, delay);
 }
 
 interface AIStrategyState {
@@ -45,7 +40,7 @@ interface AIStrategyState {
     model: string,
     prompt: string
   ) => Promise<void>;
-  pollResult: (taskId: string) => Promise<void>;
+  connectAndListen: (taskId: string) => void;
   cancelPolling: () => void;
   clearAnalysis: () => void;
   updateIndicator: (index: number, field: string, value: unknown) => void;
@@ -82,7 +77,7 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
       if (res.code === 0) {
         const taskId = res.data.task_id;
         set({ taskId, phase: 'analyzing' });
-        get().pollResult(taskId);
+        get().connectAndListen(taskId);
       } else {
         set({ phase: 'idle', error: res.message || '提交失败' });
       }
@@ -92,56 +87,67 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
     }
   },
 
-  pollResult: async (taskId: string) => {
-    const poll = async () => {
-      try {
-        const res = await aiService.getAnalysisResult(taskId);
-        if (res.code !== 0) {
-          _schedulePoll(poll, 2000);
-          return;
-        }
+  /** 通过 SSE 连接监听任务状态变化 */
+  connectAndListen: (taskId: string) => {
+    _disconnectSSE();
 
-        const data = res.data;
-        if (data.status === 'completed' || data.status === 'review') {
-          // 有 strategy_id → 策略已生成；否则 → 分析完成等待确认（review）
+    _sseAbort = connectAnalysisSSE(
+      taskId,
+      // onEvent: 收到 SSE 推送
+      (data) => {
+        const status = data.status as string;
+
+        if (status === 'completed' || status === 'review') {
           if (data.strategy_id) {
-            set({ phase: 'completed', generatedStrategyId: data.strategy_id });
+            set({
+              phase: 'completed',
+              generatedStrategyId: data.strategy_id as number,
+              progress: null,
+            });
           } else {
             set({
               phase: 'review',
-              result: data,
-              indicators: data.indicators || [],
+              result: data as unknown as AnalysisResult,
+              indicators: (data.indicators as IndicatorItem[]) || [],
               error: null,
+              progress: null,
             });
           }
+          _disconnectSSE();
           get().fetchTasks();
-        } else if (data.status === 'failed') {
-          set({ phase: 'failed', error: data.error_message || '分析失败' });
+        } else if (status === 'failed') {
+          set({
+            phase: 'failed',
+            error: (data.error_message as string) || '任务执行失败',
+            progress: null,
+          });
+          _disconnectSSE();
           get().fetchTasks();
-        } else if (data.status === 'generating') {
-          // 正在生成策略代码，更新进度
+        } else if (status === 'generating') {
           set({ phase: 'generating' });
           if (data.progress) {
-            set({ progress: data.progress });
+            set({ progress: data.progress as GenerationProgress });
           }
-          _schedulePoll(poll, 2000);
-        } else {
-          // processing → 仍在分析 K 线
-          _schedulePoll(poll, 2000);
         }
-      } catch {
-        _schedulePoll(poll, 3000);
-      }
-    };
-    _schedulePoll(poll, 2000);
+        // processing → 保持 analyzing 状态，不做额外操作
+      },
+      // onDone: SSE 流结束
+      () => {
+        _disconnectSSE();
+      },
+      // onError: 连接异常
+      () => {
+        _disconnectSSE();
+      },
+    );
   },
 
   cancelPolling: () => {
-    _clearPollTimer();
+    _disconnectSSE();
   },
 
   clearAnalysis: () => {
-    _clearPollTimer();
+    _disconnectSSE();
     set({
       taskId: null,
       phase: 'idle',
@@ -180,34 +186,47 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
 
       if (res.code === 0 && res.data.status === 'generating') {
         return new Promise<number>((resolve, reject) => {
-          const poll = async () => {
-            try {
-              const r = await aiService.getAnalysisResult(taskId!);
-              // 更新进度
-              if (r.data.progress) {
-                set({ progress: r.data.progress });
+          _disconnectSSE();
+
+          _sseAbort = connectAnalysisSSE(
+            taskId!,
+            (data) => {
+              const status = data.status as string;
+
+              if (data.progress) {
+                set({ progress: data.progress as GenerationProgress });
               }
-              if (r.data.status === 'completed' && r.data.strategy_id) {
-                const sid = r.data.strategy_id;
-                try {
-                  await strategyService.getStrategy(sid);
-                } catch {
-                  _schedulePoll(poll, 1500);
-                  return;
-                }
-                set({ generatedStrategyId: sid, phase: 'completed', progress: null });
-                resolve(sid);
-              } else if (r.data.status === 'failed') {
-                set({ phase: 'failed', error: r.data.error_message || '生成失败', progress: null });
-                reject(new Error(r.data.error_message));
-              } else {
-                _schedulePoll(poll, 2000);
+
+              if (
+                (status === 'completed' || status === 'review') &&
+                data.strategy_id
+              ) {
+                const sid = data.strategy_id as number;
+                // 验证策略存在
+                strategyService.getStrategy(sid).then(() => {
+                  set({
+                    generatedStrategyId: sid,
+                    phase: 'completed',
+                    progress: null,
+                  });
+                  _disconnectSSE();
+                  resolve(sid);
+                }).catch(() => {
+                  // 策略尚未就绪，SSE 会继续推送
+                });
+              } else if (status === 'failed') {
+                set({
+                  phase: 'failed',
+                  error: (data.error_message as string) || '生成失败',
+                  progress: null,
+                });
+                _disconnectSSE();
+                reject(new Error(data.error_message as string));
               }
-            } catch {
-              _schedulePoll(poll, 3000);
-            }
-          };
-          _schedulePoll(poll, 2000);
+            },
+            () => { _disconnectSSE(); },
+            () => { _disconnectSSE(); },
+          );
         });
       } else if (res.code === 0 && res.data.strategy_id) {
         set({ generatedStrategyId: res.data.strategy_id, phase: 'completed' });
@@ -231,7 +250,7 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
         set({ tasks: res.data.tasks || [] });
       }
     } catch {
-      // silent — 非关键路径，静默失败
+      // silent — 非关键路径
     } finally {
       set({ tasksLoading: false });
     }
@@ -257,10 +276,10 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
         set({ phase: 'failed', error: data.error_message });
       } else if (data.status === 'processing') {
         set({ phase: 'analyzing' });
-        get().pollResult(taskId);
+        get().connectAndListen(taskId);
       } else if (data.status === 'generating') {
         set({ phase: 'generating', progress: data.progress || null });
-        get().pollResult(taskId);
+        get().connectAndListen(taskId);
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
@@ -269,8 +288,6 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
   },
 
   resumeInProgressTask: async () => {
-    // 页面加载时，检查是否有进行中的任务并自动恢复轮询；
-    // 同时处理导航离开后 store 残留的 stale 状态。
     try {
       const res = await aiService.getTasks();
       if (res.code !== 0) return;
@@ -283,19 +300,17 @@ export const useAIStrategyStore = create<AIStrategyState>((set, get) => ({
         return;
       }
 
-      // 没有进行中的任务，但如果 store 仍处于 analyzing/generating
-      // 且 taskId 对应的任务已 completed，自动加载结果（恢复 stale 状态）
+      // 恢复 stale 状态
       const { taskId, phase } = get();
       if ((phase === 'analyzing' || phase === 'generating') && taskId) {
         const currentTask = tasks.find((t) => t.task_id === taskId);
-        if (currentTask?.status === 'completed') {
+        if (currentTask?.status === 'completed' || currentTask?.status === 'review') {
           get().loadTask(taskId);
         } else if (currentTask?.status === 'failed') {
           set({ phase: 'failed', error: '任务执行失败' });
         } else if (!currentTask) {
           set({ phase: 'idle', taskId: null, error: null });
         }
-        // 如果仍在 processing/generating，上面的 inProgress 已处理
       }
     } catch {
       // silent

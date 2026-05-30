@@ -9,6 +9,7 @@ import asyncio
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -399,6 +400,104 @@ async def get_analysis_result(
             "failed_factors": result.get("failed_factors", []),
         },
     }
+
+
+@router.get("/ai/analyze-stock/{task_id}/stream")
+async def stream_analysis(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE 实时推送任务状态和进度"""
+    # 验证任务存在且属于当前用户
+    task = (
+        await db.execute(
+            select(AIStrategyTask).where(
+                AIStrategyTask.task_id == task_id,
+                AIStrategyTask.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    async def event_stream():
+        seen_status = None
+        seen_progress = None
+        while True:
+            # 每次循环刷新 DB 状态
+            await db.refresh(task)
+            status = task.status
+            result_json = task.result_json
+
+            # 只在状态或进度变化时推送
+            progress = None
+            if result_json:
+                try:
+                    data = json.loads(result_json)
+                    progress = data.get("progress")
+                except Exception:
+                    pass
+
+            # 终端状态：推送最终结果后结束
+            if status in ("review", "completed", "failed"):
+                if status != seen_status:
+                    payload = _build_status_payload(task, status, result_json, progress)
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+
+            # 非终端状态：状态或进度变化时推送
+            if status != seen_status or (
+                progress and progress != seen_progress
+            ):
+                payload = _build_status_payload(task, status, result_json, progress)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                seen_status = status
+                seen_progress = progress
+
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _build_status_payload(
+    task: AIStrategyTask, status: str, result_json, progress
+) -> dict:
+    """构建 SSE 推送的 JSON payload"""
+    payload: dict = {"status": status, "ts_code": task.ts_code, "date": task.date}
+
+    if status == "generating" and progress:
+        payload["progress"] = progress
+
+    if status in ("review", "completed") and result_json:
+        try:
+            data = json.loads(result_json)
+            if status == "review":
+                payload["summary"] = data.get("summary", "")
+                payload["indicators"] = data.get("indicators", [])
+            if data.get("strategy_id"):
+                payload["strategy_id"] = data["strategy_id"]
+            if data.get("generated_factors"):
+                payload["generated_factors"] = data["generated_factors"]
+            if data.get("failed_factors"):
+                payload["failed_factors"] = data["failed_factors"]
+        except Exception:
+            pass
+
+    if status == "failed":
+        payload["error_message"] = task.error_message
+
+    return payload
 
 
 @router.post("/ai/confirm-strategy")
