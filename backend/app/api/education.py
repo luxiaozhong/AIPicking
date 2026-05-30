@@ -1,5 +1,7 @@
 """教育内容 API"""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query, HTTPException
 
 from ..middleware.auth import get_current_user
@@ -20,7 +22,7 @@ async def get_categories(
 
 @router.get("/articles")
 async def get_articles(
-    category: str | None = Query(None, description="按分类筛选"),
+    category: Optional[str] = Query(None, description="按分类筛选"),
     current_user: User = Depends(get_current_user),
 ):
     """获取文章列表（不含正文）"""
