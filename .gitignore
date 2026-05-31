@@ -64,3 +64,6 @@ htmlcov/
 .worktrees/
 .playwright-mcp/
 .claude/worktrees/
+
+# 测试生成的临时策略文件
+backend/app/strategies/examples/auto_*.py

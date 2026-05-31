@@ -1,40 +1,73 @@
 """策略相关测试"""
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.models.base import Base
+from app.models.user import User
+from app.database import get_db
+from app.middleware.auth import get_current_user
+from app.services.auth_service import create_user as create_user_svc
 
 
 # 测试数据库 URL
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
+# 最小有效 factor_config
+VALID_FACTOR_CONFIG = {
+    "buy_signals": {
+        "logic": "AND",
+        "factors": [{"factor_id": "momentum_rsi", "params": {"period": 14}}]
+    },
+    "sell_signals": {
+        "logic": "AND",
+        "factors": []
+    },
+    "risk_factors": []
+}
 
-@pytest.fixture(scope="module")
+
+@pytest_asyncio.fixture
 async def test_db():
-    """创建测试数据库"""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=True)
-    
-    # 创建表
+    """创建测试数据库，覆盖 get_db 和 get_current_user"""
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    # 创建测试会话
-    TestingSessionLocal = sessionmaker(
+
+    session_factory = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
-    
-    yield TestingSessionLocal
-    
-    # 清理
+
+    async with session_factory() as session:
+        # 创建测试管理员用户
+        user = await create_user_svc(session, "testadmin", "test123", role="admin")
+        await session.commit()
+        await session.refresh(user)
+
+        # 覆盖依赖
+        async def override_get_db():
+            yield session
+
+        async def override_get_current_user():
+            return user
+
+        app.dependency_overrides[get_db] = override_get_db
+        app.dependency_overrides[get_current_user] = override_get_current_user
+
+        yield session
+
+        app.dependency_overrides.clear()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(test_db):
     """创建测试客户端"""
     transport = ASGITransport(app=app)
@@ -50,12 +83,12 @@ async def test_create_strategy(client):
         json={
             "name": "测试策略",
             "description": "这是一个测试策略",
-            "code": "class TestStrategy:\n    pass",
-            "tags": ["测试", "均线"]
+            "tags": ["测试", "均线"],
+            "factor_config": VALID_FACTOR_CONFIG
         }
     )
-    
-    assert response.status_code == 201
+
+    assert response.status_code == 200
     data = response.json()
     assert data["code"] == 0
     assert data["data"]["name"] == "测试策略"
@@ -70,18 +103,19 @@ async def test_get_strategies_list(client):
         "/api/v1/strategies",
         json={
             "name": "测试策略2",
-            "code": "class TestStrategy2:\n    pass"
+            "tags": ["测试"],
+            "factor_config": VALID_FACTOR_CONFIG
         }
     )
-    
+
     # 获取列表
     response = await client.get("/api/v1/strategies")
-    
+
     assert response.status_code == 200
     data = response.json()
-    assert data["code"] == 0
-    assert "items" in data["data"]
-    assert len(data["data"]["items"]) >= 1
+    assert "items" in data
+    assert len(data["items"]) >= 1
+    assert "total" in data
 
 
 @pytest.mark.asyncio
@@ -92,14 +126,15 @@ async def test_get_strategy_detail(client):
         "/api/v1/strategies",
         json={
             "name": "测试策略3",
-            "code": "class TestStrategy3:\n    pass"
+            "tags": ["测试"],
+            "factor_config": VALID_FACTOR_CONFIG
         }
     )
     strategy_id = create_response.json()["data"]["id"]
-    
+
     # 获取详情
     response = await client.get(f"/api/v1/strategies/{strategy_id}")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["code"] == 0
@@ -114,11 +149,12 @@ async def test_update_strategy(client):
         "/api/v1/strategies",
         json={
             "name": "测试策略4",
-            "code": "class TestStrategy4:\n    pass"
+            "tags": ["测试"],
+            "factor_config": VALID_FACTOR_CONFIG
         }
     )
     strategy_id = create_response.json()["data"]["id"]
-    
+
     # 更新策略
     response = await client.put(
         f"/api/v1/strategies/{strategy_id}",
@@ -127,12 +163,11 @@ async def test_update_strategy(client):
             "description": "更新后的描述"
         }
     )
-    
+
     assert response.status_code == 200
     data = response.json()
-    assert data["code"] == 0
-    assert data["data"]["name"] == "更新后的策略名称"
-    assert data["data"]["version"] == 2  # 版本应该增加
+    assert data["name"] == "更新后的策略名称"
+    assert data["version"] == 2  # 版本应该增加
 
 
 @pytest.mark.asyncio
@@ -143,17 +178,13 @@ async def test_delete_strategy(client):
         "/api/v1/strategies",
         json={
             "name": "测试策略5",
-            "code": "class TestStrategy5:\n    pass"
+            "tags": ["测试"],
+            "factor_config": VALID_FACTOR_CONFIG
         }
     )
     strategy_id = create_response.json()["data"]["id"]
-    
+
     # 删除策略
     response = await client.delete(f"/api/v1/strategies/{strategy_id}")
-    
+
     assert response.status_code == 204
-    
-    # 确认策略已被软删除（状态变为 deleted）
-    get_response = await client.get(f"/api/v1/strategies/{strategy_id}")
-    # 这里应该返回 404 或者状态为 deleted
-    # 取决于实现逻辑
