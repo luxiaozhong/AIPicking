@@ -412,15 +412,6 @@ export default function StrategyBuilder() {
     <>
       <PageHeader
         title={isEditMode ? `编辑策略：${strategyName || '加载中...'}` : '可视化构建策略'}
-        breadcrumb={[
-          { title: '策略管理', path: '/strategies' },
-          ...(isEditMode
-            ? [
-                { title: strategyName || '策略详情', path: editId ? `/strategies/${editId}` : '/strategies' },
-                { title: '编辑' },
-              ]
-            : [{ title: '可视化构建' }]),
-        ]}
       />
 
       {!isEditMode && (
