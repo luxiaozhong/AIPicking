@@ -149,7 +149,7 @@ export default function StrategyBuilder() {
     setStrategyName(currentStrategy.name);
     setStrategyDesc(currentStrategy.description || '');
 
-    const fc = currentStrategy.factor_config as FactorConfig;
+    const fc = currentStrategy.factor_config as unknown as FactorConfig;
     if (fc) {
       setFactorConfig({
         ...emptyFactorConfig(),
