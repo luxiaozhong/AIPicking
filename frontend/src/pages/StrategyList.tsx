@@ -275,7 +275,6 @@ export default function StrategyList() {
     <>
       <PageHeader
         title="策略管理"
-        breadcrumb={[{ title: '策略管理', path: '/strategies' }]}
         extra={
           <>
             <Button icon={<AppstoreOutlined />} onClick={() => navigate('/strategies/builder')} data-tour-id="btn-visual-builder">

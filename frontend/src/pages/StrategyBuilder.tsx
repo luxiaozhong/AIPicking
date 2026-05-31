@@ -424,40 +424,50 @@ export default function StrategyBuilder() {
       />
 
       {!isEditMode && (
-        <Tabs
-          activeKey={builderMode}
-          onChange={(key) => {
-            if (builderMode === 'similarity' && key === 'signal') {
-              Modal.confirm({
-                title: '切换模式',
-                content: '切换将丢失当前 AI 分析结果，是否继续？',
-                onOk: () => setBuilderMode(key as BuilderMode),
-              });
-            } else {
-              setBuilderMode(key as BuilderMode);
-            }
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #f6ffed 0%, #e6f4ff 100%)',
+            borderRadius: 10,
+            padding: '4px 16px',
+            marginBottom: 16,
+            border: '1px solid #e8e8e8',
           }}
-          items={[
-            {
-              key: 'signal',
-              label: (
-                <span>
-                  <CaretUpOutlined style={{ color: '#52c41a' }} /> 信号策略
-                </span>
-              ),
-            },
-            {
-              key: 'similarity',
-              label: (
-                <span>
-                  <ThunderboltOutlined style={{ color: '#1677ff' }} /> 相似度匹配{' '}
-                  <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', marginLeft: 2 }}>NEW</Tag>
-                </span>
-              ),
-            },
-          ]}
-          style={{ marginBottom: 16 }}
-        />
+        >
+          <Tabs
+            activeKey={builderMode}
+            onChange={(key) => {
+              if (builderMode === 'similarity' && key === 'signal') {
+                Modal.confirm({
+                  title: '切换模式',
+                  content: '切换将丢失当前 AI 分析结果，是否继续？',
+                  onOk: () => setBuilderMode(key as BuilderMode),
+                });
+              } else {
+                setBuilderMode(key as BuilderMode);
+              }
+            }}
+            items={[
+              {
+                key: 'signal',
+                label: (
+                  <span style={{ fontSize: 14 }}>
+                    <CaretUpOutlined style={{ color: '#52c41a' }} /> 信号策略
+                  </span>
+                ),
+              },
+              {
+                key: 'similarity',
+                label: (
+                  <span style={{ fontSize: 14 }}>
+                    <ThunderboltOutlined style={{ color: '#1677ff' }} /> 相似度匹配{' '}
+                    <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', marginLeft: 2 }}>NEW</Tag>
+                  </span>
+                ),
+              },
+            ]}
+            style={{ marginBottom: 0 }}
+          />
+        </div>
       )}
 
       {builderMode === 'similarity' && !isEditMode ? (

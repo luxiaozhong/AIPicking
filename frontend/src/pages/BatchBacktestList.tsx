@@ -100,7 +100,6 @@ export default function BatchBacktestList() {
     <>
       <PageHeader
         title="批量回测"
-        breadcrumb={[{ title: '批量回测' }]}
       />
 
       <Card>

@@ -137,7 +137,6 @@ export default function BacktestList() {
     <>
       <PageHeader
         title="回测报告"
-        breadcrumb={[{ title: '回测报告', path: '/backtests' }]}
         extra={
           <Button icon={<ReloadOutlined />} onClick={() => fetchBacktests()}>
             刷新
