@@ -14,6 +14,7 @@ from .stock_tables import (
     DailyHotStock, DailyHotTheme, DailyNorthboundFlow,
     DailyDragonTiger, DailyDragonTigerSeat,
 )
+from .financial import FinancialReport, DailyValuation
 
 # 设置关系
 Strategy.backtest_reports = relationship("BacktestReport", back_populates="strategy", cascade="all, delete-orphan")
