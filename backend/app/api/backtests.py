@@ -32,8 +32,15 @@ async def list_backtests(
         user_id=current_user.id, user_role=current_user.role
     )
 
+    items = []
+    for bt in backtests:
+        item = BacktestResponse.model_validate(bt).model_dump()
+        item["user_name"] = bt.owner.username if bt.owner else None
+        item["user_id"] = bt.user_id
+        items.append(item)
+
     return {
-        "items": backtests,
+        "items": items,
         "total": total,
         "page": page,
         "limit": limit
@@ -57,9 +64,13 @@ async def get_backtest(
     current_user: User = Depends(get_current_user),
 ):
     """获取单个回测报告详情"""
-    return await BacktestService.get_backtest(
+    backtest = await BacktestService.get_backtest(
         db, backtest_id, user_id=current_user.id, user_role=current_user.role
     )
+    backtest_data = BacktestResponse.model_validate(backtest).model_dump()
+    backtest_data["user_name"] = backtest.owner.username if backtest.owner else None
+    backtest_data["user_id"] = backtest.user_id
+    return backtest_data
 
 
 @router.delete("/{backtest_id}", status_code=204)

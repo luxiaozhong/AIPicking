@@ -48,8 +48,13 @@ class BacktestService:
         user_id: Optional[int] = None,
         user_role: str = "user",
     ) -> Tuple[List[BacktestReport], int]:
-        """获取回测报告列表"""
-        query = select(BacktestReport).options(selectinload(BacktestReport.strategy))
+        """获取回测报告列表 — 可见性由关联策略的 is_published 决定"""
+        from ..models.strategy import Strategy
+
+        query = select(BacktestReport).options(
+            selectinload(BacktestReport.strategy),
+            selectinload(BacktestReport.owner),
+        ).join(Strategy, BacktestReport.strategy_id == Strategy.id)
 
         if strategy_id:
             query = query.where(BacktestReport.strategy_id == strategy_id)
@@ -58,10 +63,16 @@ class BacktestService:
         if stock:
             query = query.where(BacktestReport.recommendations.like(f"%{stock}%"))
         if user_role != "admin":
-            query = query.where(BacktestReport.user_id == user_id)
+            # 自己的回测 OR 关联策略已发布的回测
+            query = query.where(
+                (BacktestReport.user_id == user_id) |
+                (Strategy.is_published == True)
+            )
 
         # 计算总数
-        count_query = select(func.count()).select_from(BacktestReport)
+        count_query = select(func.count()).select_from(BacktestReport).join(
+            Strategy, BacktestReport.strategy_id == Strategy.id
+        )
         if strategy_id:
             count_query = count_query.where(BacktestReport.strategy_id == strategy_id)
         if status:
@@ -69,7 +80,10 @@ class BacktestService:
         if stock:
             count_query = count_query.where(BacktestReport.recommendations.like(f"%{stock}%"))
         if user_role != "admin":
-            count_query = count_query.where(BacktestReport.user_id == user_id)
+            count_query = count_query.where(
+                (BacktestReport.user_id == user_id) |
+                (Strategy.is_published == True)
+            )
         total_result = await db.execute(count_query)
         total = total_result.scalar()
 
@@ -88,24 +102,28 @@ class BacktestService:
         backtest_id: int,
         user_id: Optional[int] = None,
         user_role: str = "user",
-    ) -> Optional[BacktestReport]:
+    ) -> BacktestReport:
         """获取单个回测报告"""
+        from ..models.strategy import Strategy
+
         result = await db.execute(
-            select(BacktestReport).options(selectinload(BacktestReport.strategy)).where(BacktestReport.id == backtest_id)
+            select(BacktestReport)
+            .options(
+                selectinload(BacktestReport.strategy),
+                selectinload(BacktestReport.owner),
+            )
+            .join(Strategy, BacktestReport.strategy_id == Strategy.id)
+            .where(BacktestReport.id == backtest_id)
         )
         backtest = result.scalar_one_or_none()
 
         if not backtest:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Backtest with id {backtest_id} not found"
-            )
+            raise HTTPException(status_code=404, detail="回测报告不存在")
 
-        if user_role != "admin" and backtest.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="无权访问此回测报告"
-            )
+        # 权限检查
+        is_owner = backtest.user_id == user_id
+        if user_role != "admin" and not is_owner and not backtest.strategy.is_published:
+            raise HTTPException(status_code=403, detail="无权访问此回测报告")
 
         return backtest
 
