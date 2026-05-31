@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Input, Button, Card, Select, message, Modal, Space, Empty, Tabs, Tag } from 'antd';
+import { Input, Button, Card, Select, message, Modal, Space, Tabs, Tag } from 'antd';
 import {
   RobotOutlined,
   CaretUpOutlined,
@@ -388,12 +388,20 @@ export default function StrategyBuilder() {
             {/* Right: Strategy Canvas */}
             <div style={{ flex: 1, minWidth: 0 }}>
               {/* ── 选股条件（Tier 2 pre_filter）── */}
-              <Card
-                title={
-                  <Space>
-                    <FilterOutlined style={{ color: '#1677ff' }} />
-                    选股条件
-                    {selConditions.length > 0 && (
+              {selConditions.length === 0 ? (
+                <div style={{
+                  marginBottom: 16, padding: '8px 12px',
+                  border: '1px dashed #d9d9d9', borderRadius: 8,
+                  color: '#999', fontSize: 13,
+                }}>
+                  <Space><FilterOutlined style={{ color: '#1677ff' }} />选股条件 — 从左侧点击添加</Space>
+                </div>
+              ) : (
+                <Card
+                  title={
+                    <Space>
+                      <FilterOutlined style={{ color: '#1677ff' }} />
+                      选股条件
                       <Select
                         size="small"
                         value={factorConfig.selection_conditions.logic}
@@ -412,18 +420,10 @@ export default function StrategyBuilder() {
                           { label: 'OR', value: 'OR' },
                         ]}
                       />
-                    )}
-                    <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px' }}>
-                      NEW
-                    </Tag>
-                  </Space>
-                }
-                style={{ marginBottom: 16 }}
-                styles={selConditions.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
-              >
-                {selConditions.length === 0 ? (
-                  <Empty description="从左侧选股条件点击添加预筛选条件（龙虎榜、板块资金流等）" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                ) : (
+                    </Space>
+                  }
+                  style={{ marginBottom: 16 }}
+                >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {selConditions.map((item, i) => {
                       const meta = getCondMeta(item.condition_id);
@@ -439,26 +439,28 @@ export default function StrategyBuilder() {
                       );
                     })}
                   </div>
-                )}
-              </Card>
+                </Card>
+              )}
 
               {/* ── 评分修正（Tier 2 score_modifier）── */}
-              <Card
-                title={
-                  <Space>
-                    <RiseOutlined style={{ color: '#fa8c16' }} />
-                    评分修正
-                    <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px' }}>
-                      NEW
-                    </Tag>
-                  </Space>
-                }
-                style={{ marginBottom: 16 }}
-                styles={scorers.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
-              >
-                {scorers.length === 0 ? (
-                  <Empty description="从左侧评分修正点击添加上分条件（龙虎榜加分、板块排名加分等）" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                ) : (
+              {scorers.length === 0 ? (
+                <div style={{
+                  marginBottom: 16, padding: '8px 12px',
+                  border: '1px dashed #d9d9d9', borderRadius: 8,
+                  color: '#999', fontSize: 13,
+                }}>
+                  <Space><RiseOutlined style={{ color: '#fa8c16' }} />评分修正 — 从左侧点击添加</Space>
+                </div>
+              ) : (
+                <Card
+                  title={
+                    <Space>
+                      <RiseOutlined style={{ color: '#fa8c16' }} />
+                      评分修正
+                    </Space>
+                  }
+                  style={{ marginBottom: 16 }}
+                >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {scorers.map((item, i) => {
                       const meta = getCondMeta(item.condition_id);
@@ -474,38 +476,43 @@ export default function StrategyBuilder() {
                       );
                     })}
                   </div>
-                )}
-              </Card>
+                </Card>
+              )}
 
               {/* Buy Signals */}
-              <Card
-                title={
-                  <Space>
-                    <CaretUpOutlined style={{ color: '#52c41a' }} />
-                    买入信号因子
-                    <Select
-                      size="small"
-                      value={factorConfig.buy_signals.logic}
-                      style={{ width: 80 }}
-                      onChange={(v) =>
-                        setFactorConfig((prev) => ({
-                          ...prev,
-                          buy_signals: { ...prev.buy_signals, logic: v },
-                        }))
-                      }
-                      options={[
-                        { label: 'AND', value: 'AND' },
-                        { label: 'OR', value: 'OR' },
-                      ]}
-                    />
-                  </Space>
-                }
-                style={{ marginBottom: 16 }}
-                styles={factorConfig.buy_signals.factors.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
-              >
-                {factorConfig.buy_signals.factors.length === 0 ? (
-                  <Empty description="从左侧因子库点击添加买入因子" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                ) : (
+              {factorConfig.buy_signals.factors.length === 0 ? (
+                <div style={{
+                  marginBottom: 16, padding: '8px 12px',
+                  border: '1px dashed #d9d9d9', borderRadius: 8,
+                  color: '#999', fontSize: 13,
+                }}>
+                  <Space><CaretUpOutlined style={{ color: '#52c41a' }} />买入信号因子 — 从左侧点击添加</Space>
+                </div>
+              ) : (
+                <Card
+                  title={
+                    <Space>
+                      <CaretUpOutlined style={{ color: '#52c41a' }} />
+                      买入信号因子
+                      <Select
+                        size="small"
+                        value={factorConfig.buy_signals.logic}
+                        style={{ width: 80 }}
+                        onChange={(v) =>
+                          setFactorConfig((prev) => ({
+                            ...prev,
+                            buy_signals: { ...prev.buy_signals, logic: v },
+                          }))
+                        }
+                        options={[
+                          { label: 'AND', value: 'AND' },
+                          { label: 'OR', value: 'OR' },
+                        ]}
+                      />
+                    </Space>
+                  }
+                  style={{ marginBottom: 16 }}
+                >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {factorConfig.buy_signals.factors.map((item, i) => {
                       const meta = getMeta(item.factor_id);
@@ -522,23 +529,28 @@ export default function StrategyBuilder() {
                       );
                     })}
                   </div>
-                )}
-              </Card>
+                </Card>
+              )}
 
               {/* Sell Signals */}
-              <Card
-                title={
-                  <Space>
-                    <CaretDownOutlined style={{ color: '#ff4d4f' }} />
-                    卖出信号因子
-                  </Space>
-                }
-                style={{ marginBottom: 16 }}
-                styles={factorConfig.sell_signals.factors.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
-              >
-                {factorConfig.sell_signals.factors.length === 0 ? (
-                  <Empty description="从左侧因子库点击添加卖出因子" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                ) : (
+              {factorConfig.sell_signals.factors.length === 0 ? (
+                <div style={{
+                  marginBottom: 16, padding: '8px 12px',
+                  border: '1px dashed #d9d9d9', borderRadius: 8,
+                  color: '#999', fontSize: 13,
+                }}>
+                  <Space><CaretDownOutlined style={{ color: '#ff4d4f' }} />卖出信号因子 — 从左侧点击添加</Space>
+                </div>
+              ) : (
+                <Card
+                  title={
+                    <Space>
+                      <CaretDownOutlined style={{ color: '#ff4d4f' }} />
+                      卖出信号因子
+                    </Space>
+                  }
+                  style={{ marginBottom: 16 }}
+                >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {factorConfig.sell_signals.factors.map((item, i) => {
                       const meta = getMeta(item.factor_id);
@@ -555,22 +567,27 @@ export default function StrategyBuilder() {
                       );
                     })}
                   </div>
-                )}
-              </Card>
+                </Card>
+              )}
 
               {/* Risk Factors */}
-              <Card
-                title={
-                  <Space>
-                    <SafetyOutlined style={{ color: '#faad14' }} />
-                    风控因子（始终生效）
-                  </Space>
-                }
-                styles={factorConfig.risk_factors.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
-              >
-                {factorConfig.risk_factors.length === 0 ? (
-                  <Empty description="从左侧因子库点击添加风控因子" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                ) : (
+              {factorConfig.risk_factors.length === 0 ? (
+                <div style={{
+                  marginBottom: 16, padding: '8px 12px',
+                  border: '1px dashed #d9d9d9', borderRadius: 8,
+                  color: '#999', fontSize: 13,
+                }}>
+                  <Space><SafetyOutlined style={{ color: '#faad14' }} />风控因子（始终生效）— 从左侧点击添加</Space>
+                </div>
+              ) : (
+                <Card
+                  title={
+                    <Space>
+                      <SafetyOutlined style={{ color: '#faad14' }} />
+                      风控因子（始终生效）
+                    </Space>
+                  }
+                >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {factorConfig.risk_factors.map((item, i) => {
                       const meta = getMeta(item.factor_id);
@@ -587,8 +604,8 @@ export default function StrategyBuilder() {
                       );
                     })}
                   </div>
-                )}
-              </Card>
+                </Card>
+              )}
             </div>
           </div>
         </>
