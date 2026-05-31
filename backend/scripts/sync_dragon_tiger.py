@@ -216,6 +216,52 @@ def fetch_daily_list(date_str: str) -> list[dict]:
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# 抓取：单只股票买卖席位明细
+# ═════════════════════════════════════════════════════════════════════════
+
+def fetch_seats(stock_code: str, date_str: str, seat_type: str) -> list[dict]:
+    """
+    拉取单只股票龙虎榜买卖席位明细。
+    seat_type: 'buy' → RPT_BILLBOARD_DAILYDETAILSBUY
+               'sell' → RPT_BILLBOARD_DAILYDETAILSSELL
+    返回 TOP5 席位列表
+    """
+    report_map = {
+        "buy": "RPT_BILLBOARD_DAILYDETAILSBUY",
+        "sell": "RPT_BILLBOARD_DAILYDETAILSSELL",
+    }
+    report_name = report_map.get(seat_type)
+    if not report_name:
+        return []
+
+    sort_col = "BUY" if seat_type == "buy" else "SELL"
+    filter_str = f"(TRADE_DATE='{date_str}')(SECURITY_CODE=\"{stock_code}\")"
+    data = eastmoney_datacenter(
+        report_name,
+        filter_str=filter_str,
+        page_size=10,
+        sort_columns=sort_col,
+        sort_types="-1",
+    )
+
+    seats = []
+    for i, row in enumerate(data[:5]):
+        seat_code = str(row.get("OPERATEDEPT_CODE", ""))
+        seats.append({
+            "stock_code": stock_code,
+            "seat_type": seat_type,
+            "rank": i + 1,
+            "seat_name": row.get("OPERATEDEPT_NAME", ""),
+            "seat_code": seat_code,
+            "buy_amt_wan": round((row.get("BUY") or 0) / 10000, 1),
+            "sell_amt_wan": round((row.get("SELL") or 0) / 10000, 1),
+            "net_amt_wan": round((row.get("NET") or 0) / 10000, 1),
+            "is_institution": seat_code == "0",
+        })
+    return seats
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # 存储
 # ═════════════════════════════════════════════════════════════════════════
 
@@ -249,6 +295,40 @@ def save_daily_list(date_str: str, stocks: list[dict]) -> int:
         psycopg2.extras.execute_batch(cur, _LIST_UPSERT, rows)
         conn.commit()
         logging.info(f"Saved {len(rows)} dragon tiger stocks for {date_str}")
+        return len(rows)
+    finally:
+        conn.close()
+
+
+_SEATS_UPSERT = """
+INSERT INTO daily_dragon_tiger_seats
+    (trade_date, stock_code, seat_type, rank, seat_name, seat_code,
+     buy_amt_wan, sell_amt_wan, net_amt_wan, is_institution)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (trade_date, stock_code, seat_type, rank) DO UPDATE SET
+    seat_name     = EXCLUDED.seat_name,
+    seat_code     = EXCLUDED.seat_code,
+    buy_amt_wan   = EXCLUDED.buy_amt_wan,
+    sell_amt_wan  = EXCLUDED.sell_amt_wan,
+    net_amt_wan   = EXCLUDED.net_amt_wan,
+    is_institution = EXCLUDED.is_institution
+"""
+
+
+def save_seats(date_str: str, seats: list[dict]) -> int:
+    """存储席位明细，返回写入行数"""
+    if not seats:
+        return 0
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        rows = [(date_str, s["stock_code"], s["seat_type"], s["rank"],
+                 s["seat_name"], s["seat_code"],
+                 s["buy_amt_wan"], s["sell_amt_wan"], s["net_amt_wan"],
+                 s["is_institution"])
+                for s in seats]
+        psycopg2.extras.execute_batch(cur, _SEATS_UPSERT, rows)
+        conn.commit()
         return len(rows)
     finally:
         conn.close()
