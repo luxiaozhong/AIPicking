@@ -64,6 +64,7 @@ export default function StrategyBuilder() {
   const [aiLoading, setAiLoading] = useState(false);
 
   const [isDirty, setIsDirty] = useState(false);
+  const [editLoaded, setEditLoaded] = useState(false);
   const editLoadedRef = useRef(false);
 
   // Reset dirty-flag guard when entering edit mode
@@ -136,7 +137,6 @@ export default function StrategyBuilder() {
   }, [storeError, isEditMode, navigate]);
 
   // 编辑模式：currentStrategy 加载完成后填充表单
-  const [editLoaded, setEditLoaded] = useState(false);
   useEffect(() => {
     if (!isEditMode || editLoaded || !currentStrategy) return;
 
