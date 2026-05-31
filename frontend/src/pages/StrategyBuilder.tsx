@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Input, Button, Card, Select, message, Modal, Space, Empty, Tabs, Tag } from 'antd';
 import {
   RobotOutlined,
-  CodeOutlined,
   CaretUpOutlined,
   CaretDownOutlined,
   SafetyOutlined,
@@ -34,7 +32,6 @@ function emptyFactorConfig(): FactorConfig {
 }
 
 export default function StrategyBuilder() {
-  const navigate = useNavigate();
 
   const [builderMode, setBuilderMode] = useState<BuilderMode>('signal');
   const [strategyName, setStrategyName] = useState('');
@@ -46,8 +43,6 @@ export default function StrategyBuilder() {
   const [conditionCategories, setConditionCategories] = useState<string[]>([]);
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
-  const [codePreviewVisible, setCodePreviewVisible] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState('');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -209,8 +204,6 @@ export default function StrategyBuilder() {
       });
       if (res.code === 0 && res.data) {
         message.success('策略创建成功！');
-        setGeneratedCode(res.data.generated_code || '');
-        setCodePreviewVisible(true);
       } else {
         message.error(res.message || '创建失败');
       }
@@ -260,7 +253,6 @@ export default function StrategyBuilder() {
 
   const selConditions = factorConfig.selection_conditions.conditions;
   const scorers = factorConfig.scoring_modifiers;
-  const hasTier2 = selConditions.length > 0 || scorers.length > 0;
 
   return (
     <>
@@ -342,13 +334,6 @@ export default function StrategyBuilder() {
             </Button>
             <Button type="primary" onClick={handleSave} loading={loading}>
               保存策略
-            </Button>
-            <Button
-              icon={<CodeOutlined />}
-              onClick={() => setCodePreviewVisible(true)}
-              disabled={!generatedCode}
-            >
-              预览代码
             </Button>
           </div>
 
@@ -434,9 +419,10 @@ export default function StrategyBuilder() {
                   </Space>
                 }
                 style={{ marginBottom: 16 }}
+                styles={selConditions.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
               >
                 {selConditions.length === 0 ? (
-                  <Empty description="从左侧选股条件点击添加预筛选条件（龙虎榜、板块资金流等）" />
+                  <Empty description="从左侧选股条件点击添加预筛选条件（龙虎榜、板块资金流等）" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {selConditions.map((item, i) => {
@@ -468,9 +454,10 @@ export default function StrategyBuilder() {
                   </Space>
                 }
                 style={{ marginBottom: 16 }}
+                styles={scorers.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
               >
                 {scorers.length === 0 ? (
-                  <Empty description="从左侧评分修正点击添加上分条件（龙虎榜加分、板块排名加分等）" />
+                  <Empty description="从左侧评分修正点击添加上分条件（龙虎榜加分、板块排名加分等）" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {scorers.map((item, i) => {
@@ -514,9 +501,10 @@ export default function StrategyBuilder() {
                   </Space>
                 }
                 style={{ marginBottom: 16 }}
+                styles={factorConfig.buy_signals.factors.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
               >
                 {factorConfig.buy_signals.factors.length === 0 ? (
-                  <Empty description="从左侧因子库点击添加买入因子" />
+                  <Empty description="从左侧因子库点击添加买入因子" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {factorConfig.buy_signals.factors.map((item, i) => {
@@ -546,9 +534,10 @@ export default function StrategyBuilder() {
                   </Space>
                 }
                 style={{ marginBottom: 16 }}
+                styles={factorConfig.sell_signals.factors.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
               >
                 {factorConfig.sell_signals.factors.length === 0 ? (
-                  <Empty description="从左侧因子库点击添加卖出因子" />
+                  <Empty description="从左侧因子库点击添加卖出因子" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {factorConfig.sell_signals.factors.map((item, i) => {
@@ -577,9 +566,10 @@ export default function StrategyBuilder() {
                     风控因子（始终生效）
                   </Space>
                 }
+                styles={factorConfig.risk_factors.length === 0 ? { body: { padding: '8px 24px' } } : undefined}
               >
                 {factorConfig.risk_factors.length === 0 ? (
-                  <Empty description="从左侧因子库点击添加风控因子" />
+                  <Empty description="从左侧因子库点击添加风控因子" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                     {factorConfig.risk_factors.map((item, i) => {
@@ -604,39 +594,6 @@ export default function StrategyBuilder() {
         </>
       )}
 
-      {/* Code Preview Modal */}
-      <Modal
-        title="生成的策略代码"
-        open={codePreviewVisible}
-        onCancel={() => setCodePreviewVisible(false)}
-        footer={
-          <Button
-            type="primary"
-            onClick={() => {
-              setCodePreviewVisible(false);
-              navigate('/strategies');
-            }}
-          >
-            返回策略列表
-          </Button>
-        }
-        width={800}
-      >
-        <pre
-          style={{
-            background: '#1e1e1e',
-            color: '#d4d4d4',
-            padding: 16,
-            borderRadius: 8,
-            maxHeight: 500,
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            fontSize: 13,
-          }}
-        >
-          {generatedCode}
-        </pre>
-      </Modal>
     </>
   );
 }
