@@ -135,7 +135,7 @@ async def delete_user(
 
 
 @router.delete("/{user_id}/permanent", status_code=200)
-async def hard_delete_user(
+async def delete_user_permanently(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
@@ -160,6 +160,6 @@ async def hard_delete_user(
             detail="不能删除默认管理员账号",
         )
 
-    await auth_service.permanent_delete_user(db, user_id)
+    await auth_service.permanent_delete_user(db, user_id, user=target_user)
 
     return {"code": 0, "message": "用户已永久删除"}

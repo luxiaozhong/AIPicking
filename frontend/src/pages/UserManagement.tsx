@@ -95,7 +95,10 @@ const UserManagement: React.FC = () => {
   };
 
   const handlePermanentDelete = async () => {
-    if (!deletingUser || deleteConfirmInput !== deletingUser.username) return;
+    if (!deletingUser || deleteConfirmInput !== deletingUser.username) {
+      message.warning('请输入正确的用户名以确认删除');
+      return;
+    }
     setDeleting(true);
     try {
       await userService.deleteUserPermanent(deletingUser.id);
@@ -105,7 +108,7 @@ const UserManagement: React.FC = () => {
       setDeleteConfirmInput('');
       fetchUsers();
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '删除失败');
+      message.error(error.response?.data?.detail || '操作失败');
     } finally {
       setDeleting(false);
     }

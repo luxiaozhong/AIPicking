@@ -5,11 +5,15 @@ from typing import Optional
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.user import User
 from ..models.base import beijing_now
+from ..models.strategy import Strategy
+from ..models.backtest import BacktestReport, StrategyRun, BatchBacktestReport
+from ..models.ai_task import AIStrategyTask
+from ..models.ai_factor import AIFactor
 from ..config import settings
 
 # JWT 配置
@@ -171,15 +175,13 @@ async def seed_default_admin(db: AsyncSession) -> User:
     return admin
 
 
-async def permanent_delete_user(db: AsyncSession, user_id: int) -> bool:
-    """永久删除用户及其所有关联数据"""
-    from sqlalchemy import delete, update
-    from ..models.strategy import Strategy
-    from ..models.backtest import BacktestReport, StrategyRun, BatchBacktestReport
-    from ..models.ai_task import AIStrategyTask
-    from ..models.ai_factor import AIFactor
+async def permanent_delete_user(db: AsyncSession, user_id: int, user: Optional[User] = None) -> bool:
+    """永久删除用户及其所有关联数据
 
-    user = await get_user_by_id(db, user_id)
+    若调用方已持有 User 对象，可通过 user 参数传入以避免重复查询。
+    """
+    if user is None:
+        user = await get_user_by_id(db, user_id)
     if not user:
         return False
 
@@ -195,4 +197,5 @@ async def permanent_delete_user(db: AsyncSession, user_id: int) -> bool:
     )
 
     await db.delete(user)
+    await db.flush()
     return True
