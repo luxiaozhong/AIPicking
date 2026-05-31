@@ -169,3 +169,29 @@ async def seed_default_admin(db: AsyncSession) -> User:
 
     admin = await create_user(db, "admin", "admin123", role="admin")
     return admin
+
+
+async def permanent_delete_user(db: AsyncSession, user_id: int) -> bool:
+    """永久删除用户及其所有关联数据"""
+    from sqlalchemy import delete, update
+    from ..models.strategy import Strategy
+    from ..models.backtest import BacktestReport, StrategyRun, BatchBacktestReport
+    from ..models.ai_task import AIStrategyTask
+    from ..models.ai_factor import AIFactor
+
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return False
+
+    await db.execute(delete(Strategy).where(Strategy.user_id == user_id))
+    await db.execute(delete(BacktestReport).where(BacktestReport.user_id == user_id))
+    await db.execute(delete(StrategyRun).where(StrategyRun.user_id == user_id))
+    await db.execute(delete(BatchBacktestReport).where(BatchBacktestReport.user_id == user_id))
+    await db.execute(delete(AIStrategyTask).where(AIStrategyTask.user_id == user_id))
+
+    await db.execute(
+        update(AIFactor).where(AIFactor.created_by == user_id).values(created_by=None)
+    )
+
+    await db.delete(user)
+    return True

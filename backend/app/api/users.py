@@ -132,3 +132,34 @@ async def delete_user(
         )
 
     return {"code": 0, "message": "用户已停用"}
+
+
+@router.delete("/{user_id}/permanent", status_code=200)
+async def hard_delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """永久删除用户（管理员，硬删除 + 级联删除关联数据）"""
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能删除自己的账号",
+        )
+
+    target_user = await auth_service.get_user_by_id(db, user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    if target_user.username == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能删除默认管理员账号",
+        )
+
+    await auth_service.permanent_delete_user(db, user_id)
+
+    return {"code": 0, "message": "用户已永久删除"}

@@ -2,10 +2,10 @@
 
 import pytest
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.async.io import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from app.main import app
-from app.database import Base
+from app.models.base import Base
 
 
 # 测试数据库 URL
