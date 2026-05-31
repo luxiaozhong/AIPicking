@@ -458,6 +458,10 @@ def main():
     if result["list_count"] == 0 and not result["errors"]:
         logging.info(f"{date_str} 无龙虎榜数据（非交易日或数据未发布）")
 
+    if result["errors"]:
+        logging.error(f"Sync completed with {len(result['errors'])} errors")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
