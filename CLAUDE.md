@@ -41,11 +41,13 @@ nohup bash restart.sh > /tmp/aipicking.log 2>&1 &  # Run in background
 
 **Default admin:** `admin` / `admin123` (seeded on startup if no admin exists).
 
-### Backend (FastAPI + SQLAlchemy async + SQLite via aiosqlite)
+### Backend (FastAPI + SQLAlchemy async + PostgreSQL)
 
-**Dependencies:** `httpx` (DeepSeek API calls), `python-dotenv` (.env loading).
+**数据库**: 全部使用 PostgreSQL（已完成 SQLite → PG 迁移，不再使用 SQLite/stock_db.sqlite）。
 
-**Data flow**: `API routes` → `Services` → `Models/Engine` → `postgresql`
+**Dependencies:** `httpx` (DeepSeek API calls), `python-dotenv` (.env loading), `psycopg2` (scripts).
+
+**Data flow**: `API routes` → `Services` → `Models/Engine` → `PostgreSQL`
 
 **Key modules:**
 
@@ -154,9 +156,10 @@ Custom envelope `{code: int, message: str, data: ...}`. `code: 0` means success.
 
 ### Environment
 
-- Backend `.env` — `DATABASE_URL`, `STOCK_DB_PATH`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT`, `CORS_ORIGINS`
+- Backend `.env` — `DATABASE_URL`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT`, `CORS_ORIGINS`
 - Frontend `.env.development` / `.env.production` — `VITE_API_BASE_URL`
 - `.env` is loaded by `python-dotenv` in `config.py`, NOT auto-loaded by uvicorn. Must install `python-dotenv`.
+- `STOCK_DB_PATH` / SQLite 已废弃，所有数据统一走 PostgreSQL。历史脚本 `sync_market_data.py` 后续也需改为 PG。
 
 ### Server Deployment
 

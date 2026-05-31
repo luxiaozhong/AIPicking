@@ -1,15 +1,19 @@
-import { Row, Col, Card, Statistic } from 'antd';
+import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Row, Col, Card, Statistic, Typography } from 'antd';
 import {
   LineChartOutlined,
   BarChartOutlined,
   ExperimentOutlined,
   TrophyOutlined,
+  RobotOutlined,
+  BuildOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
 import PageHeader from '@/components/shared/PageHeader';
 import { useStrategyStore } from '@/stores/strategyStore';
 import { useBacktestStore } from '@/stores/backtestStore';
+
+const { Text } = Typography;
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -74,39 +78,58 @@ export default function Dashboard() {
       </Row>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
+        <Col span={24}>
           <Card title="快捷操作">
-            <Row gutter={[8, 8]}>
+            <Row gutter={[12, 12]}>
               {[
-                { label: 'AI 参考选股', path: '/strategies/ai-builder' },
-                { label: '可视化构建策略', path: '/strategies/builder' },
-                { label: '查看策略列表', path: '/strategies' },
-                { label: '查看回测报告', path: '/backtests' },
+                {
+                  icon: <RobotOutlined style={{ fontSize: 24, color: '#1677ff' }} />,
+                  title: 'AI 参考选股',
+                  description:
+                    '以一只好股票的过去某一天为参考，AI 自动找出全市场最相似的标的。辅助你找到启动点信号，并可回测过去任意交易日。',
+                  path: '/strategies/ai-builder',
+                },
+                {
+                  icon: <BuildOutlined style={{ fontSize: 24, color: '#52c41a' }} />,
+                  title: '可视化构建策略',
+                  description:
+                    '拖拽因子组合生成买卖信号策略，或用自然语言描述量化特征生成策略。',
+                  path: '/strategies/builder',
+                },
+                {
+                  icon: <LineChartOutlined style={{ fontSize: 24, color: '#722ed1' }} />,
+                  title: '策略列表',
+                  description: '查看、编辑、执行和回测已创建的所有策略。',
+                  path: '/strategies',
+                },
+                {
+                  icon: <BarChartOutlined style={{ fontSize: 24, color: '#faad14' }} />,
+                  title: '回测报告',
+                  description: '查看历史回测结果、收益曲线和胜率分析。',
+                  path: '/backtests',
+                },
               ].map((action) => (
-                <Col span={12} key={action.path}>
+                <Col xs={24} sm={12} key={action.path}>
                   <Card
-                    size="small"
                     hoverable
                     onClick={() => navigate(action.path)}
-                    style={{ textAlign: 'center' }}
+                    style={{ height: '100%' }}
                   >
-                    {action.label}
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                      <div style={{ flexShrink: 0, marginTop: 2 }}>{action.icon}</div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>
+                          {action.title}
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.6 }}>
+                          {action.description}
+                        </Text>
+                      </div>
+                    </div>
                   </Card>
                 </Col>
               ))}
             </Row>
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card title="快速入门">
-            <ol style={{ paddingLeft: 20, lineHeight: 2 }}>
-              <li>在「策略管理」中创建或上传量化策略</li>
-              <li>使用可视化构建器选择因子组合策略</li>
-              <li>提交回测任务，验证策略在某一天的选股表现</li>
-              <li>使用批量回测，一键验证策略在多个历史时间段的表现</li>
-              <li>查看回测报告，分析推荐股票的后续涨跌</li>
-              <li>执行策略获取当前市场推荐</li>
-            </ol>
           </Card>
         </Col>
       </Row>
