@@ -45,6 +45,8 @@ class BacktestResponse(BaseModel):
     """回测报告响应 schema"""
     id: int
     strategy_id: int
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
     strategy_name: Optional[str] = None
     name: Optional[str] = None
     status: str = "pending"
@@ -56,7 +58,7 @@ class BacktestResponse(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     @field_validator('config', 'recommendations', 'summary', mode='before')
     @classmethod
     def parse_json_fields(cls, v):
@@ -67,7 +69,7 @@ class BacktestResponse(BaseModel):
             except json.JSONDecodeError:
                 return v
         return v
-    
+
     class Config:
         from_attributes = True
 
