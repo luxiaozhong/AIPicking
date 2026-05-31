@@ -332,3 +332,132 @@ def save_seats(date_str: str, seats: list[dict]) -> int:
         return len(rows)
     finally:
         conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 编排
+# ═════════════════════════════════════════════════════════════════════════
+
+def sync(date_str: str, dry_run: bool = False) -> dict:
+    """拉取 + 存储当日全市场龙虎榜数据。best-effort per stock。"""
+    result = {
+        "date": date_str,
+        "list_count": 0,
+        "seats_count": 0,
+        "errors": [],
+    }
+
+    # 1. 全市场上榜汇总
+    stocks = fetch_daily_list(date_str)
+    if not stocks:
+        logging.info(f"No dragon tiger data for {date_str}")
+        return result
+
+    if not dry_run:
+        n = save_daily_list(date_str, stocks)
+        result["list_count"] = n
+    else:
+        result["list_count"] = len(stocks)
+
+    # 2. 逐只股票拉席位明细
+    total_seats = 0
+    for i, stock in enumerate(stocks):
+        code = stock["stock_code"]
+        name = stock["stock_name"]
+        try:
+            buy_seats = fetch_seats(code, date_str, "buy")
+            sell_seats = fetch_seats(code, date_str, "sell")
+            all_seats = buy_seats + sell_seats
+            if not dry_run and all_seats:
+                save_seats(date_str, all_seats)
+            total_seats += len(all_seats)
+            if (i + 1) % 20 == 0 or i == 0:
+                logging.info(f"  [{i+1}/{len(stocks)}] {code} {name}: "
+                           f"buy={len(buy_seats)} sell={len(sell_seats)}")
+        except Exception as e:
+            msg = f"{code} {name}: {e}"
+            result["errors"].append(msg)
+            logging.warning(f"  [{i+1}/{len(stocks)}] {msg}")
+
+    result["seats_count"] = total_seats
+    logging.info(f"Seats total: {total_seats} records, {len(result['errors'])} errors")
+
+    # 3. 摘要
+    _print_summary(date_str, stocks, result["errors"])
+
+    return result
+
+
+def _print_summary(date_str: str, stocks: list[dict], errors: list[str]):
+    """打印龙虎榜摘要"""
+    from collections import Counter
+
+    print()
+    print("=" * 60)
+    print(f"  龙虎榜 {date_str} — 共 {len(stocks)} 只上榜")
+    print("=" * 60)
+
+    # 净买入 TOP10
+    print("\n📈 净买入 TOP10:")
+    top_buy = sorted(stocks, key=lambda s: s["net_buy_wan"], reverse=True)[:10]
+    for s in top_buy:
+        print(f"  {s['stock_code']} {s['stock_name']:<8s} "
+              f"净买{s['net_buy_wan']:>8.0f}万  涨跌{s['change_pct']:>+5.1f}%  "
+              f"{s['reason']}")
+
+    # 净卖出 TOP5
+    print("\n📉 净卖出 TOP5:")
+    top_sell = sorted(stocks, key=lambda s: s["net_buy_wan"])[:5]
+    for s in top_sell:
+        print(f"  {s['stock_code']} {s['stock_name']:<8s} "
+              f"净买{s['net_buy_wan']:>8.0f}万  涨跌{s['change_pct']:>+5.1f}%  "
+              f"{s['reason']}")
+
+    # 上榜原因分布
+    reasons = Counter(s["reason"] for s in stocks)
+    print("\n🏷️  上榜原因分布:")
+    for reason, cnt in reasons.most_common():
+        print(f"  {reason}: {cnt} 只")
+
+    if errors:
+        print(f"\n⚠️  席位明细采集失败 {len(errors)} 只")
+    print("=" * 60)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# CLI
+# ═════════════════════════════════════════════════════════════════════════
+
+def main():
+    parser = argparse.ArgumentParser(description="龙虎榜每日数据采集")
+    parser.add_argument("--date", default=None,
+                        help="交易日期 YYYY-MM-DD（默认: 今天）")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只拉取不写入数据库")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+    )
+
+    date_str = args.date or date.today().strftime("%Y-%m-%d")
+
+    # 建表（幂等）
+    ensure_tables()
+
+    if args.dry_run:
+        logging.info(f"DRY RUN mode — fetching {date_str} without writing")
+
+    result = sync(date_str, dry_run=args.dry_run)
+
+    if result["list_count"] == 0 and not result["errors"]:
+        logging.info(f"{date_str} 无龙虎榜数据（非交易日或数据未发布）")
+
+
+if __name__ == "__main__":
+    main()
