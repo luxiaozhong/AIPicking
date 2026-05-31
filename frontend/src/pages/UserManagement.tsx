@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Switch, message, Space, Tag, Popconfirm } from 'antd';
-import { PlusOutlined, EditOutlined, StopOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, StopOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UserResponse } from '@/types/auth';
 import userService from '@/services/userService';
+import { useAuthStore } from '@/stores/authStore';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<UserResponse[]>([]);
@@ -14,6 +15,11 @@ const UserManagement: React.FC = () => {
   const [editingUser, setEditingUser] = useState<UserResponse | null>(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const currentUser = useAuthStore((s) => s.user);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletingUser, setDeletingUser] = useState<UserResponse | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -88,6 +94,23 @@ const UserManagement: React.FC = () => {
     }
   };
 
+  const handlePermanentDelete = async () => {
+    if (!deletingUser || deleteConfirmInput !== deletingUser.username) return;
+    setDeleting(true);
+    try {
+      await userService.deleteUserPermanent(deletingUser.id);
+      message.success(`用户 "${deletingUser.username}" 已永久删除`);
+      setDeleteModalOpen(false);
+      setDeletingUser(null);
+      setDeleteConfirmInput('');
+      fetchUsers();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '删除失败');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const columns: ColumnsType<UserResponse> = [
     {
       title: 'ID',
@@ -146,6 +169,20 @@ const UserManagement: React.FC = () => {
                 停用
               </Button>
             </Popconfirm>
+          )}
+          {record.id !== currentUser?.id && (
+            <Button
+              type="link"
+              danger
+              icon={<ExclamationCircleOutlined />}
+              onClick={() => {
+                setDeletingUser(record);
+                setDeleteConfirmInput('');
+                setDeleteModalOpen(true);
+              }}
+            >
+              删除
+            </Button>
           )}
         </Space>
       ),
@@ -216,6 +253,53 @@ const UserManagement: React.FC = () => {
             </Form.Item>
           )}
         </Form>
+      </Modal>
+
+      <Modal
+        title={
+          <span>
+            <ExclamationCircleOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
+            永久删除用户
+          </span>
+        }
+        open={deleteModalOpen}
+        onOk={handlePermanentDelete}
+        onCancel={() => {
+          setDeleteModalOpen(false);
+          setDeletingUser(null);
+          setDeleteConfirmInput('');
+        }}
+        confirmLoading={deleting}
+        okText="确认删除"
+        cancelText="取消"
+        okButtonProps={{
+          danger: true,
+          disabled: deleteConfirmInput !== deletingUser?.username,
+        }}
+        destroyOnClose
+      >
+        {deletingUser && (
+          <div>
+            <p style={{ marginBottom: 12 }}>
+              此操作不可逆！用户 <strong>"{deletingUser.username}"</strong> 及其所有关联数据将被永久删除：
+            </p>
+            <ul style={{ color: '#ff4d4f', marginBottom: 16, paddingLeft: 20 }}>
+              <li>策略</li>
+              <li>回测报告</li>
+              <li>运行记录</li>
+              <li>批量回测报告</li>
+              <li>AI 分析任务</li>
+            </ul>
+            <p>
+              请输入用户名 <strong>"{deletingUser.username}"</strong> 以确认：
+            </p>
+            <Input
+              value={deleteConfirmInput}
+              onChange={(e) => setDeleteConfirmInput(e.target.value)}
+              placeholder={deletingUser.username}
+            />
+          </div>
+        )}
       </Modal>
     </div>
   );

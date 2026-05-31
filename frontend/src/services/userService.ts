@@ -35,6 +35,11 @@ export const userService = {
     const response = await api.delete<{ code: number; message: string }>(`/users/${id}`);
     return response.data;
   },
+
+  async deleteUserPermanent(id: number) {
+    const response = await api.delete<{ code: number; message: string }>(`/users/${id}/permanent`);
+    return response.data;
+  },
 };
 
 export default userService;
