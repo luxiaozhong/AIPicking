@@ -21,6 +21,7 @@ interface StrategyState {
     limit?: number;
     search?: string;
     status?: string;
+    scope?: string;
   }) => Promise<void>;
 
 
@@ -41,6 +42,14 @@ interface StrategyState {
   deleteStrategy: (id: number) => Promise<void>;
 
   permanentDeleteStrategy: (id: number) => Promise<void>;
+
+  publishStrategy: (id: number) => Promise<void>;
+  unpublishStrategy: (id: number) => Promise<void>;
+  rateStrategy: (id: number, score: number) => Promise<void>;
+  fetchRatings: (id: number) => Promise<import('@/types/strategy').RatingStats | null>;
+  addComment: (id: number, content: string) => Promise<void>;
+  fetchComments: (id: number, page?: number) => Promise<import('@/types/strategy').CommentListResponse | null>;
+  deleteComment: (strategyId: number, commentId: number) => Promise<void>;
 
   clearError: () => void;
 }
@@ -67,6 +76,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         limit: params.limit || get().limit,
         search: params.search,
         status: params.status,
+        scope: params.scope,
       });
 
       set({
@@ -216,6 +226,86 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         error: error.response?.data?.message || '彻底删除策略失败',
       });
 
+      throw error;
+    }
+  },
+
+  // 发布策略
+  publishStrategy: async (id: number) => {
+    set({ loading: true, error: null });
+    try {
+      await strategyService.publishStrategy(id);
+      await get().fetchStrategies();
+      if (get().currentStrategy?.id === id) {
+        await get().fetchStrategy(id);
+      }
+      set({ loading: false });
+    } catch (error: any) {
+      set({ loading: false, error: error.response?.data?.message || '发布失败' });
+      throw error;
+    }
+  },
+
+  // 取消发布
+  unpublishStrategy: async (id: number) => {
+    set({ loading: true, error: null });
+    try {
+      await strategyService.unpublishStrategy(id);
+      await get().fetchStrategies();
+      if (get().currentStrategy?.id === id) {
+        await get().fetchStrategy(id);
+      }
+      set({ loading: false });
+    } catch (error: any) {
+      set({ loading: false, error: error.response?.data?.message || '取消发布失败' });
+      throw error;
+    }
+  },
+
+  // 评分
+  rateStrategy: async (id: number, score: number) => {
+    try {
+      await strategyService.rateStrategy(id, score);
+    } catch (error: any) {
+      set({ error: error.response?.data?.message || '评分失败' });
+      throw error;
+    }
+  },
+
+  // 获取评分统计
+  fetchRatings: async (id: number) => {
+    try {
+      return await strategyService.getStrategyRatings(id);
+    } catch {
+      return null;
+    }
+  },
+
+  // 发表评论
+  addComment: async (id: number, content: string) => {
+    try {
+      await strategyService.addComment(id, content);
+    } catch (error: any) {
+      set({ error: error.response?.data?.message || '评论失败' });
+      throw error;
+    }
+  },
+
+  // 获取评论列表
+  fetchComments: async (id: number, page = 1) => {
+    try {
+      return await strategyService.getComments(id, page);
+    } catch {
+      return null;
+    }
+  },
+
+  // 删除评论
+  deleteComment: async (strategyId: number, commentId: number) => {
+    try {
+      await strategyService.deleteComment(strategyId, commentId);
+    } catch (error: any) {
+      set({ error: error.response?.data?.message || '删除评论失败' });
       throw error;
     }
   },
