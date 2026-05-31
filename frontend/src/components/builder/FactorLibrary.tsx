@@ -57,7 +57,7 @@ export default function FactorLibrary({
         {/* Tier 2 选股条件 */}
         {hasConditions && filteredConditions.length > 0 && (
           <>
-            <Divider orientation="left" plain style={{ fontSize: 12, margin: '8px 0' }}>
+            <Divider plain style={{ fontSize: 12, margin: '8px 0' }}>
               <FilterOutlined /> 选股条件 & 评分
             </Divider>
             {conditionCategories.map((cat) => {
@@ -116,7 +116,7 @@ export default function FactorLibrary({
               );
             })}
 
-            <Divider orientation="left" plain style={{ fontSize: 12, margin: '8px 0' }}>
+            <Divider plain style={{ fontSize: 12, margin: '8px 0' }}>
               <RiseOutlined /> K线技术因子
             </Divider>
           </>
