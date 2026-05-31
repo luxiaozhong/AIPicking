@@ -173,3 +173,80 @@ def ensure_tables():
         cur.execute(idx)
     conn.commit()
     conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 抓取：全市场龙虎榜汇总
+# ═════════════════════════════════════════════════════════════════════════
+
+def fetch_daily_list(date_str: str) -> list[dict]:
+    """
+    拉取指定交易日全市场龙虎榜上榜汇总。
+    date_str: YYYY-MM-DD
+    返回: [{stock_code, stock_name, reason, close, change_pct, turnover_pct,
+            net_buy_wan, buy_wan, sell_wan}, ...]
+    """
+    filter_str = f"(TRADE_DATE>='{date_str}')(TRADE_DATE<='{date_str}')"
+    data = eastmoney_datacenter(
+        "RPT_DAILYBILLBOARD_DETAILSNEW",
+        filter_str=filter_str,
+        page_size=500,
+        sort_columns="BILLBOARD_NET_AMT",
+        sort_types="-1",
+    )
+    if not data:
+        logging.info(f"No dragon tiger data for {date_str} (non-trading day or data not released)")
+        return []
+
+    stocks = []
+    for row in data:
+        stocks.append({
+            "stock_code": row.get("SECURITY_CODE", ""),
+            "stock_name": row.get("SECURITY_NAME_ABBR", ""),
+            "reason": row.get("EXPLANATION", ""),
+            "close": row.get("CLOSE_PRICE"),
+            "change_pct": round(float(row.get("CHANGE_RATE") or 0), 2),
+            "turnover_pct": round(float(row.get("TURNOVERRATE") or 0), 2),
+            "net_buy_wan": round((row.get("BILLBOARD_NET_AMT") or 0) / 10000, 1),
+            "buy_wan": round((row.get("BILLBOARD_BUY_AMT") or 0) / 10000, 1),
+            "sell_wan": round((row.get("BILLBOARD_SELL_AMT") or 0) / 10000, 1),
+        })
+    logging.info(f"Fetched {len(stocks)} dragon tiger stocks for {date_str}")
+    return stocks
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 存储
+# ═════════════════════════════════════════════════════════════════════════
+
+_LIST_UPSERT = """
+INSERT INTO daily_dragon_tiger
+    (trade_date, stock_code, stock_name, reason, close, change_pct,
+     turnover_pct, net_buy_wan, buy_wan, sell_wan)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (trade_date, stock_code) DO UPDATE SET
+    stock_name   = EXCLUDED.stock_name,
+    reason       = EXCLUDED.reason,
+    close        = EXCLUDED.close,
+    change_pct   = EXCLUDED.change_pct,
+    turnover_pct = EXCLUDED.turnover_pct,
+    net_buy_wan  = EXCLUDED.net_buy_wan,
+    buy_wan      = EXCLUDED.buy_wan,
+    sell_wan     = EXCLUDED.sell_wan
+"""
+
+def save_daily_list(date_str: str, stocks: list[dict]) -> int:
+    """存储龙虎榜汇总，返回写入行数"""
+    if not stocks:
+        return 0
+    conn = get_conn()
+    cur = conn.cursor()
+    rows = [(date_str, s["stock_code"], s["stock_name"], s["reason"],
+             s["close"], s["change_pct"], s["turnover_pct"],
+             s["net_buy_wan"], s["buy_wan"], s["sell_wan"])
+            for s in stocks]
+    psycopg2.extras.execute_batch(cur, _LIST_UPSERT, rows)
+    conn.commit()
+    conn.close()
+    logging.info(f"Saved {len(rows)} dragon tiger stocks for {date_str}")
+    return len(rows)
