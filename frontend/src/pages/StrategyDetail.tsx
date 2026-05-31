@@ -6,9 +6,11 @@ import {
   DeleteOutlined,
   BarChartOutlined,
   PlayCircleOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStrategyStore } from '@/stores/strategyStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useBacktestStore } from '@/stores/backtestStore';
 import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
@@ -16,6 +18,7 @@ import CodeBlock from '@/components/shared/CodeBlock';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import StockKLineModal from '@/components/shared/StockKLineModal';
+import StrategyCommunity from '@/components/StrategyCommunity';
 import type { RecommendationItem } from '@/types/backtest';
 
 export default function StrategyDetail() {
@@ -32,6 +35,8 @@ export default function StrategyDetail() {
     clearError,
   } = useStrategyStore();
 
+  const { user } = useAuthStore();
+
   const { executeStrategy, loading: executeLoading } = useBacktestStore();
   const [stockCode, setStockCode] = useState('');
   const [executeResult, setExecuteResult] = useState<{
@@ -41,6 +46,7 @@ export default function StrategyDetail() {
     recommendations: RecommendationItem[];
   } | null>(null);
   const [selectedStock, setSelectedStock] = useState<RecommendationItem | null>(null);
+  const isOwner = !currentStrategy?.user_id || String(currentStrategy?.user_id) === String(user?.id);
 
   useEffect(() => {
     if (id) fetchStrategy(parseInt(id));
@@ -90,12 +96,16 @@ export default function StrategyDetail() {
 
   const actions = (
     <>
-      <Button icon={<EditOutlined />} onClick={() => navigate(`/strategies/${currentStrategy.id}/edit`)}>
-        编辑
-      </Button>
-      <Button icon={<DownloadOutlined />} onClick={handleDownload}>
-        下载
-      </Button>
+      {isOwner && (
+        <>
+          <Button icon={<EditOutlined />} onClick={() => navigate(`/strategies/${currentStrategy.id}/edit`)}>
+            编辑
+          </Button>
+          <Button icon={<DownloadOutlined />} onClick={handleDownload}>
+            下载
+          </Button>
+        </>
+      )}
       <Button icon={<BarChartOutlined />} onClick={() => navigate(`/strategies/${currentStrategy.id}/backtest`)}>
         运行回测
       </Button>
@@ -108,9 +118,11 @@ export default function StrategyDetail() {
       <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleExecute} loading={executeLoading}>
         执行策略
       </Button>
-      <Popconfirm title="确定删除？" onConfirm={handleDelete} okText="确定" cancelText="取消">
-        <Button danger icon={<DeleteOutlined />}>删除</Button>
-      </Popconfirm>
+      {isOwner && (
+        <Popconfirm title="确定删除？" onConfirm={handleDelete} okText="确定" cancelText="取消">
+          <Button danger icon={<DeleteOutlined />}>删除</Button>
+        </Popconfirm>
+      )}
     </>
   );
 
@@ -143,8 +155,13 @@ export default function StrategyDetail() {
     {
       key: 'code',
       label: '策略代码',
-      children: (
+      children: isOwner ? (
         <CodeBlock code={codeContent} maxHeight={500} onCopy={() => message.success('已复制')} />
+      ) : (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+          <LockOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+          <p>代码仅对创建者可见</p>
+        </div>
       ),
     },
     {
@@ -237,6 +254,13 @@ export default function StrategyDetail() {
           </Button>
         </div>
       ),
+    },
+    {
+      key: 'community',
+      label: '评分评论',
+      children: currentStrategy ? (
+        <StrategyCommunity strategyId={currentStrategy.id} isOwner={isOwner} />
+      ) : null,
     },
   ];
 
