@@ -1,10 +1,11 @@
 """回测引擎核心（新逻辑：截止日推荐 + 后续表现追踪）"""
 
 import ast
+import re
 import sys
 import io
 import os
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple, Optional, Set
 from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, select
@@ -48,13 +49,48 @@ class BacktestEngine:
         self.strategy_params = strategy_params
         self.config = config
         self.strategy_func = None
+        self.required_data: Optional[Set[str]] = None  # None = 加载全部（向后兼容）
         self._load_strategy()
+
+    def _parse_required_data(self, code: str) -> Optional[Set[str]]:
+        """从策略代码中解析 REQUIRED_DATA 声明。
+
+        策略代码中可声明：
+            REQUIRED_DATA = ["dragon_tiger", "sector_flow"]
+
+        支持的数据源：
+            - sector_flow  → daily_sector_flow 表
+            - hot_stocks   → daily_hot_stock 表
+            - hot_themes   → daily_hot_theme 表
+            - dragon_tiger → daily_dragon_tiger + daily_dragon_tiger_seats 表
+
+        返回 None 表示未声明 REQUIRED_DATA（向后兼容，加载全部数据）。
+        返回空 set 表示声明了但不需要任何额外数据。
+        """
+        pattern = r'REQUIRED_DATA\s*=\s*\[(.*?)\]'
+        match = re.search(pattern, code)
+        if match is None:
+            return None  # 未声明，加载全部
+        inner = match.group(1)
+        if not inner.strip():
+            return set()
+        items = re.findall(r'"([^"]*)"', inner)
+        return set(items)
+
+    def _should_load(self, source: str) -> bool:
+        """判断是否需要加载某个数据源"""
+        if self.required_data is None:
+            return True  # 向后兼容：未声明则加载全部
+        return source in self.required_data
 
     def _load_strategy(self) -> None:
         """加载策略代码（安全检查 + 编译）"""
         is_valid, error_msg = self._validate_strategy(self.strategy_code)
         if not is_valid:
             raise ValueError(f"策略代码验证失败: {error_msg}")
+
+        # 解析 REQUIRED_DATA（在 exec 之前，用 regex 解析更可靠）
+        self.required_data = self._parse_required_data(self.strategy_code)
 
         try:
             code_obj = compile(self.strategy_code, "<strategy>", "exec")
@@ -294,35 +330,44 @@ class BacktestEngine:
             daily_result = session.execute(daily_stmt)
             daily_rows = [dict(row._mapping) for row in daily_result]
 
-            # 4. 板块资金流向
-            sector_stmt = select(DailySectorFlow).where(
-                DailySectorFlow.trade_date.between(flow_start_date, cutoff_date_fmt)
-            ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
-            sector_result = session.execute(sector_stmt)
-            daily_sector_flow_data = [dict(row._mapping) for row in sector_result]
+            # 4. 板块资金流向（按需）
+            daily_sector_flow_data = []
+            if self._should_load("sector_flow"):
+                sector_stmt = select(DailySectorFlow).where(
+                    DailySectorFlow.trade_date.between(flow_start_date, cutoff_date_fmt)
+                ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
+                sector_result = session.execute(sector_stmt)
+                daily_sector_flow_data = [dict(row._mapping) for row in sector_result]
 
-            # 5. 热门股（仅当天）
-            hot_stock_stmt = select(DailyHotStock).where(
-                DailyHotStock.trade_date == cutoff_date_fmt
-            ).order_by(DailyHotStock.sort_order)
-            hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
+            # 5. 热门股（按需）
+            hot_stocks_data = []
+            if self._should_load("hot_stocks"):
+                hot_stock_stmt = select(DailyHotStock).where(
+                    DailyHotStock.trade_date == cutoff_date_fmt
+                ).order_by(DailyHotStock.sort_order)
+                hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
 
-            # 6. 热门题材（仅当天）
-            hot_theme_stmt = select(DailyHotTheme).where(
-                DailyHotTheme.trade_date == cutoff_date_fmt
-            ).order_by(DailyHotTheme.stock_count.desc())
-            hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
+            # 6. 热门题材（按需）
+            hot_themes_data = []
+            if self._should_load("hot_themes"):
+                hot_theme_stmt = select(DailyHotTheme).where(
+                    DailyHotTheme.trade_date == cutoff_date_fmt
+                ).order_by(DailyHotTheme.stock_count.desc())
+                hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
 
-            # 7. 龙虎榜（近 30 日上榜记录 + 席位明细）
-            dt_stmt = select(DailyDragonTiger).where(
-                DailyDragonTiger.trade_date.between(flow_start_date, cutoff_date_fmt)
-            ).order_by(DailyDragonTiger.trade_date.desc())
-            dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
+            # 7. 龙虎榜（按需）
+            dragon_tiger_data = []
+            dragon_tiger_seats_data = []
+            if self._should_load("dragon_tiger"):
+                dt_stmt = select(DailyDragonTiger).where(
+                    DailyDragonTiger.trade_date.between(flow_start_date, cutoff_date_fmt)
+                ).order_by(DailyDragonTiger.trade_date.desc())
+                dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
 
-            dt_seat_stmt = select(DailyDragonTigerSeat).where(
-                DailyDragonTigerSeat.trade_date.between(flow_start_date, cutoff_date_fmt)
-            ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
-            dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
+                dt_seat_stmt = select(DailyDragonTigerSeat).where(
+                    DailyDragonTigerSeat.trade_date.between(flow_start_date, cutoff_date_fmt)
+                ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
+                dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
         finally:
             session.close()
 
@@ -375,33 +420,43 @@ class BacktestEngine:
             ).order_by(Daily.ts_code, Daily.trade_date)
             daily_rows = [dict(row._mapping) for row in session.execute(daily_stmt)]
 
-            sector_stmt = select(DailySectorFlow).where(
-                DailySectorFlow.trade_date.between(flow_earliest_date, end_date_fmt)
-            ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
-            daily_sector_flow_data = [dict(row._mapping) for row in session.execute(sector_stmt)]
+            # 板块资金流向（按需）
+            daily_sector_flow_data = []
+            if self._should_load("sector_flow"):
+                sector_stmt = select(DailySectorFlow).where(
+                    DailySectorFlow.trade_date.between(flow_earliest_date, end_date_fmt)
+                ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
+                daily_sector_flow_data = [dict(row._mapping) for row in session.execute(sector_stmt)]
 
-            # 热门股
-            hot_stock_stmt = select(DailyHotStock).where(
-                DailyHotStock.trade_date.between(flow_earliest_date, end_date_fmt)
-            ).order_by(DailyHotStock.trade_date, DailyHotStock.sort_order)
-            hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
+            # 热门股（按需）
+            hot_stocks_data = []
+            if self._should_load("hot_stocks"):
+                hot_stock_stmt = select(DailyHotStock).where(
+                    DailyHotStock.trade_date.between(flow_earliest_date, end_date_fmt)
+                ).order_by(DailyHotStock.trade_date, DailyHotStock.sort_order)
+                hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
 
-            # 热门题材
-            hot_theme_stmt = select(DailyHotTheme).where(
-                DailyHotTheme.trade_date.between(flow_earliest_date, end_date_fmt)
-            ).order_by(DailyHotTheme.trade_date, DailyHotTheme.stock_count.desc())
-            hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
+            # 热门题材（按需）
+            hot_themes_data = []
+            if self._should_load("hot_themes"):
+                hot_theme_stmt = select(DailyHotTheme).where(
+                    DailyHotTheme.trade_date.between(flow_earliest_date, end_date_fmt)
+                ).order_by(DailyHotTheme.trade_date, DailyHotTheme.stock_count.desc())
+                hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
 
-            # 龙虎榜 + 席位
-            dt_stmt = select(DailyDragonTiger).where(
-                DailyDragonTiger.trade_date.between(flow_earliest_date, end_date_fmt)
-            ).order_by(DailyDragonTiger.trade_date.desc())
-            dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
+            # 龙虎榜 + 席位（按需）
+            dragon_tiger_data = []
+            dragon_tiger_seats_data = []
+            if self._should_load("dragon_tiger"):
+                dt_stmt = select(DailyDragonTiger).where(
+                    DailyDragonTiger.trade_date.between(flow_earliest_date, end_date_fmt)
+                ).order_by(DailyDragonTiger.trade_date.desc())
+                dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
 
-            dt_seat_stmt = select(DailyDragonTigerSeat).where(
-                DailyDragonTigerSeat.trade_date.between(flow_earliest_date, end_date_fmt)
-            ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
-            dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
+                dt_seat_stmt = select(DailyDragonTigerSeat).where(
+                    DailyDragonTigerSeat.trade_date.between(flow_earliest_date, end_date_fmt)
+                ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
+                dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
         finally:
             session.close()
 

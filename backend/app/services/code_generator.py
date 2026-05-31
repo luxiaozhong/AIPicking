@@ -64,6 +64,9 @@ def generate_strategy_code(name: str, factor_config: Dict[str, Any]) -> str:
     for f in buy_factors + sell_factors + risk_factors:
         all_factor_ids.add(f["factor_id"])
 
+    # ── 推断所需数据源 ──
+    required_data = _infer_required_data(factor_config)
+
     # ── 生成 K 线因子 import ──
     imports = []
     for fid in sorted(all_factor_ids):
@@ -128,6 +131,8 @@ def generate_strategy_code(name: str, factor_config: Dict[str, Any]) -> str:
 自动生成的策略代码 - {name}
 注意：此文件由系统自动生成，请勿手动修改
 """
+
+REQUIRED_DATA = {json.dumps(sorted(required_data))}
 
 import pandas as pd
 import numpy as np
@@ -325,3 +330,33 @@ def _gen_risk_code(index: int, factor: Dict[str, Any]) -> str:
         f"        if risk_sell_{index}.iloc[-1] == 1:\n"
         f"            continue"
     )
+
+
+def _infer_required_data(factor_config: Dict[str, Any]) -> List[str]:
+    """根据因子配置推断策略需要的数据源。
+
+    映射规则：
+      - 选股条件 / 评分修正中 condition_id 以 dt_ 开头 → dragon_tiger
+      - 选股条件 / 评分修正中 condition_id 以 sf_ 开头 → sector_flow
+      - 默认不需要 hot_stocks / hot_themes（暂无因子使用）
+    """
+    needed: set = set()
+
+    selection = factor_config.get("selection_conditions", {})
+    scorers = factor_config.get("scoring_modifiers", [])
+
+    for cond in selection.get("conditions", []):
+        cid = cond.get("condition_id", "")
+        if cid.startswith("dt_"):
+            needed.add("dragon_tiger")
+        elif cid.startswith("sf_"):
+            needed.add("sector_flow")
+
+    for sc in scorers:
+        cid = sc.get("condition_id", "")
+        if cid.startswith("dt_"):
+            needed.add("dragon_tiger")
+        elif cid.startswith("sf_"):
+            needed.add("sector_flow")
+
+    return sorted(needed)
