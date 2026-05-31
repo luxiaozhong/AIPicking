@@ -1,6 +1,6 @@
 """策略模型"""
 
-from sqlalchemy import Column, String, Text, Integer, ForeignKey
+from sqlalchemy import Column, String, Text, Integer, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from .base import BaseModel
 
@@ -22,6 +22,7 @@ class Strategy(BaseModel):
     generated_code = Column(Text)  # 自动生成的策略代码
     # 用户关联
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    is_published = Column(Boolean, default=False, index=True)
     owner = relationship("User", back_populates="strategies")
 
     @property
