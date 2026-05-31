@@ -138,15 +138,13 @@ export default function StrategyList() {
       },
     ];
 
-    if (isAdmin) {
-      cols.push({
-        title: '创建者',
-        dataIndex: 'owner_name',
-        key: 'owner_name',
-        width: 110,
-        render: (name: string) => name || '—',
-      });
-    }
+    cols.push({
+      title: '创建者',
+      dataIndex: 'owner_name',
+      key: 'owner_name',
+      width: 110,
+      render: (name: string) => name || '—',
+    });
 
     cols.push(
       {
