@@ -829,14 +829,14 @@ def run(data):
             "cutoff_date": "20260525",
             "stocks": [...],
             "daily": {...},
-            "sector_flow": [...],
+            "daily_sector_flow": [...],
             "config": {"ts_code": "000001.SZ"},  # 可选：目标个股
         }
     """
     cutoff_date = data["cutoff_date"]
     stocks = data["stocks"]
     daily = data["daily"]
-    sector_flow_raw = data.get("sector_flow", [])
+    daily_sector_flow_raw = data.get("daily_sector_flow", [])
     config = data.get("config", {})
     target_ts_code = config.get("ts_code", "").strip() if config else ""
 
@@ -845,8 +845,8 @@ def run(data):
     # 构建资金流索引
     sector_index = None
     sector_ranking = None
-    if sector_flow_raw:
-        sector_index, sector_ranking = build_sector_flow_index(sector_flow_raw)
+    if daily_sector_flow_raw:
+        sector_index, sector_ranking = build_sector_flow_index(daily_sector_flow_raw)
 
     recommendations = []
 

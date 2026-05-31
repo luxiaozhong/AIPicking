@@ -22,10 +22,10 @@ PG_URL = os.getenv("PG_MIGRATE_URL", "postgresql://aipicking:aipicking_dev_pwd@l
 PG_URL = PG_URL.replace("+asyncpg", "").replace("+psycopg2", "")
 
 TABLE_SOURCES = {
-    "stocks": "stock", "daily": "stock", "sector_flow": "stock",
+    "stocks": "stock", "daily": "stock",
+    # sector_flow / daily_industry_flow → 已合并到 daily_sector_flow（2026-05-31）
     "stock_themes": "stock", "daily_hot_stocks": "stock",
     "daily_hot_themes": "stock", "daily_northbound_flow": "stock",
-    "daily_industry_flow": "stock",
     "users": "app", "strategies": "app", "backtest_reports": "app",
     "strategy_runs": "app", "batch_backtest_reports": "app",
     "ai_strategy_tasks": "app", "ai_factors": "app",

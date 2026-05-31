@@ -8,17 +8,30 @@ import {
   CaretDownOutlined,
   SafetyOutlined,
   ThunderboltOutlined,
+  FilterOutlined,
+  RiseOutlined,
 } from '@ant-design/icons';
-import type { FactorMeta, FactorItem, FactorConfig } from '@/types/factor';
+import type { FactorMeta, FactorItem, ConditionMeta, ConditionItem, FactorConfig } from '@/types/factor';
 import { factorService } from '@/services/factorService';
 import { strategyService } from '@/services/strategyService';
 import { aiService } from '@/services/aiService';
 import PageHeader from '@/components/shared/PageHeader';
 import FactorCard from '@/components/builder/FactorCard';
+import ConditionCard from '@/components/builder/ConditionCard';
 import FactorLibrary from '@/components/builder/FactorLibrary';
 import AINLAssistant from '@/components/builder/AINLAssistant';
 
 type BuilderMode = 'signal' | 'similarity';
+
+function emptyFactorConfig(): FactorConfig {
+  return {
+    selection_conditions: { logic: 'AND', conditions: [] },
+    scoring_modifiers: [],
+    buy_signals: { logic: 'AND', factors: [] },
+    sell_signals: { logic: 'OR', factors: [] },
+    risk_factors: [],
+  };
+}
 
 export default function StrategyBuilder() {
   const navigate = useNavigate();
@@ -26,13 +39,11 @@ export default function StrategyBuilder() {
   const [builderMode, setBuilderMode] = useState<BuilderMode>('signal');
   const [strategyName, setStrategyName] = useState('');
   const [strategyDesc, setStrategyDesc] = useState('');
-  const [factorConfig, setFactorConfig] = useState<FactorConfig>({
-    buy_signals: { logic: 'AND', factors: [] },
-    sell_signals: { logic: 'OR', factors: [] },
-    risk_factors: [],
-  });
+  const [factorConfig, setFactorConfig] = useState<FactorConfig>(emptyFactorConfig);
   const [allFactors, setAllFactors] = useState<FactorMeta[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [allConditions, setAllConditions] = useState<ConditionMeta[]>([]);
+  const [conditionCategories, setConditionCategories] = useState<string[]>([]);
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const [codePreviewVisible, setCodePreviewVisible] = useState(false);
@@ -41,22 +52,31 @@ export default function StrategyBuilder() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
-  const loadFactors = useCallback(async () => {
+  // 加载因子 + 条件
+  const loadData = useCallback(async () => {
     try {
-      const res = await factorService.getFactors();
-      if (res.code === 0) {
-        setAllFactors(res.data.factors);
-        setCategories(res.data.categories);
+      const [factorRes, condRes] = await Promise.all([
+        factorService.getFactors(),
+        factorService.getConditions(),
+      ]);
+      if (factorRes.code === 0) {
+        setAllFactors(factorRes.data.factors);
+        setCategories(factorRes.data.categories);
+      }
+      if (condRes.code === 0) {
+        setAllConditions(condRes.data.conditions);
+        setConditionCategories(condRes.data.categories);
       }
     } catch {
-      message.error('加载因子列表失败');
+      message.error('加载因子/条件列表失败');
     }
   }, []);
 
   useEffect(() => {
-    loadFactors();
-  }, [loadFactors]);
+    loadData();
+  }, [loadData]);
 
+  // ── K 线因子 操作 ──
   const addFactor = (factor: FactorMeta, target: 'buy' | 'sell' | 'risk') => {
     const newItem: FactorItem = {
       factor_id: factor.id,
@@ -115,6 +135,66 @@ export default function StrategyBuilder() {
     });
   };
 
+  // ── Tier 2 条件 操作 ──
+  const addCondition = (condition: ConditionMeta, target: 'selection' | 'scoring') => {
+    const newItem: ConditionItem = {
+      condition_id: condition.id,
+      params: condition.params.reduce(
+        (acc, p) => {
+          acc[p.name] = p.default;
+          return acc;
+        },
+        {} as Record<string, number | boolean | string>,
+      ),
+    };
+
+    setFactorConfig((prev) => {
+      if (target === 'scoring') {
+        return { ...prev, scoring_modifiers: [...prev.scoring_modifiers, newItem] };
+      }
+      return {
+        ...prev,
+        selection_conditions: {
+          ...prev.selection_conditions,
+          conditions: [...prev.selection_conditions.conditions, newItem],
+        },
+      };
+    });
+    message.success(`已添加: ${condition.name}`);
+  };
+
+  const removeCondition = (target: 'selection' | 'scoring', index: number) => {
+    setFactorConfig((prev) => {
+      if (target === 'scoring') {
+        const f = [...prev.scoring_modifiers];
+        f.splice(index, 1);
+        return { ...prev, scoring_modifiers: f };
+      }
+      const f = [...prev.selection_conditions.conditions];
+      f.splice(index, 1);
+      return { ...prev, selection_conditions: { ...prev.selection_conditions, conditions: f } };
+    });
+  };
+
+  const updateConditionParams = (
+    target: 'selection' | 'scoring',
+    index: number,
+    paramName: string,
+    value: number | boolean | string,
+  ) => {
+    setFactorConfig((prev) => {
+      if (target === 'scoring') {
+        const f = [...prev.scoring_modifiers];
+        f[index] = { ...f[index], params: { ...f[index].params, [paramName]: value } };
+        return { ...prev, scoring_modifiers: f };
+      }
+      const f = [...prev.selection_conditions.conditions];
+      f[index] = { ...f[index], params: { ...f[index].params, [paramName]: value } };
+      return { ...prev, selection_conditions: { ...prev.selection_conditions, conditions: f } };
+    });
+  };
+
+  // ── 保存 ──
   const handleSave = async () => {
     if (!strategyName.trim()) {
       message.warning('请输入策略名称');
@@ -153,7 +233,12 @@ export default function StrategyBuilder() {
         const { name, description, factor_config, explanation } = res.data;
         setStrategyName(name || 'AI生成的策略');
         setStrategyDesc(description || '');
-        if (factor_config) setFactorConfig(factor_config);
+        if (factor_config) {
+          setFactorConfig({
+            ...emptyFactorConfig(),
+            ...factor_config,
+          });
+        }
         message.success(explanation || 'AI 已生成策略配置');
         setAiPanelOpen(false);
       } else {
@@ -167,10 +252,15 @@ export default function StrategyBuilder() {
   };
 
   const getMeta = (factorId: string) => allFactors.find((f) => f.id === factorId);
+  const getCondMeta = (condId: string) => allConditions.find((c) => c.id === condId);
 
   const handleNLGenerated = (strategyId: number) => {
     message.success(`策略生成成功！ID: ${strategyId}`);
   };
+
+  const selConditions = factorConfig.selection_conditions.conditions;
+  const scorers = factorConfig.scoring_modifiers;
+  const hasTier2 = selConditions.length > 0 || scorers.length > 0;
 
   return (
     <>
@@ -223,7 +313,7 @@ export default function StrategyBuilder() {
           <AINLAssistant onStrategyGenerated={handleNLGenerated} />
         </div>
       ) : (
-        /* === 信号策略模式（原有代码） === */
+        /* === 信号策略模式 === */
         <>
           {/* Toolbar */}
           <div
@@ -286,7 +376,7 @@ export default function StrategyBuilder() {
 
           {/* Main layout: factor library + canvas */}
           <div style={{ display: 'flex', gap: 16, minHeight: 'calc(100vh - 280px)' }}>
-            {/* Left: Factor Library */}
+            {/* Left: Factor & Condition Library */}
             <div
               style={{
                 width: 300,
@@ -301,14 +391,101 @@ export default function StrategyBuilder() {
               <FactorLibrary
                 allFactors={allFactors}
                 categories={categories}
+                allConditions={allConditions}
+                conditionCategories={conditionCategories}
                 searchText={searchText}
                 onSearchChange={setSearchText}
                 onAddFactor={addFactor}
+                onAddCondition={addCondition}
               />
             </div>
 
             {/* Right: Strategy Canvas */}
             <div style={{ flex: 1, minWidth: 0 }}>
+              {/* ── 选股条件（Tier 2 pre_filter）── */}
+              <Card
+                title={
+                  <Space>
+                    <FilterOutlined style={{ color: '#1677ff' }} />
+                    选股条件
+                    {selConditions.length > 0 && (
+                      <Select
+                        size="small"
+                        value={factorConfig.selection_conditions.logic}
+                        style={{ width: 80 }}
+                        onChange={(v) =>
+                          setFactorConfig((prev) => ({
+                            ...prev,
+                            selection_conditions: {
+                              ...prev.selection_conditions,
+                              logic: v,
+                            },
+                          }))
+                        }
+                        options={[
+                          { label: 'AND', value: 'AND' },
+                          { label: 'OR', value: 'OR' },
+                        ]}
+                      />
+                    )}
+                    <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px' }}>
+                      NEW
+                    </Tag>
+                  </Space>
+                }
+                style={{ marginBottom: 16 }}
+              >
+                {selConditions.length === 0 ? (
+                  <Empty description="从左侧选股条件点击添加预筛选条件（龙虎榜、板块资金流等）" />
+                ) : (
+                  selConditions.map((item, i) => {
+                    const meta = getCondMeta(item.condition_id);
+                    if (!meta) return null;
+                    return (
+                      <ConditionCard
+                        key={`sel-${i}`}
+                        item={item}
+                        meta={meta}
+                        onRemove={() => removeCondition('selection', i)}
+                        onParamChange={(p, v) => updateConditionParams('selection', i, p, v)}
+                      />
+                    );
+                  })
+                )}
+              </Card>
+
+              {/* ── 评分修正（Tier 2 score_modifier）── */}
+              <Card
+                title={
+                  <Space>
+                    <RiseOutlined style={{ color: '#fa8c16' }} />
+                    评分修正
+                    <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px' }}>
+                      NEW
+                    </Tag>
+                  </Space>
+                }
+                style={{ marginBottom: 16 }}
+              >
+                {scorers.length === 0 ? (
+                  <Empty description="从左侧评分修正点击添加上分条件（龙虎榜加分、板块排名加分等）" />
+                ) : (
+                  scorers.map((item, i) => {
+                    const meta = getCondMeta(item.condition_id);
+                    if (!meta) return null;
+                    return (
+                      <ConditionCard
+                        key={`scr-${i}`}
+                        item={item}
+                        meta={meta}
+                        onRemove={() => removeCondition('scoring', i)}
+                        onParamChange={(p, v) => updateConditionParams('scoring', i, p, v)}
+                      />
+                    );
+                  })
+                )}
+              </Card>
+
               {/* Buy Signals */}
               <Card
                 title={
@@ -423,7 +600,13 @@ export default function StrategyBuilder() {
         open={codePreviewVisible}
         onCancel={() => setCodePreviewVisible(false)}
         footer={
-          <Button type="primary" onClick={() => { setCodePreviewVisible(false); navigate('/strategies'); }}>
+          <Button
+            type="primary"
+            onClick={() => {
+              setCodePreviewVisible(false);
+              navigate('/strategies');
+            }}
+          >
             返回策略列表
           </Button>
         }

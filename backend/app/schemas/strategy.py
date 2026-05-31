@@ -20,8 +20,22 @@ class SignalGroup(BaseModel):
     factors: List[FactorItem] = Field(default_factory=list, description="因子列表")
 
 
+class ConditionItem(BaseModel):
+    """单个选股条件/评分修正配置"""
+    condition_id: str = Field(..., description="条件ID")
+    params: Dict[str, Any] = Field(default_factory=dict, description="条件参数")
+
+
+class SelectionGroup(BaseModel):
+    """选股条件组"""
+    logic: str = Field("AND", description="条件组合逻辑: AND / OR")
+    conditions: List[ConditionItem] = Field(default_factory=list, description="条件列表")
+
+
 class FactorConfig(BaseModel):
     """因子组合配置"""
+    selection_conditions: SelectionGroup = Field(default_factory=lambda: SelectionGroup())
+    scoring_modifiers: List[ConditionItem] = Field(default_factory=list, description="评分修正列表")
     buy_signals: SignalGroup = Field(default_factory=lambda: SignalGroup())
     sell_signals: SignalGroup = Field(default_factory=lambda: SignalGroup())
     risk_factors: List[FactorItem] = Field(default_factory=list, description="风控因子列表")

@@ -10,7 +10,10 @@ from datetime import datetime, timedelta
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from ..config import settings
-from ..models.stock_tables import Stock, Daily, DailySectorFlow
+from ..models.stock_tables import (
+    Stock, Daily, DailySectorFlow,
+    DailyHotStock, DailyHotTheme, DailyDragonTiger, DailyDragonTigerSeat,
+)
 
 # 同步引擎（用于 thread pool 中的回测）
 _sync_engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -160,7 +163,9 @@ class BacktestEngine:
         cutoff_date: str,
         track_days: List[int] = [3, 7, 15]
     ) -> Dict[str, Any]:
-        stocks_data, daily_data, sector_flow_data = self._load_data(cutoff_date)
+        loaded = self._load_data(cutoff_date)
+        stocks_data = loaded["stocks"]
+        daily_data = loaded["daily"]
 
         ts_code = (self.config or {}).get("ts_code", "").strip()
         if ts_code:
@@ -171,9 +176,8 @@ class BacktestEngine:
 
         strategy_input = {
             "cutoff_date": cutoff_date,
-            "stocks": stocks_data,
-            "daily": daily_data,
-            "sector_flow": sector_flow_data,
+            **loaded,
+            "daily": daily_data,  # 覆盖 loaded 中未过滤的 daily
             "config": self.config or {},
         }
 
@@ -197,7 +201,9 @@ class BacktestEngine:
         end_date: str,
         track_days: List[int] = [3, 7, 15]
     ) -> List[Dict[str, Any]]:
-        stocks_data, daily_data, sector_flow_data = self._load_data_range(start_date, end_date)
+        loaded = self._load_data_range(start_date, end_date)
+        stocks_data = loaded["stocks"]
+        daily_data = loaded["daily"]
 
         trading_days = sorted(set(
             row["trade_date"] for rows in daily_data.values() for row in rows
@@ -208,6 +214,7 @@ class BacktestEngine:
         results = []
 
         for cutoff_date in trading_days:
+            cutoff_date_fmt = datetime.strptime(cutoff_date, "%Y%m%d").strftime("%Y-%m-%d")
             daily_result = {
                 "cutoff_date": cutoff_date,
                 "input": {"cutoff_date": cutoff_date, "config": self.config or {}},
@@ -222,11 +229,19 @@ class BacktestEngine:
                 if ts_code:
                     sliced_daily = {ts_code: sliced_daily[ts_code]} if ts_code in sliced_daily else {}
 
+                # 切片横截面数据到当日
+                sliced_hot_stocks = [r for r in loaded["hot_stocks"] if r.get("trade_date") == cutoff_date_fmt]
+                sliced_hot_themes = [r for r in loaded["hot_themes"] if r.get("trade_date") == cutoff_date_fmt]
+
                 strategy_input = {
                     "cutoff_date": cutoff_date,
                     "stocks": stocks_data,
                     "daily": sliced_daily,
-                    "sector_flow": sector_flow_data,
+                    "daily_sector_flow": loaded["daily_sector_flow"],
+                    "hot_stocks": sliced_hot_stocks,
+                    "hot_themes": sliced_hot_themes,
+                    "dragon_tiger": loaded["dragon_tiger"],
+                    "dragon_tiger_seats": loaded["dragon_tiger_seats"],
                     "config": self.config or {},
                 }
 
@@ -249,8 +264,8 @@ class BacktestEngine:
 
         return results
 
-    def _load_data(self, cutoff_date: str) -> Tuple[List[Dict], Dict[str, List[Dict]], List[Dict]]:
-        """从 PostgreSQL 加载历史数据（截止日及之前）"""
+    def _load_data(self, cutoff_date: str) -> Dict[str, Any]:
+        """从 PostgreSQL 加载历史数据（截止日及之前），返回完整 strategy_input 数据"""
         session = _get_db()
         try:
             # 1. 股票基础信息
@@ -284,11 +299,34 @@ class BacktestEngine:
                 DailySectorFlow.trade_date.between(flow_start_date, cutoff_date_fmt)
             ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
             sector_result = session.execute(sector_stmt)
-            sector_flow_data = [dict(row._mapping) for row in sector_result]
+            daily_sector_flow_data = [dict(row._mapping) for row in sector_result]
+
+            # 5. 热门股（仅当天）
+            hot_stock_stmt = select(DailyHotStock).where(
+                DailyHotStock.trade_date == cutoff_date_fmt
+            ).order_by(DailyHotStock.sort_order)
+            hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
+
+            # 6. 热门题材（仅当天）
+            hot_theme_stmt = select(DailyHotTheme).where(
+                DailyHotTheme.trade_date == cutoff_date_fmt
+            ).order_by(DailyHotTheme.stock_count.desc())
+            hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
+
+            # 7. 龙虎榜（近 30 日上榜记录 + 席位明细）
+            dt_stmt = select(DailyDragonTiger).where(
+                DailyDragonTiger.trade_date.between(flow_start_date, cutoff_date_fmt)
+            ).order_by(DailyDragonTiger.trade_date.desc())
+            dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
+
+            dt_seat_stmt = select(DailyDragonTigerSeat).where(
+                DailyDragonTigerSeat.trade_date.between(flow_start_date, cutoff_date_fmt)
+            ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
+            dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
         finally:
             session.close()
 
-        # 5. 按 ts_code 分组
+        # 按 ts_code 分组日线
         daily_data = {}
         for row in daily_rows:
             ts_code = row["ts_code"]
@@ -302,10 +340,18 @@ class BacktestEngine:
                 "circ_market_cap": row["circ_market_cap"],
             })
 
-        return stocks_data, daily_data, sector_flow_data
+        return {
+            "stocks": stocks_data,
+            "daily": daily_data,
+            "daily_sector_flow": daily_sector_flow_data,
+            "hot_stocks": hot_stocks_data,
+            "hot_themes": hot_themes_data,
+            "dragon_tiger": dragon_tiger_data,
+            "dragon_tiger_seats": dragon_tiger_seats_data,
+        }
 
-    def _load_data_range(self, start_date: str, end_date: str) -> Tuple[List[Dict], Dict[str, List[Dict]], List[Dict]]:
-        """加载全时段历史数据"""
+    def _load_data_range(self, start_date: str, end_date: str) -> Dict[str, Any]:
+        """加载全时段历史数据，返回完整 strategy_input 数据"""
         session = _get_db()
         try:
             stmt = select(
@@ -332,7 +378,30 @@ class BacktestEngine:
             sector_stmt = select(DailySectorFlow).where(
                 DailySectorFlow.trade_date.between(flow_earliest_date, end_date_fmt)
             ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
-            sector_flow_data = [dict(row._mapping) for row in session.execute(sector_stmt)]
+            daily_sector_flow_data = [dict(row._mapping) for row in session.execute(sector_stmt)]
+
+            # 热门股
+            hot_stock_stmt = select(DailyHotStock).where(
+                DailyHotStock.trade_date.between(flow_earliest_date, end_date_fmt)
+            ).order_by(DailyHotStock.trade_date, DailyHotStock.sort_order)
+            hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
+
+            # 热门题材
+            hot_theme_stmt = select(DailyHotTheme).where(
+                DailyHotTheme.trade_date.between(flow_earliest_date, end_date_fmt)
+            ).order_by(DailyHotTheme.trade_date, DailyHotTheme.stock_count.desc())
+            hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
+
+            # 龙虎榜 + 席位
+            dt_stmt = select(DailyDragonTiger).where(
+                DailyDragonTiger.trade_date.between(flow_earliest_date, end_date_fmt)
+            ).order_by(DailyDragonTiger.trade_date.desc())
+            dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
+
+            dt_seat_stmt = select(DailyDragonTigerSeat).where(
+                DailyDragonTigerSeat.trade_date.between(flow_earliest_date, end_date_fmt)
+            ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
+            dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
         finally:
             session.close()
 
@@ -349,7 +418,15 @@ class BacktestEngine:
                 "circ_market_cap": row["circ_market_cap"],
             })
 
-        return stocks_data, daily_data, sector_flow_data
+        return {
+            "stocks": stocks_data,
+            "daily": daily_data,
+            "daily_sector_flow": daily_sector_flow_data,
+            "hot_stocks": hot_stocks_data,
+            "hot_themes": hot_themes_data,
+            "dragon_tiger": dragon_tiger_data,
+            "dragon_tiger_seats": dragon_tiger_seats_data,
+        }
 
     def _track_performance(
         self,
@@ -481,7 +558,8 @@ class BacktestEngine:
         }
 
     def run_live(self, cutoff_date: str, ts_code: str = None) -> List[Dict]:
-        stocks_data, daily_data, sector_flow_data = self._load_data(cutoff_date)
+        loaded = self._load_data(cutoff_date)
+        daily_data = loaded["daily"]
 
         if ts_code:
             if ts_code in daily_data:
@@ -491,9 +569,8 @@ class BacktestEngine:
 
         strategy_input = {
             "cutoff_date": cutoff_date,
-            "stocks": stocks_data,
+            **loaded,
             "daily": daily_data,
-            "sector_flow": sector_flow_data,
             "config": self.config or {},
         }
 

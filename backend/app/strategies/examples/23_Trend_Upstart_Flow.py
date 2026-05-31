@@ -460,13 +460,13 @@ def run(data):
             "cutoff_date": "20260525",
             "stocks": [{"ts_code": "...", "name": "...", "industry_l2": "...", ...}],
             "daily": {"600001.SH": [{"trade_date": "...", "close": ..., "vol": ..., ...}]},
-            "sector_flow": [{"trade_date": "...", "sector_type": "...", "sector_name": "...", ...}],
+            "daily_sector_flow": [{"trade_date": "...", "sector_type": "...", "sector_name": "...", ...}],
         }
     """
     cutoff_date = data["cutoff_date"]
     stocks = data["stocks"]
     daily = data["daily"]
-    sector_flow_raw = data.get("sector_flow", [])
+    daily_sector_flow_raw = data.get("daily_sector_flow", [])
     target_ts_code = data.get("config", {}).get("ts_code", "").strip() if data.get("config") else ""
 
     stock_lookup = {s["ts_code"]: s for s in stocks}
@@ -475,8 +475,8 @@ def run(data):
     # 构建 sector_flow 索引和排名
     sector_index = None
     sector_ranking = None
-    if sector_flow_raw:
-        sector_index, sector_ranking = build_sector_flow_index(sector_flow_raw)
+    if daily_sector_flow_raw:
+        sector_index, sector_ranking = build_sector_flow_index(daily_sector_flow_raw)
 
     for ts_code, rows in daily.items():
         if not rows:
@@ -520,7 +520,7 @@ def run(data):
             matched = find_stock_sectors(sector_index, industry_l2, industry_l1, concepts_str)
             flow_score = compute_flow_score(matched, sector_ranking, sector_index)
             result["score"] += flow_score
-            result["breakdown"]["sector_flow"] = flow_score
+            result["breakdown"]["daily_sector_flow"] = flow_score
 
         if result["score"] < 40 and not target_ts_code:
             continue

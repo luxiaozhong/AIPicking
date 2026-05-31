@@ -90,7 +90,7 @@ def _rule_based_parse(prompt: str) -> dict:
         if get_factor_meta(fid)
     ]
     name = (
-        "AI生成-" + "+".join([n["name"] for n in factor_names[:3]])
+        "AI生成-" + "+".join(factor_names[:3])
         if factor_names
         else "AI生成的策略"
     )

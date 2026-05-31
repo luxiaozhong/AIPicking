@@ -66,12 +66,11 @@ TABLE_ORDER = [
     # 股票数据（无 FK 依赖）
     ("stocks", "stock"),
     ("daily", "stock"),
-    ("sector_flow", "stock"),
+    # sector_flow / daily_industry_flow → 已合并到 daily_sector_flow（2026-05-31）
     ("stock_themes", "stock"),
     ("daily_hot_stocks", "stock"),
     ("daily_hot_themes", "stock"),
     ("daily_northbound_flow", "stock"),
-    ("daily_industry_flow", "stock"),
     # 应用数据 — 独立表
     ("users", "app"),
     ("strategies", "app"),
@@ -85,10 +84,11 @@ TABLE_ORDER = [
 
 # PostgreSQL SERIAL 序列名列表
 SEQUENCES = [
-    "stocks_id_seq", "daily_id_seq", "sector_flow_id_seq",
+    "stocks_id_seq", "daily_id_seq",
+    # sector_flow_id_seq / daily_industry_flow_id_seq → 已随表删除（2026-05-31）
     "stock_themes_id_seq", "daily_hot_stocks_id_seq",
     "daily_hot_themes_id_seq", "daily_northbound_flow_id_seq",
-    "daily_industry_flow_id_seq", "users_id_seq", "strategies_id_seq",
+    "users_id_seq", "strategies_id_seq",
     "backtest_reports_id_seq", "strategy_runs_id_seq",
     "batch_backtest_reports_id_seq", "ai_strategy_tasks_id_seq",
     "ai_factors_id_seq",
