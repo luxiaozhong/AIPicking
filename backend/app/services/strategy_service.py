@@ -410,10 +410,14 @@ class StrategyService:
     async def update_factor_config(
         db: AsyncSession,
         strategy_id: int,
-        factor_config: Dict[str, Any]
+        factor_config: Dict[str, Any],
+        user_id: Optional[int] = None,
+        user_role: str = "user",
     ) -> dict:
         """更新策略的因子配置（重新生成代码）"""
-        db_strategy = await StrategyService.get_strategy(db, strategy_id)
+        db_strategy = await StrategyService.get_strategy(
+            db, strategy_id, user_id=user_id, user_role=user_role
+        )
 
         # 重新生成代码
         generated_code = generate_strategy_code(db_strategy.name, factor_config)

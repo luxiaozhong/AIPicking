@@ -5,7 +5,6 @@ import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/Auth/ProtectedRoute';
 import StrategyList from '@/pages/StrategyList';
 
-import StrategyEdit from '@/pages/StrategyEdit';
 import StrategyDetail from '@/pages/StrategyDetail';
 import StrategyBuilder from '@/pages/StrategyBuilder';
 import AIStrategyBuilder from '@/pages/AIStrategyBuilder';
@@ -85,14 +84,6 @@ const App: React.FC = () => {
         />
 
         <Route
-          path="/strategies/new"
-          element={
-            <ProtectedRoute>
-              <StrategyEdit />
-            </ProtectedRoute>
-          }
-        />
-        <Route
           path="/strategies/builder"
           element={
             <ProtectedRoute>
@@ -113,14 +104,6 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <StrategyDetail />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/strategies/:id/edit"
-          element={
-            <ProtectedRoute>
-              <StrategyEdit />
             </ProtectedRoute>
           }
         />

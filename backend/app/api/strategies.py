@@ -222,5 +222,6 @@ async def update_strategy_factors(
 ):
     """更新策略的因子配置（重新生成代码）"""
     return await StrategyService.update_factor_config(
-        db, strategy_id, factor_config.model_dump()
+        db, strategy_id, factor_config.model_dump(),
+        user_id=current_user.id, user_role=current_user.role
     )

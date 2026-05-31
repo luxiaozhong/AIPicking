@@ -19,6 +19,7 @@ import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import StrategyCommunity from '@/components/StrategyCommunity';
+import { isVisualEditable } from '@/types/strategy';
 import type { RecommendationItem } from '@/types/backtest';
 
 export default function StrategyDetail() {
@@ -98,9 +99,11 @@ export default function StrategyDetail() {
     <>
       {isOwner && (
         <>
-          <Button icon={<EditOutlined />} onClick={() => navigate(`/strategies/${currentStrategy.id}/edit`)}>
-            编辑
-          </Button>
+          {isVisualEditable(currentStrategy.factor_config) && (
+            <Button icon={<EditOutlined />} onClick={() => navigate(`/strategies/builder?id=${currentStrategy.id}`)}>
+              编辑
+            </Button>
+          )}
           <Button icon={<DownloadOutlined />} onClick={handleDownload}>
             下载
           </Button>

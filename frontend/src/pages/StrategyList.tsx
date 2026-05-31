@@ -6,6 +6,7 @@ import { useStrategyStore } from '@/stores/strategyStore';
 import { useAuthStore } from '@/stores/authStore';
 import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
+import { isVisualEditable } from '@/types/strategy';
 import type { Strategy } from '@/types/strategy';
 
 const { Search } = Input;
@@ -235,9 +236,11 @@ export default function StrategyList() {
               <Button type="link" size="small" onClick={() => navigate(`/strategies/${record.id}`)}>
                 查看
               </Button>
-              <Button type="link" size="small" onClick={() => navigate(`/strategies/${record.id}/edit`)}>
-                编辑
-              </Button>
+              {isVisualEditable(record.factor_config) && (
+                <Button type="link" size="small" onClick={() => navigate(`/strategies/builder?id=${record.id}`)}>
+                  编辑
+                </Button>
+              )}
               {record.status === 'deleted' ? (
                 <>
                   <Popconfirm title="确定恢复此策略？" onConfirm={() => handleRestore(record.id)} okText="确定" cancelText="取消">
