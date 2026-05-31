@@ -10,6 +10,7 @@ export const strategyService = {
     limit?: number;
     search?: string;
     status?: string;
+    scope?: string;
   } = {}) {
     const response = await api.get<StrategyListResponse>('/strategies', {
       params,
@@ -89,6 +90,48 @@ export const strategyService = {
   // 彻底删除策略（硬删除，同时删除关联的回测报告）
   async permanentDeleteStrategy(id: number) {
     await api.delete(`/strategies/${id}/permanent`);
+  },
+
+  // 发布策略
+  async publishStrategy(id: number) {
+    const response = await api.put<{ code: number; message: string; is_published: boolean }>(`/strategies/${id}/publish`);
+    return response.data;
+  },
+
+  // 取消发布策略
+  async unpublishStrategy(id: number) {
+    const response = await api.put<{ code: number; message: string; is_published: boolean }>(`/strategies/${id}/unpublish`);
+    return response.data;
+  },
+
+  // 评分
+  async rateStrategy(id: number, score: number) {
+    const response = await api.post<{ code: number; message: string; data: { id: number; score: number } }>(`/strategies/${id}/ratings`, { score });
+    return response.data;
+  },
+
+  // 获取评分统计
+  async getStrategyRatings(id: number) {
+    const response = await api.get<{ average: number | null; count: number; distribution: Record<number, number>; current_user_score: number | null }>(`/strategies/${id}/ratings`);
+    return response.data;
+  },
+
+  // 发表评论
+  async addComment(id: number, content: string) {
+    const response = await api.post<{ code: number; message: string; data: { id: number; content: string; user_name: string | null; created_at: string } }>(`/strategies/${id}/comments`, { content });
+    return response.data;
+  },
+
+  // 获取评论列表
+  async getComments(id: number, page = 1, limit = 20) {
+    const response = await api.get<{ items: import('@/types/strategy').CommentItem[]; total: number; page: number; limit: number }>(`/strategies/${id}/comments`, { params: { page, limit } });
+    return response.data;
+  },
+
+  // 删除评论
+  async deleteComment(strategyId: number, commentId: number) {
+    const response = await api.delete<{ code: number; message: string }>(`/strategies/${strategyId}/comments/${commentId}`);
+    return response.data;
   },
 };
 
