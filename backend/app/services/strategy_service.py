@@ -32,38 +32,79 @@ class StrategyService:
         limit: int = 20,
         search: Optional[str] = None,
         status: Optional[str] = None,
+        scope: str = "all",
         user_id: Optional[int] = None,
         user_role: str = "user",
     ) -> Tuple[List[Strategy], int]:
         """获取策略列表"""
-        query = select(Strategy).options(selectinload(Strategy.owner))
+        from ..models.strategy_rating import StrategyRating
 
-        # 筛选条件
+        query = select(
+            Strategy,
+            func.coalesce(func.avg(StrategyRating.score), 0).label("avg_score"),
+            func.count(StrategyRating.id).label("rating_count"),
+        ).options(
+            selectinload(Strategy.owner)
+        ).outerjoin(
+            StrategyRating, StrategyRating.strategy_id == Strategy.id
+        ).group_by(Strategy.id)
+
+        # 权限筛选
+        if user_role != "admin":
+            if scope == "mine":
+                query = query.where(Strategy.user_id == user_id)
+            elif scope == "published":
+                query = query.where(
+                    (Strategy.is_published == True) & (Strategy.user_id != user_id)
+                )
+            else:  # all
+                query = query.where(
+                    (Strategy.user_id == user_id) | (Strategy.is_published == True)
+                )
+
+        # 通用筛选
         if search:
             query = query.where(Strategy.name.like(f"%{search}%"))
         if status:
             query = query.where(Strategy.status == status)
-        # 普通用户只看自己的数据
-        if user_role != "admin":
-            query = query.where(Strategy.user_id == user_id)
 
-        # 计算总数
+        # 排序
+        query = query.order_by(Strategy.created_at.desc())
+
+        # 计算总数 (separate count query without group_by)
         count_query = select(func.count()).select_from(Strategy)
+        if user_role != "admin":
+            if scope == "mine":
+                count_query = count_query.where(Strategy.user_id == user_id)
+            elif scope == "published":
+                count_query = count_query.where(
+                    (Strategy.is_published == True) & (Strategy.user_id != user_id)
+                )
+            else:
+                count_query = count_query.where(
+                    (Strategy.user_id == user_id) | (Strategy.is_published == True)
+                )
         if search:
             count_query = count_query.where(Strategy.name.like(f"%{search}%"))
         if status:
             count_query = count_query.where(Strategy.status == status)
-        if user_role != "admin":
-            count_query = count_query.where(Strategy.user_id == user_id)
         total_result = await db.execute(count_query)
         total = total_result.scalar()
 
         # 分页
         offset = (page - 1) * limit
-        query = query.offset(offset).limit(limit).order_by(Strategy.created_at.desc())
+        query = query.offset(offset).limit(limit)
 
         result = await db.execute(query)
-        strategies = result.scalars().all()
+        rows = result.all()
+
+        # 组装：将 avg_score / rating_count 赋到 strategy 对象上
+        strategies = []
+        for row in rows:
+            strategy = row[0]
+            strategy._avg_score = float(row[1]) if row[1] else None
+            strategy._rating_count = row[2] if row[2] else 0
+            strategies.append(strategy)
 
         return strategies, total
     
@@ -73,9 +114,10 @@ class StrategyService:
         strategy_id: int,
         user_id: Optional[int] = None,
         user_role: str = "user",
+        require_owner: bool = False,
     ) -> Optional[Strategy]:
         """获取单个策略"""
-        query = select(Strategy).where(Strategy.id == strategy_id)
+        query = select(Strategy).options(selectinload(Strategy.owner)).where(Strategy.id == strategy_id)
         result = await db.execute(query)
         strategy = result.scalar_one_or_none()
 
@@ -85,8 +127,15 @@ class StrategyService:
                 detail=f"Strategy with id {strategy_id} not found"
             )
 
-        # 普通用户只能访问自己的策略
-        if user_role != "admin" and strategy.user_id != user_id:
+        # 权限检查
+        is_owner = strategy.user_id == user_id
+        if require_owner:
+            if not is_owner:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="只有策略创建者可以执行此操作"
+                )
+        elif user_role != "admin" and not is_owner and not strategy.is_published:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="无权访问此策略"
@@ -207,9 +256,9 @@ class StrategyService:
     ) -> Strategy:
         """更新策略元数据（名称、描述、标签等，不含代码）"""
         db_strategy = await StrategyService.get_strategy(
-            db, strategy_id, user_id=user_id, user_role=user_role
+            db, strategy_id, user_id=user_id, user_role=user_role, require_owner=True
         )
-        
+
         # 更新字段
         update_data = strategy.model_dump(exclude_unset=True)
         if 'tags' in update_data and update_data['tags']:
@@ -234,7 +283,7 @@ class StrategyService:
     ) -> None:
         """删除策略（软删除）"""
         db_strategy = await StrategyService.get_strategy(
-            db, strategy_id, user_id=user_id, user_role=user_role
+            db, strategy_id, user_id=user_id, user_role=user_role, require_owner=True
         )
         db_strategy.status = "deleted"
         await db.commit()
@@ -250,7 +299,7 @@ class StrategyService:
         from ..models.backtest import BacktestReport, BatchBacktestReport, StrategyRun
 
         db_strategy = await StrategyService.get_strategy(
-            db, strategy_id, user_id=user_id, user_role=user_role
+            db, strategy_id, user_id=user_id, user_role=user_role, require_owner=True
         )
 
         # 删除关联的回测报告
@@ -403,3 +452,43 @@ class StrategyService:
                 "factor_config": json.loads(db_strategy.factor_config) if db_strategy.factor_config else None
             }
         }
+
+    @staticmethod
+    async def publish_strategy(
+        db: AsyncSession,
+        strategy_id: int,
+        user_id: int,
+    ) -> dict:
+        """发布策略"""
+        query = select(Strategy).where(Strategy.id == strategy_id)
+        result = await db.execute(query)
+        strategy = result.scalar_one_or_none()
+
+        if not strategy:
+            raise HTTPException(status_code=404, detail="策略不存在")
+        if strategy.user_id != user_id:
+            raise HTTPException(status_code=403, detail="只有策略创建者可以发布")
+
+        strategy.is_published = True
+        await db.commit()
+        return {"code": 0, "message": "发布成功", "is_published": True}
+
+    @staticmethod
+    async def unpublish_strategy(
+        db: AsyncSession,
+        strategy_id: int,
+        user_id: int,
+    ) -> dict:
+        """取消发布策略"""
+        query = select(Strategy).where(Strategy.id == strategy_id)
+        result = await db.execute(query)
+        strategy = result.scalar_one_or_none()
+
+        if not strategy:
+            raise HTTPException(status_code=404, detail="策略不存在")
+        if strategy.user_id != user_id:
+            raise HTTPException(status_code=403, detail="只有策略创建者可以取消发布")
+
+        strategy.is_published = False
+        await db.commit()
+        return {"code": 0, "message": "已取消发布", "is_published": False}
