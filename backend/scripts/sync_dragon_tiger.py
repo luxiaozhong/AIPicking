@@ -388,7 +388,7 @@ def sync(date_str: str, dry_run: bool = False) -> dict:
     if not dry_run and all_seats:
         save_seats(date_str, all_seats)
     result["seats_count"] = len(all_seats)
-    logging.info(f"Seats total: {total_seats} records, {len(result['errors'])} errors")
+    logging.info(f"Seats total: {len(all_seats)} records, {len(result['errors'])} errors")
 
     # 3. 摘要
     _print_summary(date_str, stocks, result["errors"])
