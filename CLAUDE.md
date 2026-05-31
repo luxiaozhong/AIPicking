@@ -60,7 +60,7 @@ nohup bash restart.sh > /tmp/aipicking.log 2>&1 &  # Run in background
 - `app/services/` — Business logic:
   - `strategy_service.py` — Upload & factor-config strategy creation
   - `backtest_service.py` — Backtests run in **thread pool** (`loop.run_in_executor`) to avoid blocking event loop
-  - `backtest_engine.py` — AST sandbox + strategy execution + performance tracking
+  - `backtest_engine.py` — AST sandbox + strategy execution + performance tracking. **Data loading uses `select(Model.__table__)` for non-core tables** (NOT `select(Model)`) so `dict(row._mapping)` returns column-level keys. Supports `REQUIRED_DATA` declaration in strategy code for on-demand loading.
   - `llm_service.py` — DeepSeek API calls for K-line analysis and indicator code generation
   - `ai_strategy_service.py` — Similarity-based strategy code generator with **runtime validation** of AI-generated code
   - `code_generator.py` — Legacy factor-config strategy code generator (buy/sell signals)
@@ -126,6 +126,33 @@ Factor functions should handle both `volume` and `vol` column names. Existing vo
 - `volume/` — OBV, turnover, volume ratio
 - `pattern/` — Engulfing, hammer, morning star
 - `risk/` — Fixed stop, take profit, trailing stop
+
+### Backtest Engine Data Loading
+
+**`REQUIRED_DATA` mechanism**: Strategies can declare which extra data sources they need. If not declared, engine loads all data (backward compatible).
+
+```python
+# In strategy code:
+REQUIRED_DATA = []                                    # Only stocks + daily
+REQUIRED_DATA = ["dragon_tiger"]                      # + dragon tiger
+REQUIRED_DATA = ["sector_flow", "dragon_tiger"]       # + both
+```
+
+**Data source mapping:**
+| Source | Tables | When needed |
+|--------|--------|-------------|
+| (core, always loaded) | `stocks`, `daily` | All strategies |
+| `sector_flow` | `daily_sector_flow` | Tier 2 `sf_*` conditions |
+| `dragon_tiger` | `daily_dragon_tiger`, `daily_dragon_tiger_seats` | Tier 2 `dt_*` conditions |
+| `hot_stocks` | `daily_hot_stock` | (unused by current factors) |
+| `hot_themes` | `daily_hot_theme` | (unused by current factors) |
+
+**Critical pattern — `select(Model.__table__`)**: Non-core table queries MUST use `select(Model.__table__)` (Core-level), NOT `select(Model)` (ORM-level). ORM-level select causes `dict(row._mapping)` to return `{'ModelName': <object>}` instead of `{'column_name': value, ...}`, breaking strategy code that accesses `row["column_name"]`.
+
+**`code_generator.py`** auto-infers `REQUIRED_DATA` from `factor_config`:
+- `selection_conditions` / `scoring_modifiers` with `dt_*` IDs → `dragon_tiger`
+- `selection_conditions` / `scoring_modifiers` with `sf_*` IDs → `sector_flow`
+- Pure K-line factors → `REQUIRED_DATA = []`
 
 ### API Response Format
 
