@@ -4,21 +4,21 @@ Daily A-share market data sync — standalone script, zero dependency on the app
 Fetches and stores into stock_db.sqlite:
   1. 同花顺热点 — hot stocks + theme attribution (zero auth)
   2. 北向资金 — northbound capital flow EOD cumulative (zero auth)
-  3. 东财行业板块 — industry ranking + fund flow (rate-limited via em_get)
+  3. 东财板块 — industry + concept sector ranking & fund flow (rate-limited via em_get)
 
 Idempotent: INSERT OR REPLACE on UNIQUE(trade_date, key) — safe to re-run.
+
+Replaces the old ``sector_flow`` table with ``daily_sector_flow``:
+  - Adds ``sector_type`` column ('industry' / 'concept')
+  - Adds ``net_inflow`` = main + large + mid + small (亿元)
+  - Covers both industry (m:90+t:2) and concept (m:90+t:3) sectors
 
 Usage:
     cd backend
     venv/bin/python scripts/sync_market_data.py
     venv/bin/python scripts/sync_market_data.py --date 2026-05-29
-    venv/bin/python scripts/sync_market_data.py --date 2026-05-29 --db /other/stock_db.sqlite
+    venv/bin/python scripts/sync_market_data.py --db /other/stock_db.sqlite
     venv/bin/python scripts/sync_market_data.py --init
-
-Backfill a date range:
-    for d in 2026-05-{20..29}; do
-        venv/bin/python scripts/sync_market_data.py --date "$d" && sleep 2
-    done
 
 Cron (weekdays 18:30 Beijing time):
     30 18 * * 1-5 cd /opt/AIpicking/backend && \\
@@ -29,9 +29,7 @@ import argparse
 import logging
 import os
 import random
-import psycopg2
-import psycopg2.extras
-from urllib.parse import urlparse
+import sqlite3
 import sys
 import time
 from collections import Counter
@@ -49,10 +47,9 @@ for _env_file in (".env", ".env.production"):
     if _path.exists():
         load_dotenv(_path, override=True)
 
-DEFAULT_PG_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
-).replace("+asyncpg", "").replace("+psycopg2", "")
+DEFAULT_STOCK_DB = os.getenv(
+    "STOCK_DB_PATH", "/opt/stock_data/stock_db.sqlite"
+)
 
 # ═════════════════════════════════════════════════════════════════════════
 # Constants
@@ -63,26 +60,26 @@ UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"
 )
 
-# Eastmoney rate limiting (module-level, serial across all calls)
 _em_session: Optional[requests.Session] = None
 EM_MIN_INTERVAL = 1.0
 _em_last_call = [0.0]
+
+# Sector types for Eastmoney push2 API
+SECTOR_TYPES = {
+    "industry": "m:90+t:2",   # 行业板块
+    "concept":  "m:90+t:3",   # 概念板块
+}
 
 # ═════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════
 
-def get_db_connection() -> psycopg2.extensions.connection:
-    db_url = DEFAULT_PG_URL.replace("postgresql://", "").replace("postgresql+psycopg2://", "")
-    r = urlparse(f"http://{db_url}")
-    conn = psycopg2.connect(
-        host=r.hostname or "localhost",
-        port=r.port or 5432,
-        user=r.username or "aipicking",
-        password=r.password or "",
-        dbname=r.path.lstrip("/") or "aipicking",
-    )
-    conn.cursor_factory = psycopg2.extras.RealDictCursor
+def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
+    path = db_path or DEFAULT_STOCK_DB
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -111,7 +108,7 @@ def _em_get(url, params=None, headers=None, timeout=15, **kwargs):
 
 
 def _yi(val) -> Optional[float]:
-    """Convert yuan → 亿元, None-safe."""
+    """Convert yuan to yi (100M). None-safe."""
     if val is None:
         return None
     return round(float(val) / 1e8, 2)
@@ -121,11 +118,93 @@ def _yi(val) -> Optional[float]:
 # DDL
 # ═════════════════════════════════════════════════════════════════════════
 
-_TABLES = {}  # Tables are now managed by SQLAlchemy ORM (app.models.stock_tables)
+_TABLES = {
+    "daily_hot_stocks": """
+        CREATE TABLE IF NOT EXISTS daily_hot_stocks (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date    TEXT    NOT NULL,
+            stock_code    TEXT    NOT NULL,
+            stock_name    TEXT    NOT NULL,
+            close         REAL,
+            change_amt    REAL,
+            change_pct    REAL,
+            turnover_pct  REAL,
+            volume        REAL,
+            amount        REAL,
+            reason        TEXT,
+            market        TEXT,
+            dde_net       REAL,
+            sort_order    INTEGER,
+            created_at    TEXT    DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(trade_date, stock_code)
+        )
+    """,
+    "daily_hot_themes": """
+        CREATE TABLE IF NOT EXISTS daily_hot_themes (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date    TEXT    NOT NULL,
+            theme_name    TEXT    NOT NULL,
+            stock_count   INTEGER NOT NULL,
+            created_at    TEXT    DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(trade_date, theme_name)
+        )
+    """,
+    "daily_northbound_flow": """
+        CREATE TABLE IF NOT EXISTS daily_northbound_flow (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date    TEXT    NOT NULL,
+            hgt_net_yi    REAL,
+            sgt_net_yi    REAL,
+            total_net_yi  REAL,
+            data_points   INTEGER,
+            created_at    TEXT    DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(trade_date)
+        )
+    """,
+    "daily_sector_flow": """
+        CREATE TABLE IF NOT EXISTS daily_sector_flow (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date        TEXT    NOT NULL,
+            sector_type       TEXT    NOT NULL,
+            sector_code       TEXT    NOT NULL,
+            sector_name       TEXT    NOT NULL,
+            change_pct        REAL,
+            up_count          INTEGER,
+            down_count        INTEGER,
+            leader_stock      TEXT,
+            leader_change     REAL,
+            main_net_yi       REAL,
+            super_large_net_yi REAL,
+            large_net_yi      REAL,
+            mid_net_yi        REAL,
+            small_net_yi      REAL,
+            net_inflow        REAL,
+            rank              INTEGER,
+            created_at        TEXT    DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(trade_date, sector_type, sector_code)
+        )
+    """,
+}
 
-def ensure_tables(conn: psycopg2.extensions.connection):
-    """Tables are managed by SQLAlchemy ORM — no-op here."""
-    pass
+_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_hot_stocks_date ON daily_hot_stocks(trade_date)",
+    "CREATE INDEX IF NOT EXISTS idx_hot_stocks_code ON daily_hot_stocks(stock_code)",
+    "CREATE INDEX IF NOT EXISTS idx_hot_stocks_reason ON daily_hot_stocks(reason)",
+    "CREATE INDEX IF NOT EXISTS idx_hot_themes_date ON daily_hot_themes(trade_date)",
+    "CREATE INDEX IF NOT EXISTS idx_hot_themes_name ON daily_hot_themes(theme_name)",
+    "CREATE INDEX IF NOT EXISTS idx_northbound_date ON daily_northbound_flow(trade_date)",
+    "CREATE INDEX IF NOT EXISTS idx_dsf_date ON daily_sector_flow(trade_date)",
+    "CREATE INDEX IF NOT EXISTS idx_dsf_type ON daily_sector_flow(sector_type)",
+    "CREATE INDEX IF NOT EXISTS idx_dsf_code ON daily_sector_flow(sector_type, sector_code)",
+    "CREATE INDEX IF NOT EXISTS idx_dsf_name ON daily_sector_flow(sector_type, sector_name)",
+]
+
+
+def ensure_tables(conn: sqlite3.Connection):
+    for ddl in _TABLES.values():
+        conn.execute(ddl)
+    for idx in _INDEXES:
+        conn.execute(idx)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -242,22 +321,30 @@ def fetch_northbound_flow(date_str: str) -> Optional[dict]:
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# Fetch: 东财行业板块
+# Fetch: 东财板块（行业 + 概念）
 # ═════════════════════════════════════════════════════════════════════════
 
-def fetch_industry_ranking() -> list[dict]:
+# Common fields for both ranking + fund flow
+_SECTOR_RANK_FIELDS = (
+    "f2,f3,f4,f12,f13,f14,f104,f105,f128,f136,f140,f141,f207"
+)
+_SECTOR_FLOW_FIELDS = "f12,f14,f62,f184,f66,f72,f78"
+
+
+def _fetch_sector_ranking(fs_filter: str) -> list[dict]:
+    """Fetch sector ranking for a given Eastmoney filter string."""
     url = "https://push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": "1", "pz": "200", "po": "1", "np": "1",
         "fltt": "2", "invt": "2",
-        "fs": "m:90+t:2",
-        "fields": "f2,f3,f4,f12,f13,f14,f104,f105,f128,f136,f140,f141,f207",
+        "fs": fs_filter,
+        "fields": _SECTOR_RANK_FIELDS,
     }
     try:
         r = _em_get(url, params=params, timeout=15)
         d = r.json()
     except Exception as e:
-        logging.warning(f"Industry ranking fetch failed: {e}")
+        logging.warning(f"Sector ranking fetch failed ({fs_filter}): {e}")
         return []
 
     items = d.get("data", {}).get("diff")
@@ -267,8 +354,8 @@ def fetch_industry_ranking() -> list[dict]:
     rows = []
     for i, item in enumerate(items):
         rows.append({
-            "industry_code": item.get("f12", ""),
-            "industry_name": item.get("f14", ""),
+            "sector_code": item.get("f12", ""),
+            "sector_name": item.get("f14", ""),
             "change_pct": item.get("f3"),
             "up_count": item.get("f104"),
             "down_count": item.get("f105"),
@@ -279,19 +366,20 @@ def fetch_industry_ranking() -> list[dict]:
     return rows
 
 
-def fetch_industry_fund_flow() -> dict:
+def _fetch_sector_fund_flow(fs_filter: str) -> dict:
+    """Fetch sector fund flow for a given Eastmoney filter string."""
     url = "https://push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": "1", "pz": "200", "po": "1", "np": "1",
         "fltt": "2", "invt": "2",
-        "fs": "m:90+t:2",
-        "fields": "f12,f14,f62,f184,f66,f72,f78",
+        "fs": fs_filter,
+        "fields": _SECTOR_FLOW_FIELDS,
     }
     try:
         r = _em_get(url, params=params, timeout=15)
         d = r.json()
     except Exception as e:
-        logging.warning(f"Industry fund flow fetch failed: {e}")
+        logging.warning(f"Sector fund flow fetch failed ({fs_filter}): {e}")
         return {}
 
     items = d.get("data", {}).get("diff")
@@ -313,15 +401,39 @@ def fetch_industry_fund_flow() -> dict:
     return result
 
 
-def fetch_industry_sectors() -> list[dict]:
-    ranking = fetch_industry_ranking()
+def fetch_sectors(sector_type: str) -> list[dict]:
+    """Fetch sector ranking + fund flow for a given sector type.
+
+    Args:
+        sector_type: 'industry' (m:90+t:2) or 'concept' (m:90+t:3).
+
+    Returns merged list of dicts ready for insertion into daily_sector_flow.
+    """
+    fs_filter = SECTOR_TYPES.get(sector_type)
+    if not fs_filter:
+        logging.warning(f"Unknown sector_type: {sector_type}")
+        return []
+
+    ranking = _fetch_sector_ranking(fs_filter)
     if not ranking:
         return []
+
     time.sleep(0.3)
-    fund_flow = fetch_industry_fund_flow()
-    for ind in ranking:
-        ff = fund_flow.get(ind["industry_code"], {})
-        ind.update({k: v for k, v in ff.items() if v is not None})
+    fund_flow = _fetch_sector_fund_flow(fs_filter)
+
+    for item in ranking:
+        ff = fund_flow.get(item["sector_code"], {})
+        # Merge fund flow fields
+        for k in ("main_net_yi", "super_large_net_yi", "large_net_yi",
+                  "mid_net_yi", "small_net_yi"):
+            if k not in item and k in ff:
+                item[k] = ff[k]
+        # Compute net_inflow = main + large + mid + small
+        vals = [item.get(k) or 0.0 for k in
+                ("main_net_yi", "large_net_yi", "mid_net_yi", "small_net_yi")]
+        item["net_inflow"] = round(sum(v for v in vals if v), 2)
+        item["sector_type"] = sector_type
+
     return ranking
 
 
@@ -330,65 +442,36 @@ def fetch_industry_sectors() -> list[dict]:
 # ═════════════════════════════════════════════════════════════════════════
 
 _STOCK_INSERT = """
-    INSERT INTO daily_hot_stocks
+    INSERT OR REPLACE INTO daily_hot_stocks
         (trade_date, stock_code, stock_name, close, change_amt, change_pct,
          turnover_pct, volume, amount, reason, market, dde_net, sort_order)
-    VALUES (%(trade_date)s, %(stock_code)s, %(stock_name)s, %(close)s, %(change_amt)s,
-            %(change_pct)s, %(turnover_pct)s, %(volume)s, %(amount)s, %(reason)s, %(market)s,
-            %(dde_net)s, %(sort_order)s)
-    ON CONFLICT (trade_date, stock_code) DO UPDATE SET
-        close = EXCLUDED.close,
-        change_amt = EXCLUDED.change_amt,
-        change_pct = EXCLUDED.change_pct,
-        turnover_pct = EXCLUDED.turnover_pct,
-        volume = EXCLUDED.volume,
-        amount = EXCLUDED.amount,
-        reason = EXCLUDED.reason,
-        market = EXCLUDED.market,
-        dde_net = EXCLUDED.dde_net,
-        sort_order = EXCLUDED.sort_order
+    VALUES (:trade_date, :stock_code, :stock_name, :close, :change_amt,
+            :change_pct, :turnover_pct, :volume, :amount, :reason, :market,
+            :dde_net, :sort_order)
 """
 
 _THEME_INSERT = """
-    INSERT INTO daily_hot_themes
+    INSERT OR REPLACE INTO daily_hot_themes
         (trade_date, theme_name, stock_count)
-    VALUES (%(trade_date)s, %(theme_name)s, %(stock_count)s)
-    ON CONFLICT (trade_date, theme_name) DO UPDATE SET
-        stock_count = EXCLUDED.stock_count
+    VALUES (:trade_date, :theme_name, :stock_count)
 """
 
 _NORTHBOUND_INSERT = """
-    INSERT INTO daily_northbound_flow
+    INSERT OR REPLACE INTO daily_northbound_flow
         (trade_date, hgt_net_yi, sgt_net_yi, total_net_yi, data_points)
-    VALUES (%(trade_date)s, %(hgt_net_yi)s, %(sgt_net_yi)s, %(total_net_yi)s, %(data_points)s)
-    ON CONFLICT (trade_date) DO UPDATE SET
-        hgt_net_yi = EXCLUDED.hgt_net_yi,
-        sgt_net_yi = EXCLUDED.sgt_net_yi,
-        total_net_yi = EXCLUDED.total_net_yi,
-        data_points = EXCLUDED.data_points
+    VALUES (:trade_date, :hgt_net_yi, :sgt_net_yi, :total_net_yi, :data_points)
 """
 
-_INDUSTRY_INSERT = """
-    INSERT INTO daily_industry_flow
-        (trade_date, industry_code, industry_name, change_pct, up_count,
-         down_count, leader_stock, leader_change, main_net_yi,
-         super_large_net_yi, large_net_yi, mid_net_yi, small_net_yi, rank)
-    VALUES (%(trade_date)s, %(industry_code)s, %(industry_name)s, %(change_pct)s, %(up_count)s,
-            %(down_count)s, %(leader_stock)s, %(leader_change)s, %(main_net_yi)s,
-            %(super_large_net_yi)s, %(large_net_yi)s, %(mid_net_yi)s, %(small_net_yi)s, %(rank)s)
-    ON CONFLICT (trade_date, industry_code) DO UPDATE SET
-        industry_name = EXCLUDED.industry_name,
-        change_pct = EXCLUDED.change_pct,
-        up_count = EXCLUDED.up_count,
-        down_count = EXCLUDED.down_count,
-        leader_stock = EXCLUDED.leader_stock,
-        leader_change = EXCLUDED.leader_change,
-        main_net_yi = EXCLUDED.main_net_yi,
-        super_large_net_yi = EXCLUDED.super_large_net_yi,
-        large_net_yi = EXCLUDED.large_net_yi,
-        mid_net_yi = EXCLUDED.mid_net_yi,
-        small_net_yi = EXCLUDED.small_net_yi,
-        rank = EXCLUDED.rank
+_SECTOR_INSERT = """
+    INSERT OR REPLACE INTO daily_sector_flow
+        (trade_date, sector_type, sector_code, sector_name, change_pct,
+         up_count, down_count, leader_stock, leader_change, main_net_yi,
+         super_large_net_yi, large_net_yi, mid_net_yi, small_net_yi,
+         net_inflow, rank)
+    VALUES (:trade_date, :sector_type, :sector_code, :sector_name, :change_pct,
+            :up_count, :down_count, :leader_stock, :leader_change, :main_net_yi,
+            :super_large_net_yi, :large_net_yi, :mid_net_yi, :small_net_yi,
+            :net_inflow, :rank)
 """
 
 
@@ -418,28 +501,32 @@ def _save_northbound(conn, date_str, data):
     return True
 
 
-def _save_industry(conn, date_str, sectors):
+def _save_sectors(conn, date_str, sectors):
+    """Save sector data to daily_sector_flow. Returns count inserted."""
     rows = []
-    for ind in sectors:
+    for item in sectors:
         rows.append({
             "trade_date": date_str,
-            "industry_code": ind.get("industry_code", ""),
-            "industry_name": ind.get("industry_name", ""),
-            "change_pct": ind.get("change_pct"),
-            "up_count": ind.get("up_count"),
-            "down_count": ind.get("down_count"),
-            "leader_stock": ind.get("leader_stock", ""),
-            "leader_change": ind.get("leader_change"),
-            "main_net_yi": ind.get("main_net_yi"),
-            "super_large_net_yi": ind.get("super_large_net_yi"),
-            "large_net_yi": ind.get("large_net_yi"),
-            "mid_net_yi": ind.get("mid_net_yi"),
-            "small_net_yi": ind.get("small_net_yi"),
-            "rank": ind.get("rank"),
+            "sector_type": item.get("sector_type", ""),
+            "sector_code": item.get("sector_code", ""),
+            "sector_name": item.get("sector_name", ""),
+            "change_pct": item.get("change_pct"),
+            "up_count": item.get("up_count"),
+            "down_count": item.get("down_count"),
+            "leader_stock": item.get("leader_stock", ""),
+            "leader_change": item.get("leader_change"),
+            "main_net_yi": item.get("main_net_yi"),
+            "super_large_net_yi": item.get("super_large_net_yi"),
+            "large_net_yi": item.get("large_net_yi"),
+            "mid_net_yi": item.get("mid_net_yi"),
+            "small_net_yi": item.get("small_net_yi"),
+            "net_inflow": item.get("net_inflow"),
+            "rank": item.get("rank"),
         })
-    conn.executemany(_INDUSTRY_INSERT, rows)
+    conn.executemany(_SECTOR_INSERT, rows)
     conn.commit()
-    logging.info(f"Saved {len(rows)} industry sectors for {date_str}")
+    logging.info(f"Saved {len(rows)} {sectors[0].get('sector_type', '?')} sectors "
+                  f"for {date_str}" if sectors else f"Saved 0 sectors for {date_str}")
     return len(rows)
 
 
@@ -447,8 +534,8 @@ def _save_industry(conn, date_str, sectors):
 # Orchestrator
 # ═════════════════════════════════════════════════════════════════════════
 
-def sync(date_str: Optional[str] = None) -> dict:
-    """Fetch + store all 3 data sources. Best-effort per source."""
+def sync(date_str: Optional[str] = None, db_path: Optional[str] = None) -> dict:
+    """Fetch + store all data sources. Best-effort per source."""
     if date_str is None:
         date_str = date.today().strftime("%Y-%m-%d")
 
@@ -458,10 +545,11 @@ def sync(date_str: Optional[str] = None) -> dict:
         "themes_count": 0,
         "northbound": False,
         "industry_count": 0,
+        "concept_count": 0,
         "errors": [],
     }
 
-    conn = get_db_connection()
+    conn = get_db_connection(db_path)
     try:
         ensure_tables(conn)
 
@@ -489,15 +577,25 @@ def sync(date_str: Optional[str] = None) -> dict:
             result["errors"].append(f"northbound: {e}")
             logging.error(f"northbound failed: {e}")
 
-        # 3. Industry sectors
+        # 3. Industry sectors (东财, rate-limited)
         try:
-            sectors = fetch_industry_sectors()
-            if sectors:
-                _save_industry(conn, date_str, sectors)
-                result["industry_count"] = len(sectors)
+            industries = fetch_sectors("industry")
+            if industries:
+                _save_sectors(conn, date_str, industries)
+                result["industry_count"] = len(industries)
         except Exception as e:
-            result["errors"].append(f"industry: {e}")
-            logging.error(f"industry failed: {e}")
+            result["errors"].append(f"industry_sectors: {e}")
+            logging.error(f"industry sectors failed: {e}")
+
+        # 4. Concept sectors (东财, rate-limited)
+        try:
+            concepts = fetch_sectors("concept")
+            if concepts:
+                _save_sectors(conn, date_str, concepts)
+                result["concept_count"] = len(concepts)
+        except Exception as e:
+            result["errors"].append(f"concept_sectors: {e}")
+            logging.error(f"concept sectors failed: {e}")
 
     finally:
         conn.close()
@@ -505,8 +603,8 @@ def sync(date_str: Optional[str] = None) -> dict:
     logging.info(
         f"Sync {date_str} complete: "
         f"stocks={result['hot_stocks_count']} themes={result['themes_count']} "
-        f"northbound={'✓' if result['northbound'] else '✗'} "
-        f"industries={result['industry_count']}"
+        f"northbound={'ok' if result['northbound'] else 'no'} "
+        f"industries={result['industry_count']} concepts={result['concept_count']}"
     )
     return result
 
@@ -517,7 +615,11 @@ def sync(date_str: Optional[str] = None) -> dict:
 
 def main():
     p = argparse.ArgumentParser(description="Daily A-share market data sync")
-    p.add_argument("--date", default=None, help="Trade date YYYY-MM-DD (default: today)")
+    p.add_argument("--date", default=None,
+                   help="Trade date YYYY-MM-DD (default: today)")
+    p.add_argument("--db", default=None, help="Stock DB path override")
+    p.add_argument("--init", action="store_true",
+                   help="Create tables only, no fetch")
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = p.parse_args()
@@ -529,7 +631,22 @@ def main():
         stream=sys.stdout,
     )
 
-    result = sync(date_str=args.date)
+    date_str = args.date or date.today().strftime("%Y-%m-%d")
+
+    conn = get_db_connection(args.db)
+    try:
+        ensure_tables(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    if args.init:
+        logging.info(
+            f"Tables created in {args.db or DEFAULT_STOCK_DB}. Done."
+        )
+        return
+
+    result = sync(date_str=date_str, db_path=args.db)
 
     print()
     print("=" * 50)
@@ -537,8 +654,9 @@ def main():
     print("=" * 50)
     print(f"  Hot stocks:       {result['hot_stocks_count']:>5d}")
     print(f"  Themes:           {result['themes_count']:>5d}")
-    print(f"  Northbound flow:  {'✓' if result['northbound'] else '✗':>5s}")
+    print(f"  Northbound flow:  {'ok' if result['northbound'] else 'no':>5s}")
     print(f"  Industry sectors: {result['industry_count']:>5d}")
+    print(f"  Concept sectors:  {result['concept_count']:>5d}")
     if result["errors"]:
         print(f"  Errors:           {len(result['errors']):>5d}")
         for e in result["errors"]:

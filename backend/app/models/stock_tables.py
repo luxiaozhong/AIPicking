@@ -47,34 +47,38 @@ class Daily(BaseModel):
     circ_market_cap = Column(Float, nullable=True)
 
 
-class SectorFlow(BaseModel):
-    """板块资金流向表"""
-    __tablename__ = "sector_flow"
+class DailySectorFlow(BaseModel):
+    """每日板块资金流向表 — 替换旧 sector_flow / daily_industry_flow
+
+    覆盖行业板块 (m:90+t:2) 和概念板块 (m:90+t:3)。
+    net_inflow = main + large + mid + small（亿元），由 ingest 脚本计算。
+    """
+    __tablename__ = "daily_sector_flow"
     __table_args__ = (
-        UniqueConstraint("trade_date", "sector_code", "sector_type", name="uq_sector_flow"),
-        Index("idx_sector_flow_date", "trade_date"),
-        Index("idx_sector_flow_code", "sector_code", "sector_type"),
-        Index("idx_sector_flow_type", "sector_type"),
+        UniqueConstraint("trade_date", "sector_type", "sector_code",
+                         name="uq_daily_sector_flow"),
+        Index("idx_dsf_date", "trade_date"),
+        Index("idx_dsf_type", "sector_type"),
+        Index("idx_dsf_code", "sector_type", "sector_code"),
+        Index("idx_dsf_name", "sector_type", "sector_name"),
     )
 
     trade_date = Column(String(10), nullable=False)
+    sector_type = Column(String(20), nullable=False)
     sector_code = Column(String(20), nullable=False)
     sector_name = Column(String(100), nullable=False)
-    sector_type = Column(String(20), nullable=False)
     change_pct = Column(Float)
-    total_amount = Column(Float)
-    main_inflow = Column(Float)
-    main_inflow_pct = Column(Float)
-    retail_inflow = Column(Float)
-    retail_inflow_pct = Column(Float)
+    up_count = Column(Integer)
+    down_count = Column(Integer)
+    leader_stock = Column(String(20))
+    leader_change = Column(Float)
+    main_net_yi = Column(Float)
+    super_large_net_yi = Column(Float)
+    large_net_yi = Column(Float)
+    mid_net_yi = Column(Float)
+    small_net_yi = Column(Float)
     net_inflow = Column(Float)
-    big_order_inflow = Column(Float)
-    big_order_inflow_pct = Column(Float)
-    mid_order_inflow = Column(Float)
-    mid_order_inflow_pct = Column(Float)
-    small_order_inflow = Column(Float)
-    tiny_order_inflow = Column(Float)
-    update_time = Column(String(30))
+    rank = Column(Integer)
 
 
 class StockTheme(BaseModel):
@@ -145,27 +149,4 @@ class DailyNorthboundFlow(BaseModel):
     data_points = Column(Integer)
 
 
-class DailyIndustryFlow(BaseModel):
-    """每日行业资金流向表"""
-    __tablename__ = "daily_industry_flow"
-    __table_args__ = (
-        UniqueConstraint("trade_date", "industry_code", name="uq_industry_flow"),
-        Index("idx_industry_flow_date", "trade_date"),
-        Index("idx_industry_flow_code", "industry_code"),
-        Index("idx_industry_flow_rank", "trade_date", "rank"),
-    )
-
-    trade_date = Column(String(10), nullable=False)
-    industry_code = Column(String(20), nullable=False)
-    industry_name = Column(String(100), nullable=False)
-    change_pct = Column(Float)
-    up_count = Column(Integer)
-    down_count = Column(Integer)
-    leader_stock = Column(String(20))
-    leader_change = Column(Float)
-    main_net_yi = Column(Float)
-    super_large_net_yi = Column(Float)
-    large_net_yi = Column(Float)
-    mid_net_yi = Column(Float)
-    small_net_yi = Column(Float)
-    rank = Column(Integer)
+# daily_industry_flow → 已合并到 daily_sector_flow (sector_type='industry')

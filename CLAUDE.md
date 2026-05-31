@@ -45,7 +45,7 @@ nohup bash restart.sh > /tmp/aipicking.log 2>&1 &  # Run in background
 
 **Dependencies:** `httpx` (DeepSeek API calls), `python-dotenv` (.env loading).
 
-**Data flow**: `API routes` → `Services` → `Models/Engine` → `SQLite`
+**Data flow**: `API routes` → `Services` → `Models/Engine` → `postgresql`
 
 **Key modules:**
 

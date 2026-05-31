@@ -183,10 +183,11 @@ async def permanent_delete_user(db: AsyncSession, user_id: int) -> bool:
     if not user:
         return False
 
-    await db.execute(delete(Strategy).where(Strategy.user_id == user_id))
+    # 先删引用 strategies.id 的子表，再删策略本身（否则 PG 外键冲突）
     await db.execute(delete(BacktestReport).where(BacktestReport.user_id == user_id))
     await db.execute(delete(StrategyRun).where(StrategyRun.user_id == user_id))
     await db.execute(delete(BatchBacktestReport).where(BatchBacktestReport.user_id == user_id))
+    await db.execute(delete(Strategy).where(Strategy.user_id == user_id))
     await db.execute(delete(AIStrategyTask).where(AIStrategyTask.user_id == user_id))
 
     await db.execute(

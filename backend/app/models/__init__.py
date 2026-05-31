@@ -8,8 +8,8 @@ from .backtest import BacktestReport, StrategyRun, BatchBacktestReport
 from .ai_task import AIStrategyTask
 from .ai_factor import AIFactor
 from .stock_tables import (
-    Stock, Daily, SectorFlow, StockTheme,
-    DailyHotStock, DailyHotTheme, DailyNorthboundFlow, DailyIndustryFlow,
+    Stock, Daily, DailySectorFlow, StockTheme,
+    DailyHotStock, DailyHotTheme, DailyNorthboundFlow,
 )
 
 # 设置关系

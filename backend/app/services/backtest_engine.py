@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from ..config import settings
-from ..models.stock_tables import Stock, Daily, SectorFlow
+from ..models.stock_tables import Stock, Daily, DailySectorFlow
 
 # 同步引擎（用于 thread pool 中的回测）
 _sync_engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -265,7 +265,8 @@ class BacktestEngine:
             # 2. 日期范围
             cutoff_dt = datetime.strptime(cutoff_date, "%Y%m%d")
             start_date = (cutoff_dt - timedelta(days=180)).strftime("%Y%m%d")
-            flow_start_date = (cutoff_dt - timedelta(days=30)).strftime("%Y%m%d")
+            flow_start_date = (cutoff_dt - timedelta(days=30)).strftime("%Y-%m-%d")
+            cutoff_date_fmt = cutoff_dt.strftime("%Y-%m-%d")
 
             # 3. 日线数据
             daily_stmt = select(
@@ -279,9 +280,9 @@ class BacktestEngine:
             daily_rows = [dict(row._mapping) for row in daily_result]
 
             # 4. 板块资金流向
-            sector_stmt = select(SectorFlow).where(
-                SectorFlow.trade_date.between(flow_start_date, cutoff_date)
-            ).order_by(SectorFlow.trade_date, SectorFlow.sector_type, SectorFlow.sector_name)
+            sector_stmt = select(DailySectorFlow).where(
+                DailySectorFlow.trade_date.between(flow_start_date, cutoff_date_fmt)
+            ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
             sector_result = session.execute(sector_stmt)
             sector_flow_data = [dict(row._mapping) for row in sector_result]
         finally:
@@ -316,7 +317,8 @@ class BacktestEngine:
 
             start_dt = datetime.strptime(start_date, "%Y%m%d")
             earliest_date = (start_dt - timedelta(days=180)).strftime("%Y%m%d")
-            flow_earliest_date = (start_dt - timedelta(days=30)).strftime("%Y%m%d")
+            flow_earliest_date = (start_dt - timedelta(days=30)).strftime("%Y-%m-%d")
+            end_date_fmt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
 
             daily_stmt = select(
                 Daily.ts_code, Daily.trade_date, Daily.open, Daily.high,
@@ -327,9 +329,9 @@ class BacktestEngine:
             ).order_by(Daily.ts_code, Daily.trade_date)
             daily_rows = [dict(row._mapping) for row in session.execute(daily_stmt)]
 
-            sector_stmt = select(SectorFlow).where(
-                SectorFlow.trade_date.between(flow_earliest_date, end_date)
-            ).order_by(SectorFlow.trade_date, SectorFlow.sector_type, SectorFlow.sector_name)
+            sector_stmt = select(DailySectorFlow).where(
+                DailySectorFlow.trade_date.between(flow_earliest_date, end_date_fmt)
+            ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
             sector_flow_data = [dict(row._mapping) for row in session.execute(sector_stmt)]
         finally:
             session.close()
