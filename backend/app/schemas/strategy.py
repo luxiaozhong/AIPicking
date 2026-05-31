@@ -1,6 +1,6 @@
 """策略相关的 Pydantic schemas"""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import json
@@ -40,6 +40,17 @@ class FactorConfig(BaseModel):
     sell_signals: SignalGroup = Field(default_factory=lambda: SignalGroup())
     risk_factors: List[FactorItem] = Field(default_factory=list, description="风控因子列表")
 
+    @staticmethod
+    def _has_any_factor(config: "FactorConfig") -> bool:
+        """检查是否有任何因子/条件被配置"""
+        return bool(
+            config.selection_conditions.conditions
+            or config.scoring_modifiers
+            or config.buy_signals.factors
+            or config.sell_signals.factors
+            or config.risk_factors
+        )
+
 
 # ------- 策略相关 -------
 
@@ -54,6 +65,12 @@ class StrategyCreate(StrategyBase):
     """创建策略请求 schema（因子模式）"""
     factor_config: FactorConfig = Field(..., description="因子组合配置")
 
+    @model_validator(mode='after')
+    def check_has_any_factor(self):
+        if not FactorConfig._has_any_factor(self.factor_config):
+            raise ValueError('请至少添加一个因子（买入信号、卖出信号、风控因子、选股条件或评分修正）')
+        return self
+
 
 class StrategyCreateUpload(StrategyBase):
     """创建策略请求 schema（上传模式，兼容旧版）"""
@@ -67,6 +84,12 @@ class StrategyUpdate(BaseModel):
     tags: Optional[List[str]] = None
     status: Optional[str] = None
     factor_config: Optional[FactorConfig] = None
+
+    @model_validator(mode='after')
+    def check_factor_config_not_empty(self):
+        if self.factor_config is not None and not FactorConfig._has_any_factor(self.factor_config):
+            raise ValueError('请至少添加一个因子（买入信号、卖出信号、风控因子、选股条件或评分修正）')
+        return self
 
 
 class StrategyResponse(StrategyBase):

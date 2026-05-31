@@ -34,6 +34,16 @@ function emptyFactorConfig(): FactorConfig {
   };
 }
 
+function hasAnyFactor(fc: FactorConfig): boolean {
+  return (
+    fc.selection_conditions.conditions.length > 0 ||
+    fc.scoring_modifiers.length > 0 ||
+    fc.buy_signals.factors.length > 0 ||
+    fc.sell_signals.factors.length > 0 ||
+    fc.risk_factors.length > 0
+  );
+}
+
 export default function StrategyBuilder() {
 
   const [searchParams] = useSearchParams();
@@ -299,6 +309,10 @@ export default function StrategyBuilder() {
       message.warning('请输入策略名称');
       return;
     }
+    if (!hasAnyFactor(factorConfig)) {
+      message.warning('请至少添加一个因子（买入信号、卖出信号、风控因子、选股条件或评分修正）');
+      return;
+    }
     setLoading(true);
     try {
       const res = await strategyService.createStrategyWithFactors({
@@ -308,6 +322,8 @@ export default function StrategyBuilder() {
       });
       if (res.code === 0 && res.data) {
         message.success('策略创建成功！');
+        setIsDirty(false);
+        navigate(`/strategies/${res.data.id}`);
       } else {
         message.error(res.message || '创建失败');
       }
