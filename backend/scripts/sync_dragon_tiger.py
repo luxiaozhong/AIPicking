@@ -204,7 +204,7 @@ def fetch_daily_list(date_str: str) -> list[dict]:
             "stock_code": row.get("SECURITY_CODE", ""),
             "stock_name": row.get("SECURITY_NAME_ABBR", ""),
             "reason": row.get("EXPLANATION", ""),
-            "close": row.get("CLOSE_PRICE"),
+            "close": row.get("CLOSE_PRICE") or 0,
             "change_pct": round(float(row.get("CHANGE_RATE") or 0), 2),
             "turnover_pct": round(float(row.get("TURNOVERRATE") or 0), 2),
             "net_buy_wan": round((row.get("BILLBOARD_NET_AMT") or 0) / 10000, 1),
@@ -240,13 +240,15 @@ def save_daily_list(date_str: str, stocks: list[dict]) -> int:
     if not stocks:
         return 0
     conn = get_conn()
-    cur = conn.cursor()
-    rows = [(date_str, s["stock_code"], s["stock_name"], s["reason"],
-             s["close"], s["change_pct"], s["turnover_pct"],
-             s["net_buy_wan"], s["buy_wan"], s["sell_wan"])
-            for s in stocks]
-    psycopg2.extras.execute_batch(cur, _LIST_UPSERT, rows)
-    conn.commit()
-    conn.close()
-    logging.info(f"Saved {len(rows)} dragon tiger stocks for {date_str}")
-    return len(rows)
+    try:
+        cur = conn.cursor()
+        rows = [(date_str, s["stock_code"], s["stock_name"], s["reason"],
+                 s["close"], s["change_pct"], s["turnover_pct"],
+                 s["net_buy_wan"], s["buy_wan"], s["sell_wan"])
+                for s in stocks]
+        psycopg2.extras.execute_batch(cur, _LIST_UPSERT, rows)
+        conn.commit()
+        logging.info(f"Saved {len(rows)} dragon tiger stocks for {date_str}")
+        return len(rows)
+    finally:
+        conn.close()
