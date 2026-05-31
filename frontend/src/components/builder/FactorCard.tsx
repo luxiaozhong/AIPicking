@@ -28,7 +28,7 @@ export default function FactorCard({ item, meta, target, onRemove, onParamChange
   return (
     <Card
       size="small"
-      style={{ marginBottom: 8 }}
+      style={{}}
       title={
         <Space>
           <span>{meta.name}</span>

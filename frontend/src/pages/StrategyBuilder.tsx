@@ -438,19 +438,21 @@ export default function StrategyBuilder() {
                 {selConditions.length === 0 ? (
                   <Empty description="从左侧选股条件点击添加预筛选条件（龙虎榜、板块资金流等）" />
                 ) : (
-                  selConditions.map((item, i) => {
-                    const meta = getCondMeta(item.condition_id);
-                    if (!meta) return null;
-                    return (
-                      <ConditionCard
-                        key={`sel-${i}`}
-                        item={item}
-                        meta={meta}
-                        onRemove={() => removeCondition('selection', i)}
-                        onParamChange={(p, v) => updateConditionParams('selection', i, p, v)}
-                      />
-                    );
-                  })
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {selConditions.map((item, i) => {
+                      const meta = getCondMeta(item.condition_id);
+                      if (!meta) return null;
+                      return (
+                        <ConditionCard
+                          key={`sel-${i}`}
+                          item={item}
+                          meta={meta}
+                          onRemove={() => removeCondition('selection', i)}
+                          onParamChange={(p, v) => updateConditionParams('selection', i, p, v)}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </Card>
 
@@ -470,19 +472,21 @@ export default function StrategyBuilder() {
                 {scorers.length === 0 ? (
                   <Empty description="从左侧评分修正点击添加上分条件（龙虎榜加分、板块排名加分等）" />
                 ) : (
-                  scorers.map((item, i) => {
-                    const meta = getCondMeta(item.condition_id);
-                    if (!meta) return null;
-                    return (
-                      <ConditionCard
-                        key={`scr-${i}`}
-                        item={item}
-                        meta={meta}
-                        onRemove={() => removeCondition('scoring', i)}
-                        onParamChange={(p, v) => updateConditionParams('scoring', i, p, v)}
-                      />
-                    );
-                  })
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {scorers.map((item, i) => {
+                      const meta = getCondMeta(item.condition_id);
+                      if (!meta) return null;
+                      return (
+                        <ConditionCard
+                          key={`scr-${i}`}
+                          item={item}
+                          meta={meta}
+                          onRemove={() => removeCondition('scoring', i)}
+                          onParamChange={(p, v) => updateConditionParams('scoring', i, p, v)}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </Card>
 
@@ -514,20 +518,22 @@ export default function StrategyBuilder() {
                 {factorConfig.buy_signals.factors.length === 0 ? (
                   <Empty description="从左侧因子库点击添加买入因子" />
                 ) : (
-                  factorConfig.buy_signals.factors.map((item, i) => {
-                    const meta = getMeta(item.factor_id);
-                    if (!meta) return null;
-                    return (
-                      <FactorCard
-                        key={`buy-${i}`}
-                        item={item}
-                        meta={meta}
-                        target="buy"
-                        onRemove={() => removeFactor('buy', i)}
-                        onParamChange={(p, v) => updateFactorParams('buy', i, p, v)}
-                      />
-                    );
-                  })
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {factorConfig.buy_signals.factors.map((item, i) => {
+                      const meta = getMeta(item.factor_id);
+                      if (!meta) return null;
+                      return (
+                        <FactorCard
+                          key={`buy-${i}`}
+                          item={item}
+                          meta={meta}
+                          target="buy"
+                          onRemove={() => removeFactor('buy', i)}
+                          onParamChange={(p, v) => updateFactorParams('buy', i, p, v)}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </Card>
 
@@ -544,20 +550,22 @@ export default function StrategyBuilder() {
                 {factorConfig.sell_signals.factors.length === 0 ? (
                   <Empty description="从左侧因子库点击添加卖出因子" />
                 ) : (
-                  factorConfig.sell_signals.factors.map((item, i) => {
-                    const meta = getMeta(item.factor_id);
-                    if (!meta) return null;
-                    return (
-                      <FactorCard
-                        key={`sell-${i}`}
-                        item={item}
-                        meta={meta}
-                        target="sell"
-                        onRemove={() => removeFactor('sell', i)}
-                        onParamChange={(p, v) => updateFactorParams('sell', i, p, v)}
-                      />
-                    );
-                  })
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {factorConfig.sell_signals.factors.map((item, i) => {
+                      const meta = getMeta(item.factor_id);
+                      if (!meta) return null;
+                      return (
+                        <FactorCard
+                          key={`sell-${i}`}
+                          item={item}
+                          meta={meta}
+                          target="sell"
+                          onRemove={() => removeFactor('sell', i)}
+                          onParamChange={(p, v) => updateFactorParams('sell', i, p, v)}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </Card>
 
@@ -573,20 +581,22 @@ export default function StrategyBuilder() {
                 {factorConfig.risk_factors.length === 0 ? (
                   <Empty description="从左侧因子库点击添加风控因子" />
                 ) : (
-                  factorConfig.risk_factors.map((item, i) => {
-                    const meta = getMeta(item.factor_id);
-                    if (!meta) return null;
-                    return (
-                      <FactorCard
-                        key={`risk-${i}`}
-                        item={item}
-                        meta={meta}
-                        target="risk"
-                        onRemove={() => removeFactor('risk', i)}
-                        onParamChange={(p, v) => updateFactorParams('risk', i, p, v)}
-                      />
-                    );
-                  })
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {factorConfig.risk_factors.map((item, i) => {
+                      const meta = getMeta(item.factor_id);
+                      if (!meta) return null;
+                      return (
+                        <FactorCard
+                          key={`risk-${i}`}
+                          item={item}
+                          meta={meta}
+                          target="risk"
+                          onRemove={() => removeFactor('risk', i)}
+                          onParamChange={(p, v) => updateFactorParams('risk', i, p, v)}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </Card>
             </div>

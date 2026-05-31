@@ -25,7 +25,7 @@ export default function ConditionCard({ item, meta, onRemove, onParamChange }: C
   return (
     <Card
       size="small"
-      style={{ marginBottom: 8 }}
+      style={{}}
       title={
         <Space>
           <span>{meta.name}</span>
