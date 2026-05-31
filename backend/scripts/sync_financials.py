@@ -162,8 +162,10 @@ def fetch_sina_financials(ts_code: str, periods: int = 4) -> Optional[dict]:
 
     periods 控制拉取期数（每页一期，API num 参数）。
     """
-    prefix = "sh" if ts_code.startswith("6") else "sz"
-    paper_code = f"{prefix}{ts_code}"
+    # 去掉交易所后缀（如 .SH/.SZ），新浪只需要纯数字
+    code_clean = ts_code.split(".")[0]
+    prefix = "sh" if code_clean.startswith(("6", "9")) else ("bj" if code_clean.startswith("8") else "sz")
+    paper_code = f"{prefix}{code_clean}"
     result = {}
     for src in ("lrb", "fzb", "llb"):
         params = {
