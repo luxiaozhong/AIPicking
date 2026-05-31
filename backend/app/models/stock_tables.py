@@ -1,6 +1,6 @@
 """股票数据库表模型 — 从 SQLite 迁移到 PostgreSQL 用"""
 from sqlalchemy import (
-    Column, String, Integer, Float, Text, BigInteger,
+    Column, String, Integer, Float, Text, BigInteger, Boolean,
     Index, UniqueConstraint
 )
 from .base import BaseModel
@@ -147,6 +147,49 @@ class DailyNorthboundFlow(BaseModel):
     sgt_net_yi = Column(Float)
     total_net_yi = Column(Float)
     data_points = Column(Integer)
+
+
+class DailyDragonTiger(BaseModel):
+    """每日龙虎榜上榜汇总"""
+    __tablename__ = "daily_dragon_tiger"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "stock_code", name="uq_dragon_tiger"),
+        Index("idx_dt_date", "trade_date"),
+        Index("idx_dt_code", "stock_code"),
+    )
+
+    trade_date = Column(String(10), nullable=False)
+    stock_code = Column(String(20), nullable=False)
+    stock_name = Column(String(100))
+    reason = Column(String(200))
+    close = Column(Float)
+    change_pct = Column(Float)
+    turnover_pct = Column(Float)
+    net_buy_wan = Column(Float)
+    buy_wan = Column(Float)
+    sell_wan = Column(Float)
+
+
+class DailyDragonTigerSeat(BaseModel):
+    """每日龙虎榜买卖席位明细"""
+    __tablename__ = "daily_dragon_tiger_seats"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "stock_code", "seat_type", "rank",
+                         name="uq_dt_seats"),
+        Index("idx_dts_date", "trade_date"),
+        Index("idx_dts_code", "stock_code"),
+    )
+
+    trade_date = Column(String(10), nullable=False)
+    stock_code = Column(String(20), nullable=False)
+    seat_type = Column(String(4), nullable=False)  # buy / sell
+    rank = Column(Integer, nullable=False)          # 1-5
+    seat_name = Column(String(100))
+    seat_code = Column(String(20))
+    buy_amt_wan = Column(Float)
+    sell_amt_wan = Column(Float)
+    net_amt_wan = Column(Float)
+    is_institution = Column(Boolean, default=False)
 
 
 # daily_industry_flow → 已合并到 daily_sector_flow (sector_type='industry')
