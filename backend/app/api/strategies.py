@@ -29,6 +29,7 @@ async def list_strategies(
     limit: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     status: Optional[str] = Query(None, description="状态筛选"),
+    scope: str = Query("all", description="筛选范围: all / mine / published"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -38,6 +39,7 @@ async def list_strategies(
 
     strategies, total = await StrategyService.get_strategies(
         db, page, limit, search, status,
+        scope=scope,
         user_id=current_user.id, user_role=current_user.role
     )
 
@@ -49,6 +51,30 @@ async def list_strategies(
     }
 
 
+
+
+@router.put("/{strategy_id}/publish")
+async def publish_strategy(
+    strategy_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """发布策略（创建者操作）"""
+    return await StrategyService.publish_strategy(
+        db, strategy_id, user_id=current_user.id
+    )
+
+
+@router.put("/{strategy_id}/unpublish")
+async def unpublish_strategy(
+    strategy_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """取消发布策略（创建者操作）"""
+    return await StrategyService.unpublish_strategy(
+        db, strategy_id, user_id=current_user.id
+    )
 
 
 # ========== 注意：/code 路由必须放在 /{strategy_id} 之前，否则会被错误匹配 ==========
@@ -73,15 +99,17 @@ async def get_strategy(
         db, strategy_id, user_id=current_user.id, user_role=current_user.role
     )
 
-    # 获取策略代码
+    # 获取策略代码（仅创建者可见）
+    is_owner = strategy.user_id == current_user.id
     code_content = ""
-    if strategy.file_path and os.path.exists(strategy.file_path):
-        try:
-            code_content = await StrategyService.get_strategy_code(strategy.file_path)
-        except Exception:
-            pass
-    if not code_content:
-        code_content = strategy.generated_code or ""
+    if is_owner:
+        if strategy.file_path and os.path.exists(strategy.file_path):
+            try:
+                code_content = await StrategyService.get_strategy_code(strategy.file_path)
+            except Exception:
+                pass
+        if not code_content:
+            code_content = strategy.generated_code or ""
 
     # 使用 Pydantic 模型序列化策略对象
     from ..schemas.strategy import StrategyResponse
