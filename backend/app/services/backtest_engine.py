@@ -333,7 +333,7 @@ class BacktestEngine:
             # 4. 板块资金流向（按需）
             daily_sector_flow_data = []
             if self._should_load("sector_flow"):
-                sector_stmt = select(DailySectorFlow).where(
+                sector_stmt = select(DailySectorFlow.__table__).where(
                     DailySectorFlow.trade_date.between(flow_start_date, cutoff_date_fmt)
                 ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
                 sector_result = session.execute(sector_stmt)
@@ -342,7 +342,7 @@ class BacktestEngine:
             # 5. 热门股（按需）
             hot_stocks_data = []
             if self._should_load("hot_stocks"):
-                hot_stock_stmt = select(DailyHotStock).where(
+                hot_stock_stmt = select(DailyHotStock.__table__).where(
                     DailyHotStock.trade_date == cutoff_date_fmt
                 ).order_by(DailyHotStock.sort_order)
                 hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
@@ -350,7 +350,7 @@ class BacktestEngine:
             # 6. 热门题材（按需）
             hot_themes_data = []
             if self._should_load("hot_themes"):
-                hot_theme_stmt = select(DailyHotTheme).where(
+                hot_theme_stmt = select(DailyHotTheme.__table__).where(
                     DailyHotTheme.trade_date == cutoff_date_fmt
                 ).order_by(DailyHotTheme.stock_count.desc())
                 hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
@@ -359,12 +359,12 @@ class BacktestEngine:
             dragon_tiger_data = []
             dragon_tiger_seats_data = []
             if self._should_load("dragon_tiger"):
-                dt_stmt = select(DailyDragonTiger).where(
+                dt_stmt = select(DailyDragonTiger.__table__).where(
                     DailyDragonTiger.trade_date.between(flow_start_date, cutoff_date_fmt)
                 ).order_by(DailyDragonTiger.trade_date.desc())
                 dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
 
-                dt_seat_stmt = select(DailyDragonTigerSeat).where(
+                dt_seat_stmt = select(DailyDragonTigerSeat.__table__).where(
                     DailyDragonTigerSeat.trade_date.between(flow_start_date, cutoff_date_fmt)
                 ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
                 dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
@@ -423,7 +423,7 @@ class BacktestEngine:
             # 板块资金流向（按需）
             daily_sector_flow_data = []
             if self._should_load("sector_flow"):
-                sector_stmt = select(DailySectorFlow).where(
+                sector_stmt = select(DailySectorFlow.__table__).where(
                     DailySectorFlow.trade_date.between(flow_earliest_date, end_date_fmt)
                 ).order_by(DailySectorFlow.trade_date, DailySectorFlow.sector_type, DailySectorFlow.sector_name)
                 daily_sector_flow_data = [dict(row._mapping) for row in session.execute(sector_stmt)]
@@ -431,7 +431,7 @@ class BacktestEngine:
             # 热门股（按需）
             hot_stocks_data = []
             if self._should_load("hot_stocks"):
-                hot_stock_stmt = select(DailyHotStock).where(
+                hot_stock_stmt = select(DailyHotStock.__table__).where(
                     DailyHotStock.trade_date.between(flow_earliest_date, end_date_fmt)
                 ).order_by(DailyHotStock.trade_date, DailyHotStock.sort_order)
                 hot_stocks_data = [dict(row._mapping) for row in session.execute(hot_stock_stmt)]
@@ -439,7 +439,7 @@ class BacktestEngine:
             # 热门题材（按需）
             hot_themes_data = []
             if self._should_load("hot_themes"):
-                hot_theme_stmt = select(DailyHotTheme).where(
+                hot_theme_stmt = select(DailyHotTheme.__table__).where(
                     DailyHotTheme.trade_date.between(flow_earliest_date, end_date_fmt)
                 ).order_by(DailyHotTheme.trade_date, DailyHotTheme.stock_count.desc())
                 hot_themes_data = [dict(row._mapping) for row in session.execute(hot_theme_stmt)]
@@ -448,12 +448,12 @@ class BacktestEngine:
             dragon_tiger_data = []
             dragon_tiger_seats_data = []
             if self._should_load("dragon_tiger"):
-                dt_stmt = select(DailyDragonTiger).where(
+                dt_stmt = select(DailyDragonTiger.__table__).where(
                     DailyDragonTiger.trade_date.between(flow_earliest_date, end_date_fmt)
                 ).order_by(DailyDragonTiger.trade_date.desc())
                 dragon_tiger_data = [dict(row._mapping) for row in session.execute(dt_stmt)]
 
-                dt_seat_stmt = select(DailyDragonTigerSeat).where(
+                dt_seat_stmt = select(DailyDragonTigerSeat.__table__).where(
                     DailyDragonTigerSeat.trade_date.between(flow_earliest_date, end_date_fmt)
                 ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
                 dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
