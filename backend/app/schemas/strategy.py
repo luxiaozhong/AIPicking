@@ -62,9 +62,12 @@ class StrategyResponse(StrategyBase):
     owner_name: Optional[str] = None
     status: str = "active"
     version: int = 1
+    is_published: bool = False
     file_path: Optional[str] = None
     factor_config: Optional[Dict[str, Any]] = None
     generated_code: Optional[str] = None
+    avg_score: Optional[float] = None
+    rating_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -105,3 +108,10 @@ class StrategyUploadResponse(BaseModel):
     message: str
     data: Optional[StrategyResponse] = None
     errors: Optional[List[str]] = None
+
+
+class PublishResponse(BaseModel):
+    """发布/取消发布响应"""
+    code: int = 0
+    message: str
+    is_published: bool
