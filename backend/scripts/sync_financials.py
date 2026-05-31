@@ -603,7 +603,7 @@ if __name__ == "__main__":
         total = 0
         for i, s in enumerate(stocks):
             try:
-                n = sync_stock(s["ts_code"], with_sina=(i < 20))
+                n = sync_stock(s["ts_code"], with_sina=True)
                 total += n
                 if (i + 1) % 100 == 0:
                     print(f"  进度: {i+1}/{len(stocks)}, 已写入 {total} 条")
@@ -617,7 +617,7 @@ if __name__ == "__main__":
         total = 0
         for i, s in enumerate(stocks):
             try:
-                n = sync_stock(s["ts_code"], with_sina=(i < 20))
+                n = sync_stock(s["ts_code"], with_sina=True)
                 total += n
                 if (i + 1) % 200 == 0:
                     print(f"  进度: {i+1}/{len(stocks)}, 已写入 {total} 条")
