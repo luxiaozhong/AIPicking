@@ -21,6 +21,7 @@ import os
 import random
 import sys
 import time
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -84,7 +85,7 @@ def _get_em_session() -> requests.Session:
         _em_session.headers.update({"User-Agent": UA})
     return _em_session
 
-def em_get(url: str, params=None, headers=None, timeout: int = 15, **kwargs):
+def em_get(url: str, params=None, headers=None, timeout: int = 15):
     """东财统一请求入口：自动节流 + 复用 session + 默认 UA。"""
     session = _get_em_session()
     wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
@@ -95,7 +96,7 @@ def em_get(url: str, params=None, headers=None, timeout: int = 15, **kwargs):
         if headers:
             merged.update(headers)
         return session.get(url, params=params, headers=merged,
-                           timeout=timeout, **kwargs)
+                           timeout=timeout)
     finally:
         _em_last_call[0] = time.time()
 
@@ -109,8 +110,12 @@ def eastmoney_datacenter(report_name: str, columns: str = "ALL",
         "sortColumns": sort_columns, "sortTypes": sort_types,
         "source": "WEB", "client": "WEB",
     }
-    r = em_get(DATACENTER_URL, params=params, timeout=15)
-    d = r.json()
+    try:
+        r = em_get(DATACENTER_URL, params=params, timeout=15)
+        d = r.json()
+    except Exception as e:
+        logging.error(f"Eastmoney API error ({report_name}): {e}")
+        return []
     if d.get("result") and d["result"].get("data"):
         return d["result"]["data"]
     return []
@@ -166,13 +171,15 @@ _INDEXES = [
 def ensure_tables():
     """创建龙虎榜表（幂等）"""
     conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(_DDL_DRAGON_TIGER)
-    cur.execute(_DDL_DRAGON_TIGER_SEATS)
-    for idx in _INDEXES:
-        cur.execute(idx)
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute(_DDL_DRAGON_TIGER)
+        cur.execute(_DDL_DRAGON_TIGER_SEATS)
+        for idx in _INDEXES:
+            cur.execute(idx)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -246,6 +253,7 @@ def fetch_seats(stock_code: str, date_str: str, seat_type: str) -> list[dict]:
 
     seats = []
     for i, row in enumerate(data[:5]):
+        # 东财用 OPERATEDEPT_CODE=="0" 标识机构专用席位
         seat_code = str(row.get("OPERATEDEPT_CODE", ""))
         seats.append({
             "stock_code": stock_code,
@@ -359,18 +367,16 @@ def sync(date_str: str, dry_run: bool = False) -> dict:
     else:
         result["list_count"] = len(stocks)
 
-    # 2. 逐只股票拉席位明细
-    total_seats = 0
+    # 2. 逐只股票拉席位明细（累积后批量写入）
+    all_seats = []
     for i, stock in enumerate(stocks):
         code = stock["stock_code"]
         name = stock["stock_name"]
         try:
             buy_seats = fetch_seats(code, date_str, "buy")
             sell_seats = fetch_seats(code, date_str, "sell")
-            all_seats = buy_seats + sell_seats
-            if not dry_run and all_seats:
-                save_seats(date_str, all_seats)
-            total_seats += len(all_seats)
+            all_seats.extend(buy_seats)
+            all_seats.extend(sell_seats)
             if (i + 1) % 20 == 0 or i == 0:
                 logging.info(f"  [{i+1}/{len(stocks)}] {code} {name}: "
                            f"buy={len(buy_seats)} sell={len(sell_seats)}")
@@ -379,7 +385,9 @@ def sync(date_str: str, dry_run: bool = False) -> dict:
             result["errors"].append(msg)
             logging.warning(f"  [{i+1}/{len(stocks)}] {msg}")
 
-    result["seats_count"] = total_seats
+    if not dry_run and all_seats:
+        save_seats(date_str, all_seats)
+    result["seats_count"] = len(all_seats)
     logging.info(f"Seats total: {total_seats} records, {len(result['errors'])} errors")
 
     # 3. 摘要
@@ -390,7 +398,6 @@ def sync(date_str: str, dry_run: bool = False) -> dict:
 
 def _print_summary(date_str: str, stocks: list[dict], errors: list[str]):
     """打印龙虎榜摘要"""
-    from collections import Counter
 
     print()
     print("=" * 60)
@@ -447,8 +454,9 @@ def main():
 
     date_str = args.date or date.today().strftime("%Y-%m-%d")
 
-    # 建表（幂等）
-    ensure_tables()
+    # 建表（幂等）— dry-run 模式跳过
+    if not args.dry_run:
+        ensure_tables()
 
     if args.dry_run:
         logging.info(f"DRY RUN mode — fetching {date_str} without writing")
