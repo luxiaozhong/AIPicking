@@ -43,6 +43,14 @@ interface StrategyState {
 
   permanentDeleteStrategy: (id: number) => Promise<void>;
 
+  updateFactorConfig: (id: number, config: Record<string, unknown>, meta?: {
+    name?: string;
+    description?: string;
+    tags?: string[];
+  }) => Promise<void>;
+
+  createFromFactorConfig: (config: Record<string, unknown>, name: string, description?: string) => Promise<Strategy>;
+
   publishStrategy: (id: number) => Promise<void>;
   unpublishStrategy: (id: number) => Promise<void>;
   rateStrategy: (id: number, score: number) => Promise<void>;
@@ -226,6 +234,53 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
         error: error.response?.data?.message || '彻底删除策略失败',
       });
 
+      throw error;
+    }
+  },
+
+  // 更新策略因子配置（重新生成代码）
+  updateFactorConfig: async (id: number, config: Record<string, unknown>, meta?: {
+    name?: string;
+    description?: string;
+    tags?: string[];
+  }) => {
+    set({ loading: true, error: null });
+    try {
+      // 先更新元数据（如有变化）
+      if (meta && (meta.name || meta.description !== undefined || meta.tags)) {
+        await strategyService.updateStrategy(id, {
+          name: meta.name,
+          description: meta.description,
+          tags: meta.tags,
+        });
+      }
+      // 更新因子配置
+      await strategyService.updateStrategyFactors(id, config as any);
+      // 刷新数据
+      await get().fetchStrategy(id);
+      set({ loading: false });
+    } catch (error: any) {
+      set({ loading: false, error: error.response?.data?.message || '更新因子配置失败' });
+      throw error;
+    }
+  },
+
+  // 基于因子配置创建新策略（另存为）
+  createFromFactorConfig: async (config: Record<string, unknown>, name: string, description?: string) => {
+    set({ loading: true, error: null });
+    try {
+      const res = await strategyService.createStrategyWithFactors({
+        name,
+        description,
+        factor_config: config as any,
+      });
+      if (res.code === 0 && res.data) {
+        set({ loading: false });
+        return res.data;
+      }
+      throw new Error(res.message || '创建失败');
+    } catch (error: any) {
+      set({ loading: false, error: error.response?.data?.message || error.message || '创建失败' });
       throw error;
     }
   },

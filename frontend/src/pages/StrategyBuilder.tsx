@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Input, Button, Card, Select, message, Modal, Space, Tabs, Tag } from 'antd';
 import {
   RobotOutlined,
@@ -13,6 +14,8 @@ import type { FactorMeta, FactorItem, ConditionMeta, ConditionItem, FactorConfig
 import { factorService } from '@/services/factorService';
 import { strategyService } from '@/services/strategyService';
 import { aiService } from '@/services/aiService';
+import { useStrategyStore } from '@/stores/strategyStore';
+import { isVisualEditable } from '@/types/strategy';
 import PageHeader from '@/components/shared/PageHeader';
 import FactorCard from '@/components/builder/FactorCard';
 import ConditionCard from '@/components/builder/ConditionCard';
@@ -33,6 +36,19 @@ function emptyFactorConfig(): FactorConfig {
 
 export default function StrategyBuilder() {
 
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const editId = searchParams.get('id');
+  const isEditMode = !!editId;
+
+  const {
+    currentStrategy,
+    error: storeError,
+    fetchStrategy,
+    updateFactorConfig,
+    createFromFactorConfig,
+  } = useStrategyStore();
+
   const [builderMode, setBuilderMode] = useState<BuilderMode>('signal');
   const [strategyName, setStrategyName] = useState('');
   const [strategyDesc, setStrategyDesc] = useState('');
@@ -46,6 +62,35 @@ export default function StrategyBuilder() {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  const [isDirty, setIsDirty] = useState(false);
+  const [editLoaded, setEditLoaded] = useState(false);
+  const editLoadedRef = useRef(false);
+
+  // Reset dirty-flag guard when entering edit mode
+  useEffect(() => {
+    if (isEditMode) {
+      editLoadedRef.current = false;
+    }
+  }, [isEditMode]);
+
+  // Track changes after initial edit load
+  useEffect(() => {
+    if (editLoaded && editLoadedRef.current) {
+      setIsDirty(true);
+    }
+  }, [factorConfig, strategyName, strategyDesc, editLoaded]);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   // 加载因子 + 条件
   const loadData = useCallback(async () => {
@@ -70,6 +115,65 @@ export default function StrategyBuilder() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 编辑模式：加载策略数据
+  useEffect(() => {
+    if (!editId) return;
+    const id = parseInt(editId, 10);
+    if (isNaN(id)) {
+      message.warning('无效的策略 ID');
+      navigate('/strategies');
+      return;
+    }
+    fetchStrategy(id);
+  }, [editId, fetchStrategy, navigate]);
+
+  // 处理获取策略时的错误
+  useEffect(() => {
+    if (storeError && isEditMode) {
+      message.error(storeError);
+      navigate('/strategies');
+    }
+  }, [storeError, isEditMode, navigate]);
+
+  // 编辑模式：currentStrategy 加载完成后填充表单
+  useEffect(() => {
+    if (!isEditMode || editLoaded || !currentStrategy) return;
+
+    if (!isVisualEditable(currentStrategy.factor_config)) {
+      message.warning('该策略不支持可视化编辑（AI 参考选股策略）');
+      navigate('/strategies');
+      return;
+    }
+
+    setStrategyName(currentStrategy.name);
+    setStrategyDesc(currentStrategy.description || '');
+
+    const fc = currentStrategy.factor_config as FactorConfig;
+    if (fc) {
+      setFactorConfig({
+        ...emptyFactorConfig(),
+        ...fc,
+        selection_conditions: {
+          logic: fc.selection_conditions?.logic || 'AND',
+          conditions: fc.selection_conditions?.conditions || [],
+        },
+        buy_signals: {
+          logic: fc.buy_signals?.logic || 'AND',
+          factors: fc.buy_signals?.factors || [],
+        },
+        sell_signals: {
+          logic: fc.sell_signals?.logic || 'OR',
+          factors: fc.sell_signals?.factors || [],
+        },
+        scoring_modifiers: fc.scoring_modifiers || [],
+        risk_factors: fc.risk_factors || [],
+      });
+    }
+    setEditLoaded(true);
+    // Defer ref to avoid marking dirty on initial load
+    setTimeout(() => { editLoadedRef.current = true; }, 0);
+  }, [isEditMode, currentStrategy, editLoaded, navigate]);
 
   // ── K 线因子 操作 ──
   const addFactor = (factor: FactorMeta, target: 'buy' | 'sell' | 'risk') => {
@@ -214,6 +318,56 @@ export default function StrategyBuilder() {
     }
   };
 
+  // 编辑模式：更新策略
+  const handleUpdate = async () => {
+    if (!strategyName.trim()) {
+      message.warning('请输入策略名称');
+      return;
+    }
+    if (!editId) return;
+    setLoading(true);
+    try {
+      await updateFactorConfig(parseInt(editId, 10), factorConfig as any, {
+        name: strategyName,
+        description: strategyDesc,
+      });
+      message.success('策略更新成功！');
+      setIsDirty(false);
+    } catch (err: unknown) {
+      message.error((err as Error)?.message || '更新失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 编辑模式：另存为新策略
+  const [saveAsModalOpen, setSaveAsModalOpen] = useState(false);
+  const [saveAsName, setSaveAsName] = useState('');
+
+  const handleSaveAs = async () => {
+    if (!saveAsName.trim()) {
+      message.warning('请输入新策略名称');
+      return;
+    }
+    setLoading(true);
+    try {
+      const newStrategy = await createFromFactorConfig(
+        factorConfig as any,
+        saveAsName,
+        strategyDesc,
+      );
+      message.success('新策略创建成功！');
+      setSaveAsModalOpen(false);
+      if (newStrategy) {
+        navigate(`/strategies/${newStrategy.id}`);
+      }
+    } catch (err: unknown) {
+      message.error((err as Error)?.message || '另存失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAIGenerate = async () => {
     if (!aiPrompt.trim()) {
       message.warning('请输入策略描述');
@@ -257,54 +411,63 @@ export default function StrategyBuilder() {
   return (
     <>
       <PageHeader
-        title="可视化构建策略"
+        title={isEditMode ? `编辑策略：${strategyName || '加载中...'}` : '可视化构建策略'}
         breadcrumb={[
           { title: '策略管理', path: '/strategies' },
-          { title: '可视化构建' },
+          ...(isEditMode
+            ? [
+                { title: strategyName || '策略详情', path: editId ? `/strategies/${editId}` : '/strategies' },
+                { title: '编辑' },
+              ]
+            : [{ title: '可视化构建' }]),
         ]}
       />
 
-      <Tabs
-        activeKey={builderMode}
-        onChange={(key) => {
-          if (builderMode === 'similarity' && key === 'signal') {
-            Modal.confirm({
-              title: '切换模式',
-              content: '切换将丢失当前 AI 分析结果，是否继续？',
-              onOk: () => setBuilderMode(key as BuilderMode),
-            });
-          } else {
-            setBuilderMode(key as BuilderMode);
-          }
-        }}
-        items={[
-          {
-            key: 'signal',
-            label: (
-              <span>
-                <CaretUpOutlined style={{ color: '#52c41a' }} /> 信号策略
-              </span>
-            ),
-          },
-          {
-            key: 'similarity',
-            label: (
-              <span>
-                <ThunderboltOutlined style={{ color: '#1677ff' }} /> 相似度匹配{' '}
-                <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', marginLeft: 2 }}>NEW</Tag>
-              </span>
-            ),
-          },
-        ]}
-        style={{ marginBottom: 16 }}
-      />
+      {!isEditMode && (
+        <Tabs
+          activeKey={builderMode}
+          onChange={(key) => {
+            if (builderMode === 'similarity' && key === 'signal') {
+              Modal.confirm({
+                title: '切换模式',
+                content: '切换将丢失当前 AI 分析结果，是否继续？',
+                onOk: () => setBuilderMode(key as BuilderMode),
+              });
+            } else {
+              setBuilderMode(key as BuilderMode);
+            }
+          }}
+          items={[
+            {
+              key: 'signal',
+              label: (
+                <span>
+                  <CaretUpOutlined style={{ color: '#52c41a' }} /> 信号策略
+                </span>
+              ),
+            },
+            {
+              key: 'similarity',
+              label: (
+                <span>
+                  <ThunderboltOutlined style={{ color: '#1677ff' }} /> 相似度匹配{' '}
+                  <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', marginLeft: 2 }}>NEW</Tag>
+                </span>
+              ),
+            },
+          ]}
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
-      {builderMode === 'similarity' ? (
+      {builderMode === 'similarity' && !isEditMode ? (
         /* === 相似度匹配模式 === */
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
           <AINLAssistant onStrategyGenerated={handleNLGenerated} />
         </div>
-      ) : (
+      ) : null}
+
+      {(builderMode === 'signal' || isEditMode) ? (
         /* === 信号策略模式 === */
         <>
           {/* Toolbar */}
@@ -332,9 +495,23 @@ export default function StrategyBuilder() {
             <Button icon={<RobotOutlined />} onClick={() => setAiPanelOpen(!aiPanelOpen)}>
               AI 助手
             </Button>
-            <Button type="primary" onClick={handleSave} loading={loading}>
-              保存策略
-            </Button>
+            {isEditMode ? (
+              <Space>
+                <Button type="primary" onClick={handleUpdate} loading={loading}>
+                  更新策略
+                </Button>
+                <Button onClick={() => {
+                  setSaveAsName(strategyName ? `${strategyName} - 副本` : '');
+                  setSaveAsModalOpen(true);
+                }}>
+                  另存为新策略
+                </Button>
+              </Space>
+            ) : (
+              <Button type="primary" onClick={handleSave} loading={loading}>
+                保存策略
+              </Button>
+            )}
           </div>
 
           {/* AI Assistant Panel */}
@@ -609,8 +786,24 @@ export default function StrategyBuilder() {
             </div>
           </div>
         </>
-      )}
+      ) : null}
 
+      <Modal
+        title="另存为新策略"
+        open={saveAsModalOpen}
+        onOk={handleSaveAs}
+        onCancel={() => setSaveAsModalOpen(false)}
+        confirmLoading={loading}
+        okText="创建"
+        cancelText="取消"
+      >
+        <p style={{ marginBottom: 12, color: '#666' }}>将当前因子配置保存为一个新策略：</p>
+        <Input
+          placeholder="请输入新策略名称"
+          value={saveAsName}
+          onChange={(e) => setSaveAsName(e.target.value)}
+        />
+      </Modal>
     </>
   );
 }

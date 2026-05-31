@@ -14,6 +14,7 @@ export interface Strategy {
   is_published: boolean;
   avg_score?: number | null;
   rating_count?: number;
+  factor_config?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -94,4 +95,10 @@ export interface CommentCreateResponse {
     user_name: string | null;
     created_at: string;
   };
+}
+
+/** 判断策略是否支持可视化编辑（标准信号策略有 buy_signals/sell_signals） */
+export function isVisualEditable(factorConfig: Record<string, unknown> | null | undefined): boolean {
+  if (!factorConfig) return false;
+  return 'buy_signals' in factorConfig && 'sell_signals' in factorConfig;
 }
