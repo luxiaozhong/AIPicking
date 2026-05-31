@@ -73,8 +73,10 @@ async def health_check():
 
 
 # 导入并注册 API 路由
-from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education
+from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments
 app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["strategies"])
+app.include_router(ratings.router, prefix="/api/v1/strategies", tags=["ratings"])
+app.include_router(comments.router, prefix="/api/v1/strategies", tags=["comments"])
 app.include_router(batch_backtests.router, prefix="/api/v1/backtests/batch", tags=["batch-backtests"])
 app.include_router(backtests.router, prefix="/api/v1/backtests", tags=["backtests"])
 app.include_router(factors.router, prefix="/api/v1", tags=["factors"])
