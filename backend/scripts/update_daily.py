@@ -136,11 +136,16 @@ def _fmt_date(d: str) -> str:
     return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
 
 
+# 指数 ts_code（由 update_index_daily.py 处理，此处排除）
+_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH")
+
 def load_stocks():
-    """从 PostgreSQL stocks 表读取股票列表"""
+    """从 PostgreSQL stocks 表读取股票列表（排除指数）"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT ts_code, symbol FROM stocks")
+    cur.execute(
+        "SELECT ts_code, symbol FROM stocks WHERE ts_code NOT IN %s",
+        (_INDEX_CODES,))
     rows = cur.fetchall()
     conn.close()
     return [{"ts_code": r[0], "symbol": r[1]} for r in rows]
