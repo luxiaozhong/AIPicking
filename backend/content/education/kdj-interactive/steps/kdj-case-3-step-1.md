@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 3 · 步骤 1"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识 J 线的特性
 
 J 线是 KDJ 中最特殊的线：**J = 3K - 2D**

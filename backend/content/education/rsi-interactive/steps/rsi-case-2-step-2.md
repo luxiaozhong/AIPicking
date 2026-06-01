@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 2 · 步骤 2"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 观察反弹确认
 
 图中标注了 RSI 跌入超卖区后的反弹信号。

@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 3 · 步骤 3"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整 RSI 周期
 
 不同周期参数会影响背离信号的识别。

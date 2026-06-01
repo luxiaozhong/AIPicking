@@ -1,3 +1,11 @@
+---
+title: "MA - 步骤 2"
+category: education
+tags: ["ma", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 观察金叉信号
 
 当短期均线从下方上穿长期均线时，形成**金叉买入信号**。

@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 2 · 步骤 3"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整标准差倍数
 
 标准差倍数直接影响轨道的宽度。

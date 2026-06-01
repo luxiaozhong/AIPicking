@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 1 · 步骤 2"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 发现金叉信号
 
 当 K 线从下方上穿 D 线时，形成 **KDJ 金叉**。

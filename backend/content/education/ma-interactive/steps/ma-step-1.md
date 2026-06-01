@@ -1,3 +1,11 @@
+---
+title: "MA - 步骤 1"
+category: education
+tags: ["ma", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识均线系统
 
 均线（MA）是最基础的技术指标，反映一定周期的平均持仓成本。

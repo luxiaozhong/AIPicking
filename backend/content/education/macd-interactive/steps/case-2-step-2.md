@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 2 · 步骤 2"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 识别顶背离信号
 
 图中标记了 **2021 年 12 月 3 日** 附近的顶背离：

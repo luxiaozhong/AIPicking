@@ -1,3 +1,11 @@
+---
+title: "WR - 步骤 2"
+category: education
+tags: ["wr", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 识别超买超卖
 
 WR 与 RSI/KDJ 的超买超卖方向相反，注意区分。

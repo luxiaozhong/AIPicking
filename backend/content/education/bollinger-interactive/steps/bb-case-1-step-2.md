@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 1 · 步骤 2"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 观察收窄信号
 
 注意图中布林带宽度明显收窄的区间。

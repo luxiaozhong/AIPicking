@@ -1,3 +1,11 @@
+---
+title: "WR - 步骤 1"
+category: education
+tags: ["wr", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识 WR 指标
 
 WR（Williams %R，威廉指标）由 Larry Williams 于 1973 年提出。

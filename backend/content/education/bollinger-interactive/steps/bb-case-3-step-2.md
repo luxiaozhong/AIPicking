@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 3 · 步骤 2"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 识别波动信号
 
 将带宽变化与价格走势结合分析。

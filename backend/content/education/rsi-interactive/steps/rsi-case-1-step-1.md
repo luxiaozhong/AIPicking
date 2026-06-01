@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 1 · 步骤 1"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识 RSI 指标
 
 RSI（Relative Strength Index，相对强弱指数）是衡量价格涨跌力度的动量指标。

@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 3 · 步骤 2"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 捕捉 J 线极端信号
 
 图中标注了 J 线跌入负值区后的急速反弹。

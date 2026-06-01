@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 1 · 步骤 1"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识 KDJ 三条线
 
 KDJ 指标由三条线组成：

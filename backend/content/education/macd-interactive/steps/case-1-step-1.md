@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 1 · 步骤 1"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 观察默认 MACD 走势
 
 上方 K 线图为贵州茅台的日线走势，下方 MACD 面板中：

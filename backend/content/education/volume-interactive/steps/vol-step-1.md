@@ -1,3 +1,11 @@
+---
+title: "VOLUME - 步骤 1"
+category: education
+tags: ["volume", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 量价关系基础
 
 成交量是市场的"燃料"，验证价格走势的有效性。

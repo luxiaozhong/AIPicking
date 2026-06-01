@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 3 · 步骤 4"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 4
+---
+
 ## 综合运用 MACD 信号
 
 ### MACD 三大信号总结

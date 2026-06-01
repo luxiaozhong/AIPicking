@@ -1,3 +1,11 @@
+---
+title: "VOLUME - 步骤 3"
+category: education
+tags: ["volume", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 量价背离信号
 
 量价背离是重要的反转信号。

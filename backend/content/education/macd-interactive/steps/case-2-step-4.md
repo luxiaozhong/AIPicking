@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 2 · 步骤 4"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 4
+---
+
 ## 总结：MACD 背离交易策略
 
 ### 顶背离交易要点

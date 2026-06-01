@@ -1,3 +1,11 @@
+---
+title: "MA - 步骤 3"
+category: education
+tags: ["ma", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整参数观察
 
 不同周期组合产生不同频率的信号。

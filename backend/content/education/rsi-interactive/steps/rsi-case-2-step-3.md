@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 2 · 步骤 3"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整参数看变化
 
 调整 RSI 周期参数，观察超卖信号的变化。

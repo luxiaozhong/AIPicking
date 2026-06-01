@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 2 · 步骤 1"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识超卖信号
 
 上方 K 线图为宁德时代的日线走势，下方 RSI 面板展示对应的指标变化。

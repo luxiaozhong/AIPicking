@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 2 · 步骤 1"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 观察触及上轨
 
 当价格接近或突破上轨时，有多种解读方式。

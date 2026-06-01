@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 1 · 步骤 3"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整周期参数
 
 KDJ 的默认周期为 9 天，调整周期会影响信号频率。

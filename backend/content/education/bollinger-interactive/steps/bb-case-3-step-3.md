@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 3 · 步骤 3"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整参数验证信号
 
 不同参数下布林带信号的表现。

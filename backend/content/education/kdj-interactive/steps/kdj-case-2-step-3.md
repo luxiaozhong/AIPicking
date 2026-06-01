@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 2 · 步骤 3"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整周期对比
 
 不同周期参数对超卖信号识别的影响。

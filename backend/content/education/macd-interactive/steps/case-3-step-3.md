@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 3 · 步骤 3"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整快线观察信号灵敏度
 
 试试调整「快线 EMA」参数：

@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 1 · 步骤 3"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整周期参数
 
 右侧参数面板可以调整 RSI 的计算周期。

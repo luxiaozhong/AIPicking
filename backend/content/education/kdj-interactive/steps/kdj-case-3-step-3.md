@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 3 · 步骤 3"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整参数看 J 线变化
 
 J 线的波动幅度受周期参数影响。

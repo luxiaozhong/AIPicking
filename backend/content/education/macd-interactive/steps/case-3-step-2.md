@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 3 · 步骤 2"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 发现底背离信号
 
 图中标记了 **2022 年 4 月 27 日** 的底背离：

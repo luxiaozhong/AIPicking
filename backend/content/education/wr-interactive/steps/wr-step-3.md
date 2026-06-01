@@ -1,3 +1,11 @@
+---
+title: "WR - 步骤 3"
+category: education
+tags: ["wr", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整周期参数
 
 WR 默认周期为 10，不同周期适用不同场景。

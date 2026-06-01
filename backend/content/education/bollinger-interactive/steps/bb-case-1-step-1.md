@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 1 · 步骤 1"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识布林带结构
 
 布林带由上、中、下三条轨线组成：

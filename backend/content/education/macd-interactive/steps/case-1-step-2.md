@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 1 · 步骤 2"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 发现金叉信号
 
 注意图中标记的 **2020 年 3 月 20 日** 附近：DIF 线（蓝色）从下方上穿 DEA 线（橙色）。

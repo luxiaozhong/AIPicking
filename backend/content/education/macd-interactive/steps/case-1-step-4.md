@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 1 · 步骤 4"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 4
+---
+
 ## 总结：MACD 金叉交易策略
 
 ### 核心要点

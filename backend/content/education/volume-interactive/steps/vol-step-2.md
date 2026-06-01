@@ -1,3 +1,11 @@
+---
+title: "VOLUME - 步骤 2"
+category: education
+tags: ["volume", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 放量突破识别
 
 放量突破是重要的交易信号。

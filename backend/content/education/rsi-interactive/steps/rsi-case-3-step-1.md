@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 3 · 步骤 1"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识 RSI 背离
 
 当价格与 RSI 走势方向不一致时，形成了**背离**信号。

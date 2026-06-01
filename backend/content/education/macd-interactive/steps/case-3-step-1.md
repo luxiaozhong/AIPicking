@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 3 · 步骤 1"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 观察下跌趋势中的 MACD
 
 上方 K 线图为比亚迪的日线走势。当前市场处于下跌趋势中。

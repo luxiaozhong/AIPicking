@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 2 · 步骤 2"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 观察触及下轨
 
 价格触及下轨同样有多种情景。

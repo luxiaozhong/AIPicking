@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 2 · 步骤 2"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 观察超卖反弹
 
 图中标注了 K/D 值跌入超卖区后的反弹信号。

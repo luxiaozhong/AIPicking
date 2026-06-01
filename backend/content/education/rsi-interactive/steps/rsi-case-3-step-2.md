@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 3 · 步骤 2"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 对比价格与 RSI
 
 图中标注了价格创新高但 RSI 未创新高的背离位置。

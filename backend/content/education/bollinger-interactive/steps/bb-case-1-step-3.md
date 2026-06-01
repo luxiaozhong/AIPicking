@@ -1,3 +1,11 @@
+---
+title: "BOLLINGER - 案例 1 · 步骤 3"
+category: education
+tags: ["bollinger", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整参数观察
 
 布林带默认参数为 20 周期 + 2 倍标准差。

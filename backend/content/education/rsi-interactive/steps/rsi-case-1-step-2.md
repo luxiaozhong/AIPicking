@@ -1,3 +1,11 @@
+---
+title: "RSI - 案例 1 · 步骤 2"
+category: education
+tags: ["rsi", "互动教学"]
+difficulty: 入门
+order: 2
+---
+
 ## 识别超买信号
 
 注意图中标注位置：RSI 突破 70 进入**超买区**。

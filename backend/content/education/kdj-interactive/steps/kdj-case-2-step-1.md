@@ -1,3 +1,11 @@
+---
+title: "KDJ - 案例 2 · 步骤 1"
+category: education
+tags: ["kdj", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 认识超卖信号
 
 当 K、D 值跌入 **20 以下**时，进入超卖区。

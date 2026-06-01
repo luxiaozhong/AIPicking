@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 2 · 步骤 1"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 1
+---
+
 ## 观察股价与 MACD 的关系
 
 上方 K 线图为宁德时代的日线走势。注意观察：

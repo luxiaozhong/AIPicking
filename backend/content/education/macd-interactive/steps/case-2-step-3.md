@@ -1,3 +1,11 @@
+---
+title: "MACD - 案例 2 · 步骤 3"
+category: education
+tags: ["macd", "互动教学"]
+difficulty: 入门
+order: 3
+---
+
 ## 调整慢线观察背离变化
 
 顶背离的识别受参数影响很大。试试调整「慢线 EMA」：
