@@ -79,17 +79,17 @@ _ACCEPT_LANG_POOL = [
 ]
 
 _em_session: Optional[requests.Session] = None
-EM_MIN_INTERVAL = 3.0        # base interval between Eastmoney requests (was 1.0)
+EM_MIN_INTERVAL = 1.5        # base interval for dataapi requests (less strict than push2)
 EM_MAX_RETRIES = 3           # retry on block/429
 EM_BLOCK_BACKOFF = (30, 120) # seconds to wait when blocked (min, max)
 
 _em_last_call = [0.0]
 _sector_pre_delayed = False  # ensure pre-delay only runs once per sync
 
-# Sector types for Eastmoney push2 API
+# Sector filter codes for dataapi (same format as push2, but dataapi works)
 SECTOR_TYPES = {
-    "industry": "m:90+t:2",   # 行业板块
-    "concept":  "m:90+t:3",   # 概念板块
+    "industry": "m:90+s:4",   # 行业板块
+    "concept":  "m:90+s:3",   # 概念板块
 }
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -106,7 +106,7 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def _get_em_session() -> requests.Session:
-    """Lazy-init shared session for connection reuse (headers set per-request)."""
+    """Lazy-init shared session (headers set per-request for anti-fingerprinting)."""
     global _em_session
     if _em_session is None:
         _em_session = requests.Session()
@@ -437,127 +437,131 @@ def fetch_northbound_flow(date_str: str) -> Optional[dict]:
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# Fetch: 东财板块（行业 + 概念）
+# Fetch: 东财板块（行业 + 概念）—  via dataapi (push2 is TLS-fingerprint-gated)
 # ═════════════════════════════════════════════════════════════════════════
+#
+# push2.eastmoney.com now blocks non-browser TLS fingerprints even from within
+# China, so we use data.eastmoney.com/dataapi/bkzj/getbkzj instead.
+#
+# The dataapi endpoint returns only {f12, f13, f14, <key>} per call, where
+# <key> selects which extra field to return and sort by.  We make one call
+# with key=f62 (主力净流入 → ranking) plus additional calls for change_pct,
+# fund-flow breakdown, leader stock, up/down count — then merge by sector code.
 
-# Common fields for both ranking + fund flow
-_SECTOR_RANK_FIELDS = (
-    "f2,f3,f4,f12,f13,f14,f104,f105,f128,f136,f140,f141,f207"
-)
-_SECTOR_FLOW_FIELDS = "f12,f14,f62,f184,f66,f72,f78"
+# Base URL for the working dataapi endpoint (replaces push2)
+_DATAAPI_URL = "https://data.eastmoney.com/dataapi/bkzj/getbkzj"
+
+# Keys we fetch from dataapi and their mapping to our output fields.
+# (key, output_field, unit_converter) — converter=None means raw value.
+_DATAAPI_KEYS = [
+    ("f62", "main_net_yi",       _yi),                        # 主力净流入 元→亿
+    ("f3",  "change_pct",        lambda v: round(float(v) / 100, 2) if v is not None else None),  # ×100 → %
+    ("f66", "large_net_yi",      _yi),                        # 大单净流入
+    ("f72", "mid_net_yi",        _yi),                        # 中单净流入
+    ("f78", "small_net_yi",      _yi),                        # 小单净流入
+    ("f184","super_large_net_yi",lambda v: round(float(v) / 100, 2) if v is not None else None),  # ×100 → 亿
+    ("f104","up_count",          lambda v: int(float(v)) if v is not None else None),
+    ("f105","down_count",        lambda v: int(float(v)) if v is not None else None),
+    ("f204","leader_stock",      None),                       # 领涨股名称
+]
 
 
-def _fetch_sector_ranking(fs_filter: str) -> list[dict]:
-    """Fetch sector ranking for a given Eastmoney filter string."""
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
-    params = {
-        "pn": "1", "pz": "200", "po": "1", "np": "1",
-        "fltt": "2", "invt": "2",
-        "fs": fs_filter,
-        "fields": _SECTOR_RANK_FIELDS,
-    }
+def _dataapi_get(code: str, key: str) -> dict:
+    """Fetch all sectors from dataapi, return dict keyed by sector code (f12).
+
+    Args:
+        code: filter code, e.g. 'm:90+s:4' (industry) or 'm:90+s:3' (concept)
+        key:  field to sort by / include, e.g. 'f62' for main net flow
+    """
     try:
-        r = _em_get(url, params=params, timeout=15)
+        r = _em_get(_DATAAPI_URL, params={
+            "key": key, "code": code, "pz": "200", "pn": "1"
+        }, timeout=15)
         d = r.json()
     except Exception as e:
-        logging.warning(f"Sector ranking fetch failed ({fs_filter}): {e}")
-        return []
-
-    items = d.get("data", {}).get("diff")
-    if not items:
-        return []
-
-    rows = []
-    for i, item in enumerate(items):
-        rows.append({
-            "sector_code": item.get("f12", ""),
-            "sector_name": item.get("f14", ""),
-            "change_pct": item.get("f3"),
-            "up_count": item.get("f104"),
-            "down_count": item.get("f105"),
-            "leader_stock": item.get("f140", ""),
-            "leader_change": item.get("f136"),
-            "rank": i + 1,
-        })
-    return rows
-
-
-def _fetch_sector_fund_flow(fs_filter: str) -> dict:
-    """Fetch sector fund flow for a given Eastmoney filter string."""
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
-    params = {
-        "pn": "1", "pz": "200", "po": "1", "np": "1",
-        "fltt": "2", "invt": "2",
-        "fs": fs_filter,
-        "fields": _SECTOR_FLOW_FIELDS,
-    }
-    try:
-        r = _em_get(url, params=params, timeout=15)
-        d = r.json()
-    except Exception as e:
-        logging.warning(f"Sector fund flow fetch failed ({fs_filter}): {e}")
+        logging.warning(f"dataapi failed (code={code}, key={key}): {e}")
         return {}
 
     items = d.get("data", {}).get("diff")
     if not items:
         return {}
-
-    result = {}
-    for item in items:
-        code = item.get("f12", "")
-        if not code:
-            continue
-        result[code] = {
-            "main_net_yi": _yi(item.get("f62")),
-            "super_large_net_yi": _yi(item.get("f184")),
-            "large_net_yi": _yi(item.get("f66")),
-            "mid_net_yi": _yi(item.get("f72")),
-            "small_net_yi": _yi(item.get("f78")),
-        }
-    return result
+    return {item["f12"]: item for item in items}
 
 
 def fetch_sectors(sector_type: str) -> list[dict]:
-    """Fetch sector ranking + fund flow for a given sector type.
+    """Fetch sector data via dataapi — multiple key calls merged by sector code.
 
     Args:
-        sector_type: 'industry' (m:90+t:2) or 'concept' (m:90+t:3).
-
-    Returns merged list of dicts ready for insertion into daily_sector_flow.
+        sector_type: 'industry' (m:90+s:4) or 'concept' (m:90+s:3).
     """
-    fs_filter = SECTOR_TYPES.get(sector_type)
-    if not fs_filter:
+    code = SECTOR_TYPES.get(sector_type)
+    if not code:
         logging.warning(f"Unknown sector_type: {sector_type}")
         return []
 
-    # One-time random pre-delay before first Eastmoney sector request
     _sector_pre_delay()
 
-    ranking = _fetch_sector_ranking(fs_filter)
-    if not ranking:
+    # Primary call: sorted by main net flow (f62) — determines ranking order
+    primary = _dataapi_get(code, "f62")
+    if not primary:
+        logging.warning(f"No sector data for {sector_type} (code={code})")
         return []
 
-    # Longer delay between ranking and fund flow (was 0.3s — too fast)
-    gap = random.uniform(2.0, 5.0)
-    logging.debug(f"Waiting {gap:.1f}s before fund flow request for {sector_type}...")
-    time.sleep(gap)
+    # Fetch additional fields in parallel-minded sequence
+    aux = {}
+    for key, _out_field, _converter in _DATAAPI_KEYS:
+        if key == "f62":
+            continue  # already fetched as primary
+        data = _dataapi_get(code, key)
+        if data:
+            aux[key] = data
+        time.sleep(random.uniform(0.3, 1.0))  # gentle gap between calls
 
-    fund_flow = _fetch_sector_fund_flow(fs_filter)
+    # Merge: primary dict order = ranking (descending by f62)
+    rows = []
+    for rank_i, (sector_code, item) in enumerate(primary.items()):
+        row = {
+            "sector_code": sector_code,
+            "sector_name": item.get("f14", ""),
+            "sector_type": sector_type,
+            "rank": rank_i + 1,
+        }
 
-    for item in ranking:
-        ff = fund_flow.get(item["sector_code"], {})
-        # Merge fund flow fields
-        for k in ("main_net_yi", "super_large_net_yi", "large_net_yi",
-                  "mid_net_yi", "small_net_yi"):
-            if k not in item and k in ff:
-                item[k] = ff[k]
+        # Merge all auxiliary fields
+        for key, out_field, converter in _DATAAPI_KEYS:
+            # Get value from primary or auxiliary data
+            val = None
+            if key == "f62":
+                src = item
+            else:
+                src = aux.get(key, {}).get(sector_code) or {}
+            val = src.get(key) if src else None
+
+            if val is not None and converter is not None:
+                try:
+                    val = converter(val)
+                except (ValueError, TypeError):
+                    val = None
+            row[out_field] = val
+
         # Compute net_inflow = main + large + mid + small
-        vals = [item.get(k) or 0.0 for k in
-                ("main_net_yi", "large_net_yi", "mid_net_yi", "small_net_yi")]
-        item["net_inflow"] = round(sum(v for v in vals if v), 2)
-        item["sector_type"] = sector_type
+        components = [
+            row.get(k) or 0.0
+            for k in ("main_net_yi", "large_net_yi", "mid_net_yi", "small_net_yi")
+        ]
+        row["net_inflow"] = round(sum(components), 2)
 
-    return ranking
+        # leader_change not directly available in dataapi
+        row.setdefault("leader_change", None)
+
+        rows.append(row)
+
+    logging.info(
+        f"Fetched {len(rows)} {sector_type} sectors "
+        f"(top: {rows[0]['sector_name']} {rows[0]['net_inflow']:.1f}亿)"
+        if rows else f"No {sector_type} sector data"
+    )
+    return rows
 
 
 # ═════════════════════════════════════════════════════════════════════════
