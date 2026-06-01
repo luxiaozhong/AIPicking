@@ -54,7 +54,7 @@ def compute_factor(factor_id: str, df, params: dict):
 
 # 自动发现并导入所有因子模块
 _factor_dir = os.path.dirname(__file__)
-_subdirs = ["trend", "momentum", "volume", "pattern", "risk", "ai_generated", "fundamental"]
+_subdirs = ["trend", "momentum", "volume", "pattern", "risk", "ai_generated"]
 
 
 def _discover_and_register():
