@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input, Button, Card, Tag, Space, message, Spin, Progress } from 'antd';
 import {
   SendOutlined,
@@ -13,13 +13,19 @@ import type { IndicatorItem, NLClassified, GenerationProgress } from '@/types/ai
 
 interface Props {
   onStrategyGenerated: (strategyId: number) => void;
+  onPhaseChange?: (phase: NLPhase) => void;
 }
 
 type NLPhase = 'idle' | 'analyzing' | 'review' | 'generating' | 'completed' | 'failed';
 
-export default function AINLAssistant({ onStrategyGenerated }: Props) {
+export default function AINLAssistant({ onStrategyGenerated, onPhaseChange }: Props) {
   const [prompt, setPrompt] = useState('');
   const [phase, setPhase] = useState<NLPhase>('idle');
+
+  useEffect(() => {
+    onPhaseChange?.(phase);
+  }, [phase, onPhaseChange]);
+
   const [taskId, setTaskId] = useState<string | null>(null);
   const [summary, setSummary] = useState('');
   const [indicators, setIndicators] = useState<IndicatorItem[]>([]);

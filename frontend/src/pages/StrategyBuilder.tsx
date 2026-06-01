@@ -76,6 +76,8 @@ export default function StrategyBuilder() {
   const [isDirty, setIsDirty] = useState(false);
   const [editLoaded, setEditLoaded] = useState(false);
   const editLoadedRef = useRef(false);
+  const [nlPhase, setNlPhase] = useState<string>('idle');
+  const hasAiData = nlPhase !== 'idle' && nlPhase !== 'completed' && nlPhase !== 'failed';
 
   // Reset dirty-flag guard when entering edit mode
   useEffect(() => {
@@ -443,7 +445,7 @@ export default function StrategyBuilder() {
           <Tabs
             activeKey={builderMode}
             onChange={(key) => {
-              if (builderMode === 'similarity' && key === 'signal') {
+              if (builderMode === 'similarity' && key === 'signal' && hasAiData) {
                 Modal.confirm({
                   title: '切换模式',
                   content: '切换将丢失当前 AI 分析结果，是否继续？',
@@ -480,7 +482,7 @@ export default function StrategyBuilder() {
       {builderMode === 'similarity' && !isEditMode ? (
         /* === 相似度匹配模式 === */
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
-          <AINLAssistant onStrategyGenerated={handleNLGenerated} />
+          <AINLAssistant onStrategyGenerated={handleNLGenerated} onPhaseChange={setNlPhase} />
         </div>
       ) : null}
 
