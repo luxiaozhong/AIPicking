@@ -17,6 +17,8 @@ export interface FactorMeta {
   description: string;
   params: FactorParam[];
   signal_type: 'buy' | 'sell' | 'both';
+  factor_type?: 'kline' | 'fundamental';
+  usage_modes?: ('scoring' | 'screening')[];
 }
 
 export interface FactorItem {
@@ -41,6 +43,7 @@ export interface ConditionMeta {
   type: ConditionType;
   description: string;
   params: FactorParam[];
+  usage_modes?: ('scoring' | 'screening')[];
 }
 
 export interface ConditionItem {

@@ -15,8 +15,11 @@ from typing import Dict, List, Any
 
 from ..factors.conditions import (
     get_condition_meta,
+    get_financial_lookup_code,
+    get_financial_setup_code,
     get_helper_code,
     get_setup_code,
+    has_fundamental_conditions,
 )
 
 
@@ -64,6 +67,16 @@ def generate_strategy_code(name: str, factor_config: Dict[str, Any]) -> str:
     for f in buy_factors + sell_factors + risk_factors:
         all_factor_ids.add(f["factor_id"])
 
+    # 收集基本面因子 ID（从选股条件和评分修正中）
+    for cond in selection.get("conditions", []):
+        cid = cond.get("condition_id", "")
+        if cid.startswith("fundamental_"):
+            all_factor_ids.add(cid)
+    for sc in scorers:
+        cid = sc.get("condition_id", "")
+        if cid.startswith("fundamental_"):
+            all_factor_ids.add(cid)
+
     # ── 推断所需数据源 ──
     required_data = _infer_required_data(factor_config)
 
@@ -94,6 +107,9 @@ def generate_strategy_code(name: str, factor_config: Dict[str, Any]) -> str:
         else:
             buy_parts = " | ".join([f"buy_{i}" for i in range(len(buy_factors))])
             buy_result = f"        buy_signal = ({buy_parts}).astype(int)"
+    elif scorers:
+        # 无买入因子但有评分修正 → 全部通过，靠评分排序
+        buy_result = "        buy_signal = pd.Series(1, index=df.index)"
     else:
         buy_result = "        buy_signal = pd.Series(0, index=df.index)"
 
@@ -121,6 +137,7 @@ def generate_strategy_code(name: str, factor_config: Dict[str, Any]) -> str:
 
     # ── 是否使用了 Tier 2 条件 ──
     has_tier2 = bool(sel_conditions or scorers)
+    has_fundamental = has_fundamental_conditions(factor_config)
 
     signal_str = ', '.join([f['factor_id'] for f in buy_factors]) if buy_factors else '综合信号'
 
@@ -141,7 +158,7 @@ import numpy as np
 '''
 
     # Tier 2 helper functions
-    if has_tier2:
+    if has_tier2 or has_fundamental:
         code += get_helper_code() + "\n"
 
     code += f'''
@@ -174,6 +191,10 @@ def run(data: dict) -> list[dict]:
     else:
         code += "\n"
 
+    # Financial data index building
+    if has_fundamental:
+        code += get_financial_setup_code() + "\n"
+
     code += '''    recommendations = []
 
     for stock in stocks:
@@ -188,6 +209,9 @@ def run(data: dict) -> list[dict]:
             continue
 
 '''
+    # Financial data lookup (before selection conditions)
+    if has_fundamental:
+        code += get_financial_lookup_code() + "\n"
 
     # Selection condition checks (pre-filter)
     if sel_check_lines:
@@ -227,7 +251,12 @@ def run(data: dict) -> list[dict]:
     # Tier 2 score modifiers
     if score_lines:
         code += "\n            # === 评分修正 ===\n"
-        code += score_lines
+        # Add 4 extra spaces to put scoring modifiers inside the if block
+        indented_scores = "\n".join(
+            "    " + line if line.strip() else line
+            for line in score_lines.split("\n")
+        )
+        code += indented_scores
 
     code += f'''
             recommendations.append({{
@@ -264,6 +293,7 @@ def _gen_selection_checks(conditions: List[Dict], logic: str) -> str:
         filled = template
         filled = filled.replace("{idx}", str(idx))
         filled = filled.replace("{ts_code}", "ts_code")
+        filled = filled.replace("{params_json}", json.dumps(params, ensure_ascii=False))
         for p_name, p_val in params.items():
             if isinstance(p_val, str):
                 filled = filled.replace(f"{{{p_name}}}", p_val)
@@ -309,6 +339,7 @@ def _gen_scoring_modifiers(scorers: List[Dict]) -> str:
         filled = template
         filled = filled.replace("{idx}", str(idx))
         filled = filled.replace("{ts_code}", "ts_code")
+        filled = filled.replace("{params_json}", json.dumps(params, ensure_ascii=False))
         for p_name, p_val in params.items():
             if isinstance(p_val, str):
                 filled = filled.replace(f"{{{p_name}}}", p_val)
@@ -358,5 +389,9 @@ def _infer_required_data(factor_config: Dict[str, Any]) -> List[str]:
             needed.add("dragon_tiger")
         elif cid.startswith("sf_"):
             needed.add("sector_flow")
+
+    # Check for fundamental factors
+    if has_fundamental_conditions(factor_config):
+        needed.add("financials")
 
     return sorted(needed)

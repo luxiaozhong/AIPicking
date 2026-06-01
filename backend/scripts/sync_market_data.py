@@ -26,6 +26,7 @@ Cron (weekdays 18:30 Beijing time):
 """
 
 import argparse
+import itertools
 import logging
 import os
 import random
@@ -55,14 +56,35 @@ DEFAULT_STOCK_DB = os.getenv(
 # Constants
 # ═════════════════════════════════════════════════════════════════════════
 
-UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"
-)
+# Rotating User-Agent pool — randomize per request to evade fingerprinting
+_UA_POOL = [
+    # macOS Chrome
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Windows Chrome
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Windows Edge
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    # Linux Chrome
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+]
+_UA_CYCLE = itertools.cycle(_UA_POOL)
+
+# Accept-Language variants (rotated to look like different users)
+_ACCEPT_LANG_POOL = [
+    "zh-CN,zh;q=0.9,en;q=0.8",
+    "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    "zh-CN,zh;q=0.9",
+]
 
 _em_session: Optional[requests.Session] = None
-EM_MIN_INTERVAL = 1.0
+EM_MIN_INTERVAL = 3.0        # base interval between Eastmoney requests (was 1.0)
+EM_MAX_RETRIES = 3           # retry on block/429
+EM_BLOCK_BACKOFF = (30, 120) # seconds to wait when blocked (min, max)
+
 _em_last_call = [0.0]
+_sector_pre_delayed = False  # ensure pre-delay only runs once per sync
 
 # Sector types for Eastmoney push2 API
 SECTOR_TYPES = {
@@ -84,27 +106,121 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def _get_em_session() -> requests.Session:
+    """Lazy-init shared session for connection reuse (headers set per-request)."""
     global _em_session
     if _em_session is None:
         _em_session = requests.Session()
-        _em_session.headers.update({"User-Agent": UA})
     return _em_session
 
 
-def _em_get(url, params=None, headers=None, timeout=15, **kwargs):
-    """Eastmoney unified request: auto-throttle + session reuse."""
+def _build_browser_headers(extra: Optional[dict] = None) -> dict:
+    """Build realistic browser headers with random fingerprinting."""
+    h = {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": random.choice(_ACCEPT_LANG_POOL),
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Referer": "https://data.eastmoney.com/",
+        "Sec-Fetch-Dest": "script",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-site",
+        "User-Agent": next(_UA_CYCLE),
+    }
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _em_get(url, params=None, headers=None, timeout=15, retry_on_block=True, **kwargs):
+    """Eastmoney unified request with enhanced anti-detection.
+
+    Features:
+      - 3+ second base interval with random jitter (0.5–2.5s)
+      - Rotating User-Agent + Accept-Language per request
+      - Full browser-mimicking headers (Sec-Fetch-*, etc.)
+      - Auto-detect blocks (403 / "频率" / "IP") and retry with exponential
+        backoff (30–120s base, ×2 per attempt)
+      - Session reuse for connection pooling (headers per-request to avoid
+        fingerprinting)
+    """
     session = _get_em_session()
+
+    # Enforce base interval + jitter
     wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
     if wait > 0:
-        time.sleep(wait + random.uniform(0.1, 0.5))
-    try:
-        merged = {"Referer": "https://data.eastmoney.com/"}
-        if headers:
-            merged.update(headers)
-        return session.get(url, params=params, headers=merged,
-                           timeout=timeout, **kwargs)
-    finally:
+        time.sleep(wait)
+    # Additional random jitter to break pattern detection
+    time.sleep(random.uniform(0.5, 2.5))
+
+    merged = _build_browser_headers(headers)
+
+    last_exc = None
+    for attempt in range(EM_MAX_RETRIES):
+        try:
+            resp = session.get(url, params=params, headers=merged,
+                               timeout=timeout, **kwargs)
+        except requests.RequestException as e:
+            last_exc = e
+            logging.warning(f"Eastmoney request failed (attempt {attempt+1}/{EM_MAX_RETRIES}): {e}")
+            if attempt < EM_MAX_RETRIES - 1:
+                backoff = EM_BLOCK_BACKOFF[0] * (2 ** attempt) + random.uniform(0, 10)
+                logging.info(f"Retrying in {backoff:.0f}s...")
+                time.sleep(backoff)
+                merged = _build_browser_headers(headers)  # fresh fingerprint
+            continue
+
+        # Check for block signals
+        if resp.status_code in (403, 429):
+            logging.warning(
+                f"Eastmoney returned {resp.status_code} "
+                f"(attempt {attempt+1}/{EM_MAX_RETRIES})"
+            )
+            if attempt < EM_MAX_RETRIES - 1 and retry_on_block:
+                backoff = EM_BLOCK_BACKOFF[0] * (2 ** attempt) + random.uniform(0, 10)
+                logging.info(f"Blocked — waiting {backoff:.0f}s before retry...")
+                time.sleep(backoff)
+                merged = _build_browser_headers(headers)  # fresh fingerprint
+                continue
+
+        # Check response body for ban keywords (东财 sometimes returns 200 but
+        # the body contains a ban page)
+        text_sample = (resp.text or "")[:500]
+        ban_keywords = ["访问频率", "IP", "被封", "验证码", "频繁", "您访问过于"]
+        if any(kw in text_sample for kw in ban_keywords):
+            logging.warning(
+                f"Eastmoney response contains ban keyword "
+                f"(attempt {attempt+1}/{EM_MAX_RETRIES})"
+            )
+            if attempt < EM_MAX_RETRIES - 1 and retry_on_block:
+                backoff = EM_BLOCK_BACKOFF[0] * (2 ** attempt) + random.uniform(0, 10)
+                logging.info(f"Blocked — waiting {backoff:.0f}s before retry...")
+                time.sleep(backoff)
+                merged = _build_browser_headers(headers)
+
         _em_last_call[0] = time.time()
+        return resp
+
+    # All retries exhausted
+    if last_exc:
+        raise last_exc
+    # Return the last response even if it was a block (caller decides)
+    _em_last_call[0] = time.time()
+    return resp  # type: ignore[possibly-unbound]
+
+
+def _sector_pre_delay():
+    """One-time random delay before the first Eastmoney sector request.
+
+    Breaks the predictable cron-triggered pattern — the actual request time
+    varies by 10–60 seconds each run.
+    """
+    global _sector_pre_delayed
+    if not _sector_pre_delayed:
+        delay = random.uniform(10, 60)
+        logging.info(f"Sector pre-delay: {delay:.0f}s (breaking cron pattern)...")
+        time.sleep(delay)
+        _sector_pre_delayed = True
 
 
 def _yi(val) -> Optional[float]:
@@ -414,11 +530,18 @@ def fetch_sectors(sector_type: str) -> list[dict]:
         logging.warning(f"Unknown sector_type: {sector_type}")
         return []
 
+    # One-time random pre-delay before first Eastmoney sector request
+    _sector_pre_delay()
+
     ranking = _fetch_sector_ranking(fs_filter)
     if not ranking:
         return []
 
-    time.sleep(0.3)
+    # Longer delay between ranking and fund flow (was 0.3s — too fast)
+    gap = random.uniform(2.0, 5.0)
+    logging.debug(f"Waiting {gap:.1f}s before fund flow request for {sector_type}...")
+    time.sleep(gap)
+
     fund_flow = _fetch_sector_fund_flow(fs_filter)
 
     for item in ranking:
@@ -586,6 +709,13 @@ def sync(date_str: Optional[str] = None, db_path: Optional[str] = None) -> dict:
         except Exception as e:
             result["errors"].append(f"industry_sectors: {e}")
             logging.error(f"industry sectors failed: {e}")
+
+        # Extra gap between industry and concept fetches
+        # (different fs filter, but same push2 endpoint — looks like a burst)
+        if industries:
+            gap = random.uniform(3.0, 8.0)
+            logging.info(f"Waiting {gap:.1f}s before concept sector fetch...")
+            time.sleep(gap)
 
         # 4. Concept sectors (东财, rate-limited)
         try:

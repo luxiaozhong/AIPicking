@@ -7,6 +7,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   '板块资金流': 'cyan',
   '热门题材': 'orange',
   '热门股': 'magenta',
+  '基本面类': 'green',
 };
 
 interface FactorLibraryProps {

@@ -16,6 +16,7 @@ Cron (weekdays 17:00 Beijing time):
         venv/bin/python scripts/sync_dragon_tiger.py >> /var/log/aipicking/ingest.log 2>&1
 """
 import argparse
+import itertools
 import logging
 import os
 import random
@@ -39,7 +40,26 @@ for _env_file in (".env", ".env.production"):
     if _path.exists():
         load_dotenv(_path, override=True)
 
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+UA_POOL = [
+    # macOS Chrome
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Windows Chrome
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Windows Edge
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    # Linux Chrome
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+]
+_UA_CYCLE = itertools.cycle(UA_POOL)
+
+_ACCEPT_LANG_POOL = [
+    "zh-CN,zh;q=0.9,en;q=0.8",
+    "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    "zh-CN,zh;q=0.9",
+]
+
 DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -71,34 +91,130 @@ def get_conn():
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# 东财防封：节流 + 会话复用
+# 东财防封：节流 + 会话复用 + 浏览器指纹轮换 + 退避重试
 # ═════════════════════════════════════════════════════════════════════════
 
 _em_session: Optional[requests.Session] = None
-EM_MIN_INTERVAL = 1.0
+EM_MIN_INTERVAL = 3.0          # base interval (was 1.0)
+EM_MAX_RETRIES = 3             # retry on block/429
+EM_BLOCK_BACKOFF = (30, 120)   # base wait when blocked (min, max seconds)
+
 _em_last_call = [0.0]
+_em_pre_delayed = False
+
 
 def _get_em_session() -> requests.Session:
+    """Lazy-init shared session (headers set per-request to avoid fingerprinting)."""
     global _em_session
     if _em_session is None:
         _em_session = requests.Session()
-        _em_session.headers.update({"User-Agent": UA})
     return _em_session
 
-def em_get(url: str, params=None, headers=None, timeout: int = 15):
-    """东财统一请求入口：自动节流 + 复用 session + 默认 UA。"""
+
+def _em_pre_delay():
+    """One-time random delay before the first Eastmoney request of this run.
+
+    Breaks the predictable cron pattern — the actual start time varies by
+    10–60 seconds each run.
+    """
+    global _em_pre_delayed
+    if not _em_pre_delayed:
+        delay = random.uniform(10, 60)
+        logging.info(f"Eastmoney pre-delay: {delay:.0f}s (breaking cron pattern)...")
+        time.sleep(delay)
+        _em_pre_delayed = True
+
+
+def _build_browser_headers(extra: Optional[dict] = None) -> dict:
+    """Build realistic browser headers with random fingerprint per request."""
+    h = {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": random.choice(_ACCEPT_LANG_POOL),
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Referer": "https://data.eastmoney.com/",
+        "Sec-Fetch-Dest": "script",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-site",
+        "User-Agent": next(_UA_CYCLE),
+    }
+    if extra:
+        h.update(extra)
+    return h
+
+
+def em_get(url: str, params=None, headers=None, timeout: int = 15,
+           retry_on_block: bool = True):
+    """东财统一请求入口：自动节流 + 随机浏览器指纹 + 退避重试。
+
+    - 基础间隔 3 秒 + 随机抖动 0.5-2.5s
+    - 每请求随机切换 UA + Accept-Language
+    - 自动检测封禁（403/429/页面关键词）并退避重试
+    - Session 复用连接池，但每次请求刷新 headers 避免指纹追踪
+    """
     session = _get_em_session()
+
+    # Enforce base interval + jitter
     wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
     if wait > 0:
-        time.sleep(wait + random.uniform(0.1, 0.5))
-    try:
-        merged = {"Referer": "https://data.eastmoney.com/"}
-        if headers:
-            merged.update(headers)
-        return session.get(url, params=params, headers=merged,
-                           timeout=timeout)
-    finally:
+        time.sleep(wait)
+    time.sleep(random.uniform(0.5, 2.5))
+
+    merged = _build_browser_headers(headers)
+
+    last_exc = None
+    for attempt in range(EM_MAX_RETRIES):
+        try:
+            resp = session.get(url, params=params, headers=merged,
+                               timeout=timeout)
+        except requests.RequestException as e:
+            last_exc = e
+            logging.warning(
+                f"Eastmoney request failed (attempt {attempt+1}/{EM_MAX_RETRIES}): {e}"
+            )
+            if attempt < EM_MAX_RETRIES - 1:
+                backoff = EM_BLOCK_BACKOFF[0] * (2 ** attempt) + random.uniform(0, 10)
+                logging.info(f"Retrying in {backoff:.0f}s...")
+                time.sleep(backoff)
+                merged = _build_browser_headers(headers)
+            continue
+
+        # Check HTTP status
+        if resp.status_code in (403, 429):
+            logging.warning(
+                f"Eastmoney returned {resp.status_code} "
+                f"(attempt {attempt+1}/{EM_MAX_RETRIES})"
+            )
+            if attempt < EM_MAX_RETRIES - 1 and retry_on_block:
+                backoff = EM_BLOCK_BACKOFF[0] * (2 ** attempt) + random.uniform(0, 10)
+                logging.info(f"Blocked — waiting {backoff:.0f}s before retry...")
+                time.sleep(backoff)
+                merged = _build_browser_headers(headers)
+                continue
+
+        # Check body for ban keywords
+        text_sample = (resp.text or "")[:500]
+        ban_keywords = ["访问频率", "IP", "被封", "验证码", "频繁", "您访问过于"]
+        if any(kw in text_sample for kw in ban_keywords):
+            logging.warning(
+                f"Eastmoney response contains ban keyword "
+                f"(attempt {attempt+1}/{EM_MAX_RETRIES})"
+            )
+            if attempt < EM_MAX_RETRIES - 1 and retry_on_block:
+                backoff = EM_BLOCK_BACKOFF[0] * (2 ** attempt) + random.uniform(0, 10)
+                logging.info(f"Blocked — waiting {backoff:.0f}s before retry...")
+                time.sleep(backoff)
+                merged = _build_browser_headers(headers)
+                continue
+
         _em_last_call[0] = time.time()
+        return resp
+
+    if last_exc:
+        raise last_exc
+    _em_last_call[0] = time.time()
+    return resp  # type: ignore[possibly-unbound]
 
 def eastmoney_datacenter(report_name: str, columns: str = "ALL",
                           filter_str: str = "", page_size: int = 500,
@@ -354,6 +470,9 @@ def sync(date_str: str, dry_run: bool = False) -> dict:
         "seats_count": 0,
         "errors": [],
     }
+
+    # Pre-delay to break cron pattern
+    _em_pre_delay()
 
     # 1. 全市场上榜汇总
     stocks = fetch_daily_list(date_str)

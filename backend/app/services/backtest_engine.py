@@ -15,6 +15,7 @@ from ..models.stock_tables import (
     Stock, Daily, DailySectorFlow,
     DailyHotStock, DailyHotTheme, DailyDragonTiger, DailyDragonTigerSeat,
 )
+from ..models.financial import FinancialReport
 
 # 同步引擎（用于 thread pool 中的回测）
 _sync_engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -278,6 +279,7 @@ class BacktestEngine:
                     "hot_themes": sliced_hot_themes,
                     "dragon_tiger": loaded["dragon_tiger"],
                     "dragon_tiger_seats": loaded["dragon_tiger_seats"],
+                    "financials": loaded["financials"],
                     "config": self.config or {},
                 }
 
@@ -368,6 +370,26 @@ class BacktestEngine:
                     DailyDragonTigerSeat.trade_date.between(flow_start_date, cutoff_date_fmt)
                 ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
                 dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
+
+            # 8. 基本面数据（按需）
+            financials_data = []
+            if self._should_load("financials"):
+                fin_stmt = select(
+                    FinancialReport.ts_code, FinancialReport.report_date,
+                    FinancialReport.report_type, FinancialReport.pub_date,
+                    FinancialReport.eps, FinancialReport.bvps, FinancialReport.roe,
+                    FinancialReport.gross_margin, FinancialReport.net_margin,
+                    FinancialReport.net_profit, FinancialReport.net_profit_yoy,
+                    FinancialReport.revenue, FinancialReport.revenue_yoy,
+                    FinancialReport.debt_to_assets, FinancialReport.current_ratio,
+                    FinancialReport.quick_ratio, FinancialReport.cf_operating,
+                    FinancialReport.cf_ratio, FinancialReport.total_assets,
+                    FinancialReport.total_liabilities, FinancialReport.shareholders_equity,
+                ).where(
+                    FinancialReport.pub_date <= cutoff_date_fmt,
+                    FinancialReport.pub_date.isnot(None),
+                ).order_by(FinancialReport.ts_code, FinancialReport.report_date.desc())
+                financials_data = [dict(row._mapping) for row in session.execute(fin_stmt)]
         finally:
             session.close()
 
@@ -393,6 +415,7 @@ class BacktestEngine:
             "hot_themes": hot_themes_data,
             "dragon_tiger": dragon_tiger_data,
             "dragon_tiger_seats": dragon_tiger_seats_data,
+            "financials": financials_data,
         }
 
     def _load_data_range(self, start_date: str, end_date: str) -> Dict[str, Any]:
@@ -457,6 +480,26 @@ class BacktestEngine:
                     DailyDragonTigerSeat.trade_date.between(flow_earliest_date, end_date_fmt)
                 ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
                 dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
+
+            # 基本面数据（按需，加载 end_date 之前发布的全部财报）
+            financials_data = []
+            if self._should_load("financials"):
+                fin_stmt = select(
+                    FinancialReport.ts_code, FinancialReport.report_date,
+                    FinancialReport.report_type, FinancialReport.pub_date,
+                    FinancialReport.eps, FinancialReport.bvps, FinancialReport.roe,
+                    FinancialReport.gross_margin, FinancialReport.net_margin,
+                    FinancialReport.net_profit, FinancialReport.net_profit_yoy,
+                    FinancialReport.revenue, FinancialReport.revenue_yoy,
+                    FinancialReport.debt_to_assets, FinancialReport.current_ratio,
+                    FinancialReport.quick_ratio, FinancialReport.cf_operating,
+                    FinancialReport.cf_ratio, FinancialReport.total_assets,
+                    FinancialReport.total_liabilities, FinancialReport.shareholders_equity,
+                ).where(
+                    FinancialReport.pub_date <= end_date_fmt,
+                    FinancialReport.pub_date.isnot(None),
+                ).order_by(FinancialReport.ts_code, FinancialReport.report_date.desc())
+                financials_data = [dict(row._mapping) for row in session.execute(fin_stmt)]
         finally:
             session.close()
 
@@ -481,6 +524,7 @@ class BacktestEngine:
             "hot_themes": hot_themes_data,
             "dragon_tiger": dragon_tiger_data,
             "dragon_tiger_seats": dragon_tiger_seats_data,
+            "financials": financials_data,
         }
 
     def _track_performance(
