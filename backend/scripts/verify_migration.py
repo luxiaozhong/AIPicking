@@ -18,7 +18,14 @@ STOCK_DB_PATH = os.getenv(
     "STOCK_DB_PATH",
     os.path.expanduser("~") + "/workbuddy/2026-05-22-21-48-44/data/stock_db.sqlite"
 )
-PG_URL = os.getenv("PG_MIGRATE_URL", "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking")
+PG_URL = os.getenv("PG_MIGRATE_URL", "")
+if not PG_URL:
+    _user = os.getenv("DB_USER", "aipicking")
+    _pass = os.getenv("DB_PASSWORD", "")
+    _host = os.getenv("DB_HOST", "localhost")
+    _port = os.getenv("DB_PORT", "5432")
+    _name = os.getenv("DB_NAME", "aipicking")
+    PG_URL = f"postgresql://{_user}:{_pass}@{_host}:{_port}/{_name}"
 PG_URL = PG_URL.replace("+asyncpg", "").replace("+psycopg2", "")
 
 TABLE_SOURCES = {

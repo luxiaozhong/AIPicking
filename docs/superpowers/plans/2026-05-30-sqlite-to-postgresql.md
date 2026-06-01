@@ -37,7 +37,7 @@ systemctl enable postgresql
 
 ```bash
 sudo -u postgres psql <<SQL
-CREATE USER aipicking WITH PASSWORD 'aipicking_dev_pwd';
+CREATE USER aipicking WITH PASSWORD '<secure-password>';
 CREATE DATABASE aipicking OWNER aipicking;
 GRANT ALL PRIVILEGES ON DATABASE aipicking TO aipicking;
 \c aipicking
@@ -291,7 +291,7 @@ def _get_sync_pg_url() -> str:
     import os
     return os.getenv(
         "PG_MIGRATE_URL",
-        "postgresql+psycopg2://aipicking:aipicking_dev_pwd@localhost:5432/aipicking",
+        "postgresql+psycopg2://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>",
     )
 
 
@@ -371,7 +371,7 @@ _pg_url = os.getenv("PG_MIGRATE_URL", "")
 if not _pg_url:
     _pg_url = os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
+        "postgresql+asyncpg://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>"
     )
 _pg_url = _pg_url.replace("+asyncpg", "").replace("+psycopg2", "")
 _pg_url = f"postgresql+psycopg2://{urlparse(_pg_url).netloc}{urlparse(_pg_url).path}"
@@ -585,7 +585,7 @@ STOCK_DB_PATH = os.getenv("STOCK_DB_PATH", "/opt/stock_data/stock_db.sqlite")
 
 _pg_url = os.getenv("PG_MIGRATE_URL", "").replace("+asyncpg", "").replace("+psycopg2", "")
 if not _pg_url:
-    _pg_url = os.getenv("DATABASE_URL", "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking")
+    _pg_url = os.getenv("DATABASE_URL", "postgresql://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>")
     _pg_url = _pg_url.replace("+asyncpg", "")
 
 # 表 → 源 SQLite 映射
@@ -852,7 +852,7 @@ class Settings:
 
         # 数据库配置
         _default_db_url = (
-            "postgresql+asyncpg://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
+            "postgresql+asyncpg://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>"
         )
         self.DATABASE_URL = os.getenv("DATABASE_URL", _default_db_url)
         self.SYNC_DATABASE_URL = os.getenv(
@@ -1304,7 +1304,7 @@ from urllib.parse import urlparse
 
 
 def get_db_connection() -> psycopg2.extensions.connection:
-    db_url = os.getenv("DATABASE_URL", "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking")
+    db_url = os.getenv("DATABASE_URL", "postgresql://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>")
     db_url = db_url.replace("+asyncpg", "").replace("+psycopg2", "")
     r = urlparse(db_url)
     conn = psycopg2.connect(
@@ -1400,8 +1400,8 @@ TEST_DATABASE_URL = os.getenv(
 - [ ] **Step 3: 更新 .env**
 
 ```bash
-DATABASE_URL=postgresql+asyncpg://aipicking:aipicking_dev_pwd@localhost:5432/aipicking
-SYNC_DATABASE_URL=postgresql+psycopg2://aipicking:aipicking_dev_pwd@localhost:5432/aipicking
+DATABASE_URL=postgresql+asyncpg://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>
+SYNC_DATABASE_URL=postgresql+psycopg2://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>
 # STOCK_DB_PATH 移除
 ```
 
@@ -1439,12 +1439,12 @@ curl "http://localhost:8000/api/v1/stocks/000001.SZ/kline?days=30"
 # 登录
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
+  -d '{"username":"admin","password":"<admin-password>"}'
 
 # 策略列表
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['access_token'])")
+  -d '{"username":"admin","password":"<admin-password>"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['access_token'])")
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/strategies
 ```
 
@@ -1480,12 +1480,12 @@ git add -A && git commit -m "fix: issues found during local verification"
 
 ### Task 16: 服务器部署
 
-**服务器:** 101.35.254.125
+**服务器:** `<YOUR_SERVER_IP>`
 
 - [ ] **Step 1: SSH 到服务器，安装 PostgreSQL 16**
 
 ```bash
-ssh root@101.35.254.125
+ssh root@<YOUR_SERVER_IP>
 apt update && apt install -y postgresql-16
 systemctl start postgresql
 systemctl enable postgresql

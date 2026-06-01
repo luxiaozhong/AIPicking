@@ -11,7 +11,7 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 def beijing_now():
-    """返回北京时间（UTC+8），不带时区信息（SQLite 兼容）"""
+    """返回北京时间（UTC+8），不带时区信息"""
     return datetime.now(BEIJING_TZ).replace(tzinfo=None)
 
 

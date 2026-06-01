@@ -33,7 +33,12 @@ STOCK_DB_PATH = os.getenv(
 
 _pg_url = os.getenv("PG_MIGRATE_URL", "")
 if not _pg_url:
-    _pg_url = "postgresql+psycopg2://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
+    _user = os.getenv("DB_USER", "aipicking")
+    _pass = os.getenv("DB_PASSWORD", "")
+    _host = os.getenv("DB_HOST", "localhost")
+    _port = os.getenv("DB_PORT", "5432")
+    _name = os.getenv("DB_NAME", "aipicking")
+    _pg_url = f"postgresql+psycopg2://{_user}:{_pass}@{_host}:{_port}/{_name}"
 
 
 def parse_pg_url(url: str) -> dict:

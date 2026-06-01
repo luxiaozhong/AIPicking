@@ -73,7 +73,7 @@ npm install
 npm run dev
 
 # 访问 http://localhost:5173
-# 管理员: admin / admin123
+# 默认管理员账号: admin（密码见首次启动日志或 ADMIN_DEFAULT_PASSWORD 环境变量）
 ```
 
 ## .env 配置

@@ -51,10 +51,15 @@ def _parse_pg_url(url: str) -> dict:
     }
 
 
-_PG_PARAMS = _parse_pg_url(os.getenv(
-    "DATABASE_URL",
-    "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
-))
+_default_db = os.getenv("DATABASE_URL", "")
+if not _default_db:
+    _user = os.getenv("DB_USER", "aipicking")
+    _pass = os.getenv("DB_PASSWORD", "")
+    _host = os.getenv("DB_HOST", "localhost")
+    _port = os.getenv("DB_PORT", "5432")
+    _name = os.getenv("DB_NAME", "aipicking")
+    _default_db = f"postgresql://{_user}:{_pass}@{_host}:{_port}/{_name}"
+_PG_PARAMS = _parse_pg_url(_default_db)
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 

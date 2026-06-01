@@ -181,10 +181,7 @@ def _parse_pg_url(url: str) -> dict:
         "dbname": r.path.lstrip("/") or "aipicking",
     }
 
-_PG_PARAMS = _parse_pg_url(os.getenv(
-    "DATABASE_URL",
-    "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
-))
+_PG_PARAMS = _parse_pg_url(os.getenv("DATABASE_URL"))
 
 def get_conn():
     """获取 PostgreSQL 连接"""

@@ -1,5 +1,9 @@
 """认证服务：JWT 编码/解码、密码哈希、用户 CRUD"""
 
+import logging
+import os
+import secrets
+import string
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -15,6 +19,8 @@ from ..models.backtest import BacktestReport, StrategyRun, BatchBacktestReport
 from ..models.ai_task import AIStrategyTask
 from ..models.ai_factor import AIFactor
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 # JWT 配置
 SECRET_KEY = settings.JWT_SECRET_KEY
@@ -163,7 +169,8 @@ async def deactivate_user(db: AsyncSession, user_id: int) -> bool:
 
 
 async def seed_default_admin(db: AsyncSession) -> User:
-    """创建默认管理员账号（如果不存在）"""
+    """创建默认管理员账号（如果不存在）。密码通过环境变量 ADMIN_DEFAULT_PASSWORD
+    设置，未设置时自动生成随机密码并输出到日志。"""
     result = await db.execute(
         select(User).where(User.role == "admin").limit(1)
     )
@@ -171,7 +178,21 @@ async def seed_default_admin(db: AsyncSession) -> User:
     if existing_admin:
         return existing_admin
 
-    admin = await create_user(db, "admin", "admin123", role="admin")
+    # 优先使用环境变量，否则生成随机密码
+    password = os.getenv("ADMIN_DEFAULT_PASSWORD", "")
+    if not password:
+        alphabet = string.ascii_letters + string.digits
+        password = "".join(secrets.choice(alphabet) for _ in range(16))
+        logger.warning(
+            "=" * 60 + "\n"
+            f"  默认管理员已创建:\n"
+            f"    用户名: admin\n"
+            f"    密码:   {password}\n"
+            f"  ⚠️  请立即登录修改密码！此密码仅在本次日志中显示。\n"
+            + "=" * 60
+        )
+
+    admin = await create_user(db, "admin", password, role="admin")
     return admin
 
 

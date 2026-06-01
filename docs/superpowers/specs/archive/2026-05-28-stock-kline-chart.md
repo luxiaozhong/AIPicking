@@ -90,7 +90,7 @@ sleep 2
 # 需要先登录获取 token
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
+  -d '{"username":"admin","password":"<admin-password>"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
 
 # 测试 K 线接口
 curl -s "http://localhost:8000/api/v1/stocks/kline?ts_code=000001.SZ&days=30" \

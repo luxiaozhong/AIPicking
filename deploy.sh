@@ -270,7 +270,7 @@ fi
 echo ""
 echo "  访问: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo '服务器IP')"
 echo ""
-echo "  管理员: admin / admin123"
+echo "  默认管理员账号: admin（⚠️  首次登录后请立即修改密码！）"
 echo ""
 echo "常用:"
 echo "  systemctl restart aipicking     # 重启后端"

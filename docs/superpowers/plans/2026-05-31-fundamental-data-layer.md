@@ -886,7 +886,7 @@ def _parse_pg_url(url: str) -> dict:
 
 _PG_PARAMS = _parse_pg_url(os.getenv(
     "DATABASE_URL",
-    "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
+    "postgresql://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>"
 ))
 
 TENCENT_QUOTE_URL = "http://qt.gtimg.cn/q="
@@ -1136,7 +1136,7 @@ def _parse_pg_url(url: str) -> dict:
 
 _PG_PARAMS = _parse_pg_url(os.getenv(
     "DATABASE_URL",
-    "postgresql://aipicking:aipicking_dev_pwd@localhost:5432/aipicking"
+    "postgresql://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:5432/<DB_NAME>"
 ))
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"

@@ -39,7 +39,7 @@ Add user authentication and role-based authorization to AIpicking.
 ### 2.3 Seed data
 
 On startup (in `main.py`), if no admin exists, create default admin:
-- username: `admin`, password: `admin123`
+- username: `admin`, password: `<admin-password>`
 - Existing data in tables: `user_id` set to admin's id via migration script
 
 ### 2.4 Migration
@@ -169,7 +169,7 @@ When admin views the strategy list (`StrategyList.tsx`), a "创建者" column sh
 
 ```
 Username: admin
-Password: admin123
+Password: <admin-password>
 ```
 
 ---

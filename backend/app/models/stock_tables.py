@@ -1,4 +1,4 @@
-"""股票数据库表模型 — 从 SQLite 迁移到 PostgreSQL 用"""
+"""股票数据库表模型 — PostgreSQL"""
 from sqlalchemy import (
     Column, String, Integer, Float, Text, BigInteger, Boolean,
     Index, UniqueConstraint

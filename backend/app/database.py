@@ -50,7 +50,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
 
-# ====== PostgreSQL 迁移用，不影响现有 SQLite 运行 ======
+# ====== 同步引擎（psycopg2），用于脚本/迁移/回测引擎 ======
 
 def init_db_sync(pg_conn=None):
     """
@@ -74,10 +74,15 @@ def init_db_sync(pg_conn=None):
                 "Use init_db_sync() without arguments to auto-create an Engine."
             )
     else:
-        sync_url = os.getenv(
-            "PG_MIGRATE_URL",
-            "postgresql+psycopg2://aipicking:aipicking_dev_pwd@localhost:5432/aipicking",
-        )
+        sync_url = os.getenv("PG_MIGRATE_URL", "")
+        if not sync_url:
+            # 回退：从 DATABASE_URL 组件构建同步 URL
+            db_user = os.getenv("DB_USER", "aipicking")
+            db_pass = os.getenv("DB_PASSWORD", "")
+            db_host = os.getenv("DB_HOST", "localhost")
+            db_port = os.getenv("DB_PORT", "5432")
+            db_name = os.getenv("DB_NAME", "aipicking")
+            sync_url = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
         sync_engine = create_engine(sync_url)
         try:
             Base.metadata.create_all(sync_engine)
