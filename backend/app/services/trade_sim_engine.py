@@ -5,15 +5,13 @@
 核心流程：选股 → 分配资金 → 逐日追踪 → 止损止盈检查 → 统计汇总
 """
 
-import json
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from ..config import settings
 from ..models.stock_tables import Daily
-from ..factors.trade_sim_stops import StopFactorRegistry, TriggerResult
+from ..factors.trade_sim_stops import StopFactorRegistry
 
 _sync_engine = create_engine(settings.SYNC_DATABASE_URL)
 SyncSession = sessionmaker(bind=_sync_engine)
@@ -101,12 +99,10 @@ class TradeSimEngine:
     def _get_stock_candidates(self, cutoff_date: str) -> List[dict]:
         """运行策略选股，按 score 降序取前 N 只"""
         loaded = self._backtest_engine._load_data(cutoff_date)
-        daily_data = loaded["daily"]
 
         strategy_input = {
             "cutoff_date": cutoff_date,
             **loaded,
-            "daily": daily_data,
             "config": self.config,
         }
 
@@ -207,9 +203,9 @@ class TradeSimEngine:
         trade["buy_date"] = buy_day["trade_date"]
         trade["shares"] = allocated_amount / buy_price
 
-        # b. 初始化追踪状态
-        high_price = buy_price
-        low_price = buy_price
+        # b. 初始化追踪状态（使用实际日内高低价，而非收盘价）
+        high_price = buy_day.get("high") if buy_day.get("high") is not None else buy_price
+        low_price = buy_day.get("low") if buy_day.get("low") is not None else buy_price
 
         # 确定启用的因子（按 config 顺序）
         enabled_factors = [
@@ -220,27 +216,26 @@ class TradeSimEngine:
         # c. 逐日循环
         triggered = False
         for i, day in enumerate(daily):
-            close_price = _get_price(day)  # FIXED: explicit None check for 0.0
+            close_price = _get_price(day)
             open_price = day.get("open")
-            high = _get_val(day, "high", close_price)  # FIXED
-            low = _get_val(day, "low", close_price)  # FIXED
+            day_high = day.get("high")
+            day_low = day.get("low")
 
             if close_price is None:
                 continue
 
-            # 更新极值和回撤
-            if close_price > high_price:
-                high_price = close_price
-            if close_price < low_price:
-                low_price = close_price
-            max_drawdown = (low_price - buy_price) / buy_price * 100
+            # 更新极值（使用日内最高/最低价）
+            if day_high is not None and day_high > high_price:
+                high_price = day_high
+            if day_low is not None and day_low < low_price:
+                low_price = day_low
 
             # 计算 MA10（需要至少 10 天数据）
             ma10 = None
             if i >= 9:
                 ma10_closes = []
                 for j in range(i - 9, i + 1):
-                    c = _get_price(daily[j])  # FIXED: explicit None check
+                    c = _get_price(daily[j])
                     if c is not None:
                         ma10_closes.append(c)
                 if len(ma10_closes) >= 10:
@@ -252,8 +247,8 @@ class TradeSimEngine:
                 "date": day["trade_date"],
                 "open": open_price,
                 "close": close_price,
-                "high": high,
-                "low": low,
+                "high": day_high,
+                "low": day_low,
                 "ma10": round(ma10, 4) if ma10 else None,
                 "prev_low_ref": None,
                 "ma10_stop_line": None,
@@ -269,7 +264,7 @@ class TradeSimEngine:
                     ref_days = params.get("ref_days", 20)
                     if i >= ref_days:
                         ref_day = daily[i - ref_days]
-                        ref_price = _get_price(ref_day)  # FIXED
+                        ref_price = _get_price(ref_day)
                         tracking_record["prev_low_ref"] = ref_price
                 elif fid == "stop_ma10_cross" and ma10 is not None:
                     coeff = params.get("coefficient", 0.93)
@@ -293,7 +288,7 @@ class TradeSimEngine:
                             triggered = True
                             if i + 1 < len(daily):
                                 next_open = daily[i + 1].get("open")
-                                next_close = _get_price(daily[i + 1])  # FIXED
+                                next_close = _get_price(daily[i + 1])
                                 sell_price = next_open if next_open is not None else next_close
                                 sell_date = daily[i + 1]["trade_date"]
                             else:
