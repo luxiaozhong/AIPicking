@@ -417,3 +417,31 @@ class TradeSimEngine:
                 "lt_-10": 0, "-10_0": 0, "0_5": 0, "5_10": 0, "gt_10": 0,
             },
         }
+
+    def run_batch(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """批量交易模拟：遍历每个交易日运行交易模拟"""
+        # 加载全时段数据用于策略选股
+        loaded = self._backtest_engine._load_data_range(start_date, end_date)
+        daily_data = loaded["daily"]
+
+        # 获取所有交易日
+        trading_days = sorted(set(
+            row["trade_date"] for rows in daily_data.values() for row in rows
+            if start_date <= row["trade_date"] <= end_date
+        ))
+
+        results = []
+        for cutoff_date in trading_days:
+            try:
+                result = self.run(cutoff_date)
+                result["cutoff_date"] = cutoff_date
+                result["status"] = "completed"
+            except Exception as e:
+                result = {
+                    "cutoff_date": cutoff_date,
+                    "status": "failed",
+                    "error_message": str(e),
+                }
+            results.append(result)
+
+        return results

@@ -116,3 +116,63 @@ class TradeSimListResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+# --- 批量请求 ---
+
+class BatchTradeSimCreate(BaseModel):
+    strategy_id: int
+    start_date: str              # YYYYMMDD
+    end_date: str                # YYYYMMDD
+    name: Optional[str] = None
+    total_amount: float = Field(..., gt=0)
+    top_n: int = Field(default=5, ge=1, le=20)
+    max_hold_days: int = Field(default=60, ge=1, le=365)
+    stop_factors: List[StopFactorConfig]
+
+
+class BatchDailyResult(BaseModel):
+    cutoff_date: str
+    status: str                  # completed | failed
+    trades: Optional[List[TradeItem]] = None
+    summary: Optional[TradeSimSummary] = None
+    error_message: Optional[str] = None
+
+
+class BatchTradeSimResponse(BaseModel):
+    id: int
+    strategy_id: int
+    strategy_name: Optional[str] = None
+    name: Optional[str] = None
+    status: str
+    start_date: str
+    end_date: str
+    config: Optional[dict] = None
+    total_days: int
+    completed_days: int
+    daily_results: Optional[List[BatchDailyResult]] = None
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    @field_validator('config', 'daily_results', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        """解析 JSON 字符串字段"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class BatchTradeSimListResponse(BaseModel):
+    items: List[BatchTradeSimResponse]
+    total: int
+    page: int
+    limit: int
