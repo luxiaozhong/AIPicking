@@ -20,7 +20,7 @@ from ..factors.trade_sim_stops import StopFactorRegistry
 router = APIRouter()
 
 
-@router.post("/", response_model=TradeSimResponse, status_code=202)
+@router.post("", response_model=TradeSimResponse, status_code=202)
 async def create_trade_sim(
     data: TradeSimCreate,
     db: AsyncSession = Depends(get_db),
@@ -31,7 +31,7 @@ async def create_trade_sim(
     return _format_response(report)
 
 
-@router.get("/", response_model=TradeSimListResponse)
+@router.get("", response_model=TradeSimListResponse)
 async def list_trade_sims(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
