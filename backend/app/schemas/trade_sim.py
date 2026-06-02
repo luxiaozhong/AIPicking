@@ -2,7 +2,8 @@
 
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import json
 
 
 # --- 请求 ---
@@ -94,6 +95,17 @@ class TradeSimResponse(BaseModel):
     created_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+    @field_validator('config', 'trades', 'summary', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        """解析 JSON 字符串字段"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v
 
     class Config:
         from_attributes = True
