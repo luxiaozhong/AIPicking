@@ -1,0 +1,424 @@
+# backend/app/services/trade_sim_engine.py
+"""交易模拟引擎
+
+独立于 BacktestEngine，组合复用数据加载和策略执行能力。
+核心流程：选股 → 分配资金 → 逐日追踪 → 止损止盈检查 → 统计汇总
+"""
+
+import json
+from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from ..config import settings
+from ..models.stock_tables import Daily
+from ..factors.trade_sim_stops import StopFactorRegistry, TriggerResult
+
+_sync_engine = create_engine(settings.SYNC_DATABASE_URL)
+SyncSession = sessionmaker(bind=_sync_engine)
+
+
+def _get_db():
+    return SyncSession()
+
+
+def _get_price(day: dict) -> Optional[float]:
+    """获取优先复权价，0.0 为有效值不会回退到 close"""
+    v = day.get("adj_close")
+    if v is not None:
+        return v
+    return day.get("close")
+
+
+def _get_val(day: dict, key: str, fallback: Any = None) -> Any:
+    """获取字段值，None 时使用 fallback"""
+    v = day.get(key)
+    if v is not None:
+        return v
+    return fallback
+
+
+class TradeSimEngine:
+    """交易模拟引擎"""
+
+    def __init__(
+        self,
+        strategy_code: str,
+        strategy_params: Dict[str, Any],
+        config: Dict[str, Any],
+    ):
+        self.strategy_code = strategy_code
+        self.strategy_params = strategy_params
+        self.config = config  # {total_amount, top_n, max_hold_days, stop_factors: [...]}
+
+        # 创建 BacktestEngine 实例来复用策略加载 + 数据加载
+        from .backtest_engine import BacktestEngine
+        self._backtest_engine = BacktestEngine(
+            strategy_code=strategy_code,
+            strategy_params=strategy_params,
+            config=config,
+        )
+
+    def run(self, cutoff_date: str) -> Dict[str, Any]:
+        """主入口，返回 {trades: [...], summary: {...}}"""
+        # 1. 选股
+        candidates = self._get_stock_candidates(cutoff_date)
+        if not candidates:
+            return {"trades": [], "summary": self._empty_summary()}
+
+        # 2. 加载追踪数据
+        ts_codes = [c["ts_code"] for c in candidates]
+        tracking_daily = self._load_tracking_data(ts_codes, cutoff_date)
+
+        # 3. 逐股模拟
+        top_n = self.config.get("top_n", 5)
+        total_amount = self.config.get("total_amount", 100000)
+        allocated = total_amount / top_n
+        max_hold_days = self.config.get("max_hold_days", 60)
+        stop_factors = self.config.get("stop_factors", [])
+
+        trades = []
+        for candidate in candidates:
+            ts_code = candidate["ts_code"]
+            daily = tracking_daily.get(ts_code, [])
+            trade = self._simulate_trade(
+                ts_code=ts_code,
+                name=candidate.get("name", ts_code),
+                score=candidate.get("score", 0),
+                allocated_amount=allocated,
+                daily=daily,
+                stop_factors=stop_factors,
+                max_hold_days=max_hold_days,
+            )
+            trades.append(trade)
+
+        # 4. 汇总
+        summary = self._calculate_summary(trades)
+
+        return {"trades": trades, "summary": summary}
+
+    def _get_stock_candidates(self, cutoff_date: str) -> List[dict]:
+        """运行策略选股，按 score 降序取前 N 只"""
+        loaded = self._backtest_engine._load_data(cutoff_date)
+        daily_data = loaded["daily"]
+
+        strategy_input = {
+            "cutoff_date": cutoff_date,
+            **loaded,
+            "daily": daily_data,
+            "config": self.config,
+        }
+
+        try:
+            recommendations = self._backtest_engine.strategy_func(strategy_input)
+        except Exception as e:
+            raise RuntimeError(f"策略执行失败: {e}")
+
+        if not recommendations or not isinstance(recommendations, list):
+            return []
+
+        # 按 score 降序排序，无 score 按名称排序
+        recommendations.sort(
+            key=lambda x: (x.get("score") is not None, x.get("score", 0), x.get("name", "")),
+            reverse=True,
+        )
+
+        top_n = self.config.get("top_n", 5)
+        return recommendations[:top_n]
+
+    def _load_tracking_data(self, ts_codes: List[str], cutoff_date: str) -> dict:
+        """加载截止日后所有日线数据（用于追踪）"""
+        session = _get_db()
+        try:
+            stmt = select(
+                Daily.ts_code, Daily.trade_date, Daily.open, Daily.high,
+                Daily.low, Daily.close, Daily.adj_close, Daily.vol, Daily.amount,
+            ).where(
+                Daily.ts_code.in_(ts_codes),
+                Daily.trade_date > cutoff_date,
+            ).order_by(Daily.ts_code, Daily.trade_date)
+
+            rows = [dict(row._mapping) for row in session.execute(stmt)]
+        finally:
+            session.close()
+
+        result = {}
+        for row in rows:
+            ts_code = row["ts_code"]
+            if ts_code not in result:
+                result[ts_code] = []
+            result[ts_code].append({
+                "trade_date": row["trade_date"],
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "adj_close": row["adj_close"],
+                "vol": row["vol"],
+                "amount": row["amount"],
+            })
+        return result
+
+    def _simulate_trade(
+        self,
+        ts_code: str,
+        name: str,
+        score: float,
+        allocated_amount: float,
+        daily: list,
+        stop_factors: list,
+        max_hold_days: int,
+    ) -> dict:
+        """模拟单只股票的一笔交易"""
+
+        # 构建基础 trade 对象
+        trade = {
+            "ts_code": ts_code,
+            "name": name,
+            "score": score,
+            "allocated_amount": allocated_amount,
+            "shares": 0.0,
+            "buy_price": None,
+            "buy_date": None,
+            "sell_price": None,
+            "sell_date": None,
+            "sell_reason": None,
+            "hold_days": 0,
+            "return_pct": None,
+            "high_price": None,
+            "low_price": None,
+            "max_drawdown": None,
+            "daily_tracking": [],
+        }
+
+        if not daily:
+            trade["sell_reason"] = "数据缺失（无后续日线）"
+            return trade
+
+        # a. 买入日 = 截止日后第一个交易日
+        buy_day = daily[0]
+        buy_price = buy_day.get("open")
+        if buy_price is None or buy_price <= 0:
+            trade["sell_reason"] = "数据缺失（无开盘价）"
+            return trade
+
+        trade["buy_price"] = buy_price
+        trade["buy_date"] = buy_day["trade_date"]
+        trade["shares"] = allocated_amount / buy_price
+
+        # b. 初始化追踪状态
+        high_price = buy_price
+        low_price = buy_price
+
+        # 确定启用的因子（按 config 顺序）
+        enabled_factors = [
+            sf for sf in stop_factors
+            if sf.get("enabled") and sf.get("id")
+        ]
+
+        # c. 逐日循环
+        triggered = False
+        for i, day in enumerate(daily):
+            close_price = _get_price(day)  # FIXED: explicit None check for 0.0
+            open_price = day.get("open")
+            high = _get_val(day, "high", close_price)  # FIXED
+            low = _get_val(day, "low", close_price)  # FIXED
+
+            if close_price is None:
+                continue
+
+            # 更新极值和回撤
+            if close_price > high_price:
+                high_price = close_price
+            if close_price < low_price:
+                low_price = close_price
+            max_drawdown = (low_price - buy_price) / buy_price * 100
+
+            # 计算 MA10（需要至少 10 天数据）
+            ma10 = None
+            if i >= 9:
+                ma10_closes = []
+                for j in range(i - 9, i + 1):
+                    c = _get_price(daily[j])  # FIXED: explicit None check
+                    if c is not None:
+                        ma10_closes.append(c)
+                if len(ma10_closes) >= 10:
+                    ma10 = sum(ma10_closes) / len(ma10_closes)
+
+            # 构建追踪记录
+            current_return = (close_price - buy_price) / buy_price * 100
+            tracking_record = {
+                "date": day["trade_date"],
+                "open": open_price,
+                "close": close_price,
+                "high": high,
+                "low": low,
+                "ma10": round(ma10, 4) if ma10 else None,
+                "prev_low_ref": None,
+                "ma10_stop_line": None,
+                "return_pct": round(current_return, 2),
+                "status": "holding",
+            }
+
+            # 计算止损参考线（用于前端展示）
+            for sf in enabled_factors:
+                fid = sf.get("id")
+                params = sf.get("params", {})
+                if fid == "stop_prev_low":
+                    ref_days = params.get("ref_days", 20)
+                    if i >= ref_days:
+                        ref_day = daily[i - ref_days]
+                        ref_price = _get_price(ref_day)  # FIXED
+                        tracking_record["prev_low_ref"] = ref_price
+                elif fid == "stop_ma10_cross" and ma10 is not None:
+                    coeff = params.get("coefficient", 0.93)
+                    tracking_record["ma10_stop_line"] = round(ma10 * coeff, 4)
+
+            # 检查止损止盈
+            if not triggered:
+                for sf in enabled_factors:
+                    fid = sf.get("id")
+                    params = sf.get("params", {})
+                    try:
+                        check_fn = StopFactorRegistry.get_check_fn(fid)
+                        # 从买入日到当天的 slice
+                        result = check_fn(
+                            daily[: i + 1],
+                            {"buy_price": buy_price, "buy_date": trade["buy_date"], "buy_idx": 0},
+                            params,
+                        )
+                        if result is not None:
+                            # 触发！卖出价 = 次日开盘价（最后一天用收盘价）
+                            triggered = True
+                            if i + 1 < len(daily):
+                                next_open = daily[i + 1].get("open")
+                                next_close = _get_price(daily[i + 1])  # FIXED
+                                sell_price = next_open if next_open is not None else next_close
+                                sell_date = daily[i + 1]["trade_date"]
+                            else:
+                                sell_price = close_price
+                                sell_date = day["trade_date"]
+
+                            trade["sell_price"] = sell_price
+                            trade["sell_date"] = sell_date
+                            trade["sell_reason"] = result.reason
+                            trade["hold_days"] = i + 1
+                            trade["return_pct"] = round((sell_price - buy_price) / buy_price * 100, 2)
+                            tracking_record["status"] = "stopped" if "止损" in result.reason else "take_profit"
+                            break
+                    except ValueError:
+                        continue
+
+            # 强制平仓检查
+            if not triggered and i + 1 >= max_hold_days:
+                triggered = True
+                sell_price = close_price
+                sell_date = day["trade_date"]
+                trade["sell_price"] = sell_price
+                trade["sell_date"] = sell_date
+                trade["sell_reason"] = f"强制平仓（持有超过{max_hold_days}天）"
+                trade["hold_days"] = i + 1
+                trade["return_pct"] = round((sell_price - buy_price) / buy_price * 100, 2)
+                tracking_record["status"] = "force_close"
+
+            trade["daily_tracking"].append(tracking_record)
+
+        # 更新极值
+        trade["high_price"] = round(high_price, 2)
+        trade["low_price"] = round(low_price, 2)
+        if trade["buy_price"]:
+            trade["max_drawdown"] = round((low_price - trade["buy_price"]) / trade["buy_price"] * 100, 2)
+
+        # 如果始终未触发也未强制平仓（追踪数据不足 max_hold_days 天就结束了）
+        if not triggered:
+            trade["sell_reason"] = "数据缺失（追踪数据不足）"
+
+        return trade
+
+    def _calculate_summary(self, trades: List[dict]) -> dict:
+        """汇总统计"""
+        if not trades:
+            return self._empty_summary()
+
+        # 只统计有卖出记录的
+        closed = [t for t in trades if t["return_pct"] is not None]
+        if not closed:
+            return self._empty_summary()
+
+        total_trades = len(closed)
+        wins = [t for t in closed if t["return_pct"] > 0]
+        losses = [t for t in closed if t["return_pct"] <= 0]
+
+        win_count = len(wins)
+        lose_count = len(losses)
+        win_rate = win_count / total_trades * 100 if total_trades > 0 else 0.0
+
+        all_returns = [t["return_pct"] for t in closed]
+        avg_return = sum(all_returns) / len(all_returns)
+
+        avg_win = sum(t["return_pct"] for t in wins) / len(wins) if wins else 0.0
+        avg_loss = sum(t["return_pct"] for t in losses) / len(losses) if losses else 0.0
+
+        profit_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else 0.0
+
+        # 最大连续盈亏（按买入日期排序）
+        closed_sorted = sorted(closed, key=lambda t: t.get("buy_date", ""))
+        max_consecutive_wins = 0
+        max_consecutive_losses = 0
+        current_wins = 0
+        current_losses = 0
+        for t in closed_sorted:
+            if t["return_pct"] > 0:
+                current_wins += 1
+                current_losses = 0
+                max_consecutive_wins = max(max_consecutive_wins, current_wins)
+            else:
+                current_losses += 1
+                current_wins = 0
+                max_consecutive_losses = max(max_consecutive_losses, current_losses)
+
+        # 收益分布
+        dist = {"lt_-10": 0, "-10_0": 0, "0_5": 0, "5_10": 0, "gt_10": 0}
+        for r in all_returns:
+            if r < -10:
+                dist["lt_-10"] += 1
+            elif r < 0:
+                dist["-10_0"] += 1
+            elif r < 5:
+                dist["0_5"] += 1
+            elif r < 10:
+                dist["5_10"] += 1
+            else:
+                dist["gt_10"] += 1
+
+        return {
+            "total_trades": total_trades,
+            "win_count": win_count,
+            "lose_count": lose_count,
+            "win_rate": round(win_rate, 2),
+            "avg_return": round(avg_return, 2),
+            "avg_win": round(avg_win, 2),
+            "avg_loss": round(avg_loss, 2),
+            "profit_loss_ratio": round(profit_loss_ratio, 2),
+            "max_consecutive_wins": max_consecutive_wins,
+            "max_consecutive_losses": max_consecutive_losses,
+            "return_distribution": dist,
+        }
+
+    def _empty_summary(self) -> dict:
+        return {
+            "total_trades": 0,
+            "win_count": 0,
+            "lose_count": 0,
+            "win_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "profit_loss_ratio": 0.0,
+            "max_consecutive_wins": 0,
+            "max_consecutive_losses": 0,
+            "return_distribution": {
+                "lt_-10": 0, "-10_0": 0, "0_5": 0, "5_10": 0, "gt_10": 0,
+            },
+        }
