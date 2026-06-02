@@ -11,6 +11,7 @@ import AIStrategyBuilder from '@/pages/AIStrategyBuilder';
 import BacktestList from '@/pages/BacktestList';
 import BacktestDetail from '@/pages/BacktestDetail';
 import BacktestForm from '@/pages/BacktestForm';
+import TradeSimDetail from '@/pages/TradeSimDetail';
 import BatchBacktestList from '@/pages/BatchBacktestList';
 import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
 import Dashboard from '@/pages/Dashboard';
@@ -136,6 +137,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <BatchBacktestDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests/trade-sim/:id"
+          element={
+            <ProtectedRoute>
+              <TradeSimDetail />
             </ProtectedRoute>
           }
         />
