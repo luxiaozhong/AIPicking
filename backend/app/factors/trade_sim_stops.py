@@ -9,8 +9,16 @@ check_fn(df, position, params) -> TriggerResult | None
   - 返回 TriggerResult 表示触发，返回 None 表示未触发
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional, List, Dict, Any
+
+
+def _get_price(day: dict, key: str = "adj_close") -> Optional[float]:
+    """获取优先复权价，key 为 None 时不回退"""
+    v = day.get("adj_close")
+    if v is not None:
+        return v
+    return day.get("close")
 
 
 @dataclass
@@ -72,8 +80,8 @@ def _check_stop_prev_low(df: list, position: dict, params: dict) -> Optional[Tri
     today = df[-1]
     ref_day = df[-ref_days]
 
-    close_price = today.get("adj_close") or today.get("close")
-    ref_price = ref_day.get("adj_close") or ref_day.get("close")
+    close_price = _get_price(today)
+    ref_price = _get_price(ref_day)
 
     if close_price is None or ref_price is None:
         return None
@@ -98,14 +106,14 @@ def _check_stop_ma10_cross(df: list, position: dict, params: dict) -> Optional[T
     coefficient = params.get("coefficient", 0.93)
     buffer_days = params.get("buffer_days", 2)
 
-    if len(df) < 11:  # 至少需要 10 天算 MA10 + buffer_days
+    if len(df) < 9 + buffer_days:  # 至少需要 10 天算 MA10 + 缓冲窗口
         return None
 
     # 计算最近 buffer_days 天是否都满足条件
     consecutive = 0
     for i in range(len(df) - buffer_days, len(df)):
         day = df[i]
-        close_price = day.get("adj_close") or day.get("close")
+        close_price = _get_price(day)
         if close_price is None:
             continue
 
@@ -113,7 +121,7 @@ def _check_stop_ma10_cross(df: list, position: dict, params: dict) -> Optional[T
         start_idx = max(0, i - 9)
         closes = []
         for j in range(start_idx, i + 1):
-            c = df[j].get("adj_close") or df[j].get("close")
+            c = _get_price(df[j])
             if c is not None:
                 closes.append(c)
         if len(closes) < 10:
@@ -151,7 +159,7 @@ def _check_take_profit_pct(df: list, position: dict, params: dict) -> Optional[T
         return None
 
     today = df[-1]
-    close_price = today.get("adj_close") or today.get("close")
+    close_price = _get_price(today)
     if close_price is None:
         return None
 
