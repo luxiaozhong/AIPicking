@@ -2,13 +2,14 @@
 
 import json
 import asyncio
+import os
 import numpy as np
 from typing import List, Optional, Tuple
 from ..models.base import beijing_now
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 from ..models.trade_sim import TradeSimReport
 from ..models.strategy import Strategy
@@ -113,11 +114,11 @@ class TradeSimService:
                 # 获取策略代码
                 if strategy.generated_code:
                     strategy_code = strategy.generated_code
-                elif strategy.file_path and __import__('os').path.exists(strategy.file_path):
+                elif strategy.file_path and os.path.exists(strategy.file_path):
                     with open(strategy.file_path, "r", encoding="utf-8") as f:
                         strategy_code = f.read()
                 else:
-                    raise FileNotFoundError(f"策略代码不存在")
+                    raise FileNotFoundError("策略代码不存在")
 
                 config = json.loads(report.config) if report.config else {}
                 # 转换 cutoff_date: "YYYY-MM-DD" → "YYYYMMDD"
