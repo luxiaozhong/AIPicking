@@ -15,6 +15,7 @@ from .stock_tables import (
     DailyDragonTiger, DailyDragonTigerSeat,
 )
 from .financial import FinancialReport, DailyValuation
+from .trade_sim import TradeSimReport
 
 # 设置关系
 Strategy.backtest_reports = relationship("BacktestReport", back_populates="strategy", cascade="all, delete-orphan")
@@ -23,6 +24,7 @@ Strategy.batch_backtest_reports = relationship("BatchBacktestReport", back_popul
 Strategy.owner = relationship("User", back_populates="strategies")
 Strategy.ratings = relationship("StrategyRating", back_populates="strategy", cascade="all, delete-orphan")
 Strategy.comments = relationship("StrategyComment", back_populates="strategy", cascade="all, delete-orphan")
+Strategy.trade_sim_reports = relationship("TradeSimReport", back_populates="strategy", cascade="all, delete-orphan")
 BacktestReport.owner = relationship("User", back_populates="backtest_reports")
 StrategyRun.owner = relationship("User", back_populates="strategy_runs")
 BatchBacktestReport.owner = relationship("User", back_populates="batch_backtest_reports")
@@ -32,3 +34,5 @@ User.strategy_runs = relationship("StrategyRun", back_populates="owner")
 User.batch_backtest_reports = relationship("BatchBacktestReport", back_populates="owner")
 User.ratings = relationship("StrategyRating", back_populates="user")
 User.comments = relationship("StrategyComment", back_populates="user")
+TradeSimReport.owner = relationship("User", back_populates="trade_sim_reports")
+User.trade_sim_reports = relationship("TradeSimReport", back_populates="owner")
