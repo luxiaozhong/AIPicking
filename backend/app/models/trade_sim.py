@@ -36,5 +36,5 @@ class TradeSimReport(BaseModel):
     owner = relationship("User", back_populates="trade_sim_reports")
 
     @property
-    def strategy_name(self) -> str:
+    def strategy_name(self):
         return self.strategy.name if self.strategy else None

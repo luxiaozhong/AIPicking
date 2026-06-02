@@ -35,6 +35,12 @@ BUILTIN_STRATEGIES = [
         "tags": "个股诊断,技术分析,资金流",
     },
     {
+        "name": "Oversold Bounce",
+        "description": "科技股超跌反弹策略：三阶段信号链捕捉放量急跌后的止跌反弹。仅限创业板+科创板。",
+        "file_path": "app/strategies/examples/oversold_bounce.py",
+        "tags": "超跌反弹,量价,创业板,科创板,技术面",
+    },
+    {
         "name": "动量",
         "description": "",
         "file_path": "app/strategies/examples/auto_20_动量.py",
