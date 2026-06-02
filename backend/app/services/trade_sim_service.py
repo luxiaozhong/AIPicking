@@ -3,6 +3,7 @@
 import json
 import asyncio
 import os
+from datetime import datetime
 import numpy as np
 from typing import List, Optional, Tuple
 from ..models.base import beijing_now
@@ -66,7 +67,7 @@ class TradeSimService:
         report = TradeSimReport(
             strategy_id=data.strategy_id,
             user_id=user_id,
-            cutoff_date=data.cutoff_date,
+            cutoff_date=datetime.strptime(data.cutoff_date, "%Y-%m-%d").date(),
             config=json.dumps(config, ensure_ascii=False),
             status="pending",
         )
