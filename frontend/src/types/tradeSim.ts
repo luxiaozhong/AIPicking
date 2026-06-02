@@ -98,3 +98,40 @@ export interface TradeSimListResponse {
   page: number;
   limit: number;
 }
+
+export interface BatchTradeSimCreate {
+  strategy_id: number;
+  start_date: string;       // YYYYMMDD
+  end_date: string;         // YYYYMMDD
+  name?: string;
+  total_amount: number;
+  top_n: number;
+  max_hold_days: number;
+  stop_factors: StopFactorConfig[];
+}
+
+export interface BatchDailyResult {
+  cutoff_date: string;
+  status: string;
+  trades?: TradeItem[] | null;
+  summary?: TradeSimSummary | null;
+  error_message?: string;
+}
+
+export interface BatchTradeSimReport {
+  id: number;
+  strategy_id: number;
+  strategy_name?: string;
+  name?: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  config: { total_amount: number; top_n: number; max_hold_days: number; stop_factors: StopFactorConfig[] } | null;
+  total_days: number;
+  completed_days: number;
+  daily_results?: BatchDailyResult[] | null;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at?: string;
+}

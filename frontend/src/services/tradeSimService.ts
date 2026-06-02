@@ -4,6 +4,8 @@ import type {
   TradeSimListResponse,
   TradeSimCreate,
   StopFactorMeta,
+  BatchTradeSimCreate,
+  BatchTradeSimReport,
 } from '@/types/tradeSim';
 
 const BASE = '/trade-sims';
@@ -35,6 +37,23 @@ export const tradeSimService = {
 
   async getStopFactors(): Promise<Record<string, StopFactorMeta>> {
     const response = await api.get<Record<string, StopFactorMeta>>(`${BASE}/factors`);
+    return response.data;
+  },
+
+  async createBatch(data: BatchTradeSimCreate): Promise<BatchTradeSimReport> {
+    const response = await api.post<BatchTradeSimReport>(`${BASE}/batch`, data);
+    return response.data;
+  },
+
+  async getBatchList(params: {
+    page?: number; limit?: number; strategy_id?: number;
+  } = {}): Promise<{ items: BatchTradeSimReport[]; total: number; page: number; limit: number }> {
+    const response = await api.get<{ items: BatchTradeSimReport[]; total: number; page: number; limit: number }>(`${BASE}/batch`, { params });
+    return response.data;
+  },
+
+  async getBatchDetail(id: number): Promise<BatchTradeSimReport> {
+    const response = await api.get<BatchTradeSimReport>(`${BASE}/batch/${id}`);
     return response.data;
   },
 };

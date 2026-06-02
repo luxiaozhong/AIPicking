@@ -8,7 +8,7 @@ import PageHeader from '@/components/shared/PageHeader';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import backtestService from '@/services/backtestService';
 import tradeSimService from '@/services/tradeSimService';
-import type { TradeSimCreate } from '@/types/tradeSim';
+import type { TradeSimCreate, BatchTradeSimCreate } from '@/types/tradeSim';
 
 const { Text } = Typography;
 const { Group: CheckboxGroup } = Checkbox;
@@ -34,6 +34,7 @@ export default function BacktestForm() {
   const [batchName, setBatchName] = useState('');
 
   const [backtestMode, setBacktestMode] = useState<'simple' | 'trade-sim'>('simple');
+  const [tradeSimMode, setTradeSimMode] = useState<'single' | 'batch'>('single');
 
   // 交易模拟字段
   const [totalAmount, setTotalAmount] = useState<number>(100000);
@@ -77,6 +78,43 @@ export default function BacktestForm() {
 
     // 交易模拟模式
     if (backtestMode === 'trade-sim') {
+      // 交易模拟批量模式
+      if (tradeSimMode === 'batch') {
+        if (!dateRange || !dateRange[0] || !dateRange[1]) {
+          message.error('请选择起始和结束日期');
+          return;
+        }
+        if (!totalAmount || totalAmount <= 0) {
+          message.error('请输入投资总额');
+          return;
+        }
+        const enabled = stopFactors.filter(sf => sf.enabled);
+        if (enabled.length === 0) {
+          message.error('请至少启用一个止损止盈条件');
+          return;
+        }
+
+        try {
+          const payload: BatchTradeSimCreate = {
+            strategy_id: currentStrategy.id,
+            start_date: dateRange[0].format('YYYYMMDD'),
+            end_date: dateRange[1].format('YYYYMMDD'),
+            name: batchName.trim() || undefined,
+            total_amount: totalAmount,
+            top_n: topN,
+            max_hold_days: maxHoldDays,
+            stop_factors: stopFactors,
+          };
+          const result = await tradeSimService.createBatch(payload);
+          message.success('批量交易模拟已提交');
+          navigate(`/backtests/trade-sim/batch/${result.id}`);
+        } catch (err: any) {
+          message.error(err.response?.data?.detail || '提交失败');
+        }
+        return;
+      }
+
+      // 交易模拟单日模式
       if (!cutoffDate) {
         message.error('请选择截止日');
         return;
@@ -265,19 +303,41 @@ export default function BacktestForm() {
             </>
           ) : (
             <>
-              <Form.Item label="截止日" required>
-                <DatePicker
-                  value={cutoffDate}
-                  onChange={setCutoffDate}
-                  style={{ width: '100%' }}
-                  placeholder="策略将用此日及之前的数据选股"
-                  presets={[
-                    { label: '昨天', value: () => dayjs().subtract(1, 'day') },
-                    { label: '上周五', value: () => dayjs().subtract(1, 'week').endOf('week').subtract(1, 'day') },
-                    { label: '本月1日', value: () => dayjs().startOf('month') },
-                  ]}
-                />
+              <Form.Item label="回测模式">
+                <Radio.Group value={tradeSimMode} onChange={(e) => setTradeSimMode(e.target.value)}>
+                  <Radio.Button value="single">单日</Radio.Button>
+                  <Radio.Button value="batch">批量</Radio.Button>
+                </Radio.Group>
               </Form.Item>
+
+              {tradeSimMode === 'single' ? (
+                <Form.Item label="截止日" required>
+                  <DatePicker
+                    value={cutoffDate}
+                    onChange={setCutoffDate}
+                    style={{ width: '100%' }}
+                    placeholder="策略将用此日及之前的数据选股"
+                    presets={[
+                      { label: '昨天', value: () => dayjs().subtract(1, 'day') },
+                      { label: '上周五', value: () => dayjs().subtract(1, 'week').endOf('week').subtract(1, 'day') },
+                      { label: '本月1日', value: () => dayjs().startOf('month') },
+                    ]}
+                  />
+                </Form.Item>
+              ) : (
+                <>
+                  <Form.Item label="日期范围" required>
+                    <DatePicker.RangePicker
+                      value={dateRange as any}
+                      onChange={(v) => setDateRange(v as [dayjs.Dayjs, dayjs.Dayjs])}
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                  <Form.Item label="报告名称（可选）">
+                    <Input placeholder="如：5月交易模拟" value={batchName} onChange={(e) => setBatchName(e.target.value)} allowClear />
+                  </Form.Item>
+                </>
+              )}
 
               <Form.Item label="投资总额（元）" required>
                 <InputNumber
