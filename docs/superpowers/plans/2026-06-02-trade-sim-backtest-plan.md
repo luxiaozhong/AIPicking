@@ -26,7 +26,13 @@
 | Create | `frontend/src/types/tradeSim.ts` | TypeScript 类型定义 |
 | Create | `frontend/src/services/tradeSimService.ts` | API 调用封装 |
 | Create | `frontend/src/pages/TradeSimDetail.tsx` | 交易模拟报表组件 |
-| Modify | `frontend/src/pages/BacktestForm.tsx` | 增加模式切换 + 交易模拟表单 |
+| Create | `backend/app/models/trade_sim.py` | 新增 BatchTradeSimReport 模型 |
+| Create | `backend/app/schemas/trade_sim.py` | 新增 BatchTradeSimCreate/Response schema |
+| Modify | `backend/app/services/trade_sim_engine.py` | 新增 `run_batch()` 方法 |
+| Modify | `backend/app/services/trade_sim_service.py` | 新增批量 CRUD 方法 |
+| Modify | `backend/app/api/trade_sims.py` | 新增批量 API 端点 |
+| Create | `frontend/src/pages/BatchTradeSimDetail.tsx` | 批量交易模拟报表 |
+| Modify | `frontend/src/pages/BacktestForm.tsx` | 增加模式切换 + 交易模拟表单（含批量） |
 | Modify | `frontend/src/pages/BacktestDetail.tsx` | 按模式渲染不同报表 |
 | Modify | `frontend/src/services/backtestService.ts` | 新增交易模拟回测 API 方法 |
 
@@ -2219,7 +2225,602 @@ git commit -m "feat: complete trade simulation backtest feature"
 
 ---
 
-## 计划自审
+### Task 13: 批量交易模拟 — 模型 + Schema + Engine
+
+**Files:**
+- Modify: `backend/app/models/trade_sim.py` — 新增 BatchTradeSimReport
+- Modify: `backend/app/schemas/trade_sim.py` — 新增批量 schema
+- Modify: `backend/app/services/trade_sim_engine.py` — 新增 `run_batch()`
+
+- [ ] **Step 1: 新增 BatchTradeSimReport 模型**
+
+```python
+# 追加到 backend/app/models/trade_sim.py
+class BatchTradeSimReport(BaseModel):
+    """批量交易模拟回测报告"""
+
+    __tablename__ = "batch_trade_sim_reports"
+
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(255))
+    status = Column(String(20), default="pending", index=True)
+    start_date = Column(String(8), nullable=False)   # YYYYMMDD
+    end_date = Column(String(8), nullable=False)      # YYYYMMDD
+    config = Column(Text)        # JSON: total_amount, top_n, max_hold_days, stop_factors
+    total_days = Column(Integer, default=0)
+    completed_days = Column(Integer, default=0)
+    daily_results = Column(Text)  # JSON: [{cutoff_date, trades, summary, status, error_message}]
+    error_message = Column(Text)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    strategy = relationship("Strategy", back_populates="batch_trade_sim_reports")
+    owner = relationship("User", back_populates="batch_trade_sim_reports")
+
+    @property
+    def strategy_name(self) -> str:
+        return self.strategy.name if self.strategy else None
+```
+
+在 `models/__init__.py` 添加：
+```python
+from .trade_sim import TradeSimReport, BatchTradeSimReport
+Strategy.batch_trade_sim_reports = relationship("BatchTradeSimReport", back_populates="strategy", cascade="all, delete-orphan")
+BatchTradeSimReport.owner = relationship("User", back_populates="batch_trade_sim_reports")
+User.batch_trade_sim_reports = relationship("BatchTradeSimReport", back_populates="owner")
+```
+
+- [ ] **Step 2: 新增批量 Schema**
+
+```python
+# 追加到 backend/app/schemas/trade_sim.py
+from typing import Optional, List
+
+class BatchTradeSimCreate(BaseModel):
+    strategy_id: int
+    start_date: str              # YYYYMMDD
+    end_date: str                # YYYYMMDD
+    name: Optional[str] = None
+    total_amount: float = Field(..., gt=0)
+    top_n: int = Field(default=5, ge=1, le=20)
+    max_hold_days: int = Field(default=60, ge=1, le=365)
+    stop_factors: List[StopFactorConfig]
+
+
+class BatchDailyResult(BaseModel):
+    cutoff_date: str
+    status: str                  # completed | failed
+    trades: Optional[List[TradeItem]] = None
+    summary: Optional[TradeSimSummary] = None
+    error_message: Optional[str] = None
+
+
+class BatchTradeSimResponse(BaseModel):
+    id: int
+    strategy_id: int
+    strategy_name: Optional[str] = None
+    name: Optional[str] = None
+    status: str
+    start_date: str
+    end_date: str
+    config: Optional[dict] = None
+    total_days: int
+    completed_days: int
+    daily_results: Optional[List[BatchDailyResult]] = None
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BatchTradeSimListResponse(BaseModel):
+    items: List[BatchTradeSimResponse]
+    total: int
+    page: int
+    limit: int
+```
+
+- [ ] **Step 3: 新增 TradeSimEngine.run_batch() 方法**
+
+```python
+# 追加到 TradeSimEngine 类中
+def run_batch(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """批量交易模拟：遍历每个交易日运行交易模拟"""
+    # 加载全时段数据用于策略选股
+    loaded = self._backtest_engine._load_data_range(start_date, end_date)
+    daily_data = loaded["daily"]
+
+    # 获取所有交易日
+    trading_days = sorted(set(
+        row["trade_date"] for rows in daily_data.values() for row in rows
+        if start_date <= row["trade_date"] <= end_date
+    ))
+
+    results = []
+    for cutoff_date in trading_days:
+        try:
+            result = self.run(cutoff_date)
+            result["cutoff_date"] = cutoff_date
+            result["status"] = "completed"
+        except Exception as e:
+            result = {
+                "cutoff_date": cutoff_date,
+                "status": "failed",
+                "error_message": str(e),
+            }
+        results.append(result)
+
+    return results
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/app/models/trade_sim.py backend/app/models/__init__.py backend/app/schemas/trade_sim.py backend/app/services/trade_sim_engine.py
+git commit -m "feat: add batch trade sim model, schema, and engine method"
+```
+
+---
+
+### Task 14: 批量交易模拟 — Service + API
+
+**Files:**
+- Modify: `backend/app/services/trade_sim_service.py`
+- Modify: `backend/app/api/trade_sims.py`
+
+- [ ] **Step 1: 新增批量 Service 方法**
+
+```python
+# 追加到 TradeSimService 类中
+@staticmethod
+async def create_batch(
+    db: AsyncSession,
+    data,  # BatchTradeSimCreate
+    user_id: int,
+):
+    """提交批量交易模拟回测"""
+    from ..models.trade_sim import BatchTradeSimReport
+
+    strategy_result = await db.execute(
+        select(Strategy).where(Strategy.id == data.strategy_id)
+    )
+    strategy = strategy_result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="策略不存在")
+
+    enabled = [sf for sf in data.stop_factors if sf.enabled]
+    if not enabled:
+        raise HTTPException(status_code=400, detail="请至少启用一个止损止盈条件")
+
+    config = {
+        "total_amount": data.total_amount,
+        "top_n": data.top_n,
+        "max_hold_days": data.max_hold_days,
+        "stop_factors": [
+            {"id": sf.id, "enabled": sf.enabled, "params": sf.params}
+            for sf in data.stop_factors
+        ],
+    }
+
+    report = BatchTradeSimReport(
+        strategy_id=data.strategy_id,
+        user_id=user_id,
+        name=data.name or f"{strategy.name}_{data.start_date}_{data.end_date}",
+        start_date=data.start_date,
+        end_date=data.end_date,
+        config=json.dumps(config, ensure_ascii=False),
+        status="pending",
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    report.strategy = strategy
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(
+        None, TradeSimService._run_batch, report.id, data.start_date, data.end_date
+    )
+    return report
+
+
+@staticmethod
+def _run_batch(report_id: int, start_date: str, end_date: str):
+    """执行批量交易模拟（线程池中）"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from ..config import settings
+    from ..models.trade_sim import BatchTradeSimReport
+    from .trade_sim_engine import TradeSimEngine
+
+    engine = create_engine(settings.SYNC_DATABASE_URL)
+    Session = sessionmaker(bind=engine)
+
+    with Session() as db:
+        try:
+            report = db.query(BatchTradeSimReport).filter(BatchTradeSimReport.id == report_id).first()
+            if not report:
+                return
+
+            report.status = "running"
+            report.started_at = beijing_now()
+            db.commit()
+
+            strategy = db.query(Strategy).filter(Strategy.id == report.strategy_id).first()
+            if not strategy:
+                raise ValueError(f"策略 {report.strategy_id} 不存在")
+
+            if strategy.generated_code:
+                strategy_code = strategy.generated_code
+            elif strategy.file_path and __import__('os').path.exists(strategy.file_path):
+                with open(strategy.file_path, "r", encoding="utf-8") as f:
+                    strategy_code = f.read()
+            else:
+                raise FileNotFoundError("策略代码不存在")
+
+            config = json.loads(report.config) if report.config else {}
+
+            engine_obj = TradeSimEngine(
+                strategy_code=strategy_code,
+                strategy_params={},
+                config=config,
+            )
+
+            daily_results = engine_obj.run_batch(start_date, end_date)
+
+            report.total_days = len(daily_results)
+            report.completed_days = len([r for r in daily_results if r.get("status") == "completed"])
+            report.daily_results = json.dumps(daily_results, ensure_ascii=False, cls=NumpyEncoder)
+
+            if report.completed_days == 0 and report.total_days > 0:
+                report.status = "failed"
+                report.error_message = "所有交易日执行均失败"
+            else:
+                report.status = "completed"
+
+            report.completed_at = beijing_now()
+            db.commit()
+
+        except Exception as e:
+            db.rollback()
+            report = db.query(BatchTradeSimReport).filter(BatchTradeSimReport.id == report_id).first()
+            if report:
+                report.status = "failed"
+                report.error_message = str(e)
+                report.completed_at = beijing_now()
+                db.commit()
+
+
+@staticmethod
+async def get_batch_list(
+    db: AsyncSession,
+    page: int = 1,
+    limit: int = 20,
+    strategy_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    user_role: str = "user",
+):
+    """获取批量交易模拟列表"""
+    from ..models.trade_sim import BatchTradeSimReport
+
+    query = select(BatchTradeSimReport).options(selectinload(BatchTradeSimReport.strategy))
+    if strategy_id:
+        query = query.where(BatchTradeSimReport.strategy_id == strategy_id)
+    if user_role != "admin":
+        query = query.where(BatchTradeSimReport.user_id == user_id)
+
+    count_query = select(func.count()).select_from(BatchTradeSimReport)
+    if strategy_id:
+        count_query = count_query.where(BatchTradeSimReport.strategy_id == strategy_id)
+    if user_role != "admin":
+        count_query = count_query.where(BatchTradeSimReport.user_id == user_id)
+
+    total = (await db.execute(count_query)).scalar()
+    offset = (page - 1) * limit
+    query = query.offset(offset).limit(limit).order_by(BatchTradeSimReport.created_at.desc())
+
+    result = await db.execute(query)
+    return result.scalars().all(), total
+
+
+@staticmethod
+async def get_batch_detail(
+    db: AsyncSession,
+    report_id: int,
+    user_id: Optional[int] = None,
+    user_role: str = "user",
+):
+    """获取批量交易模拟详情"""
+    from ..models.trade_sim import BatchTradeSimReport
+
+    result = await db.execute(
+        select(BatchTradeSimReport)
+        .options(selectinload(BatchTradeSimReport.strategy))
+        .where(BatchTradeSimReport.id == report_id)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    if user_role != "admin" and report.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权访问")
+    return report
+
+
+@staticmethod
+async def delete_batch(
+    db: AsyncSession,
+    report_id: int,
+    user_id: Optional[int] = None,
+    user_role: str = "user",
+) -> None:
+    """删除批量交易模拟报告"""
+    report = await TradeSimService.get_batch_detail(db, report_id, user_id, user_role)
+    await db.delete(report)
+    await db.commit()
+```
+
+- [ ] **Step 2: 新增批量 API 端点**
+
+```python
+# 追加到 backend/app/api/trade_sims.py（注意在 GET /{report_id} 之前）
+from ..schemas.trade_sim import (
+    BatchTradeSimCreate, BatchTradeSimResponse, BatchTradeSimListResponse,
+)
+
+@router.post("/batch", response_model=BatchTradeSimResponse, status_code=202)
+async def create_batch_trade_sim(
+    data: BatchTradeSimCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    report = await TradeSimService.create_batch(db, data, current_user.id)
+    return _format_batch_response(report)
+
+
+@router.get("/batch", response_model=BatchTradeSimListResponse)
+async def list_batch_trade_sims(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    strategy_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    items, total = await TradeSimService.get_batch_list(
+        db, page, limit, strategy_id,
+        current_user.id, current_user.role if hasattr(current_user, 'role') else "user",
+    )
+    return {"items": [_format_batch_response(i) for i in items], "total": total, "page": page, "limit": limit}
+
+
+@router.get("/batch/{report_id}", response_model=BatchTradeSimResponse)
+async def get_batch_trade_sim(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    report = await TradeSimService.get_batch_detail(
+        db, report_id, current_user.id,
+        current_user.role if hasattr(current_user, 'role') else "user",
+    )
+    return _format_batch_response(report)
+
+
+@router.delete("/batch/{report_id}")
+async def delete_batch_trade_sim(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    await TradeSimService.delete_batch(
+        db, report_id, current_user.id,
+        current_user.role if hasattr(current_user, 'role') else "user",
+    )
+    return {"message": "已删除"}
+
+
+def _format_batch_response(report) -> dict:
+    config = json.loads(report.config) if report.config else {}
+    daily_results = json.loads(report.daily_results) if report.daily_results else []
+    return {
+        "id": report.id,
+        "strategy_id": report.strategy_id,
+        "strategy_name": report.strategy_name,
+        "name": report.name,
+        "status": report.status,
+        "start_date": report.start_date,
+        "end_date": report.end_date,
+        "config": config,
+        "total_days": report.total_days,
+        "completed_days": report.completed_days,
+        "daily_results": daily_results,
+        "error_message": report.error_message,
+        "started_at": report.started_at,
+        "completed_at": report.completed_at,
+        "created_at": report.created_at,
+    }
+```
+
+**注意路由定义顺序**：`/batch` 系列路由必须在 `/{report_id}` 之前定义。
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/services/trade_sim_service.py backend/app/api/trade_sims.py
+git commit -m "feat: add batch trade sim service and API endpoints"
+```
+
+---
+
+### Task 15: 前端批量交易模拟 — 表单 + 详情
+
+**Files:**
+- Modify: `frontend/src/pages/BacktestForm.tsx` — 交易模拟模式增加批量子模式
+- Create: `frontend/src/pages/BatchTradeSimDetail.tsx`
+- Modify: `frontend/src/App.tsx` — 批量详情路由
+- Modify: `frontend/src/types/tradeSim.ts` — 批量类型
+- Modify: `frontend/src/services/tradeSimService.ts` — 批量 API
+
+- [ ] **Step 1: 前端批量类型**
+
+```typescript
+// 追加到 frontend/src/types/tradeSim.ts
+export interface BatchTradeSimCreate {
+  strategy_id: number;
+  start_date: string;       // YYYYMMDD
+  end_date: string;         // YYYYMMDD
+  name?: string;
+  total_amount: number;
+  top_n: number;
+  max_hold_days: number;
+  stop_factors: StopFactorConfig[];
+}
+
+export interface BatchDailyResult {
+  cutoff_date: string;
+  status: string;
+  trades?: TradeItem[];
+  summary?: TradeSimSummary;
+  error_message?: string;
+}
+
+export interface BatchTradeSimReport {
+  id: number;
+  strategy_id: number;
+  strategy_name?: string;
+  name?: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  config: BatchTradeSimCreate | null;
+  total_days: number;
+  completed_days: number;
+  daily_results?: BatchDailyResult[];
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at?: string;
+}
+```
+
+- [ ] **Step 2: 前端批量 API 方法**
+
+```typescript
+// 追加到 tradeSimService
+async createBatch(data: BatchTradeSimCreate): Promise<BatchTradeSimReport> {
+  const response = await api.post<BatchTradeSimReport>(`${BASE}/batch`, data);
+  return response.data;
+},
+
+async getBatchList(params: {
+  page?: number; limit?: number; strategy_id?: number;
+} = {}): Promise<{ items: BatchTradeSimReport[]; total: number; page: number; limit: number }> {
+  const response = await api.get(`${BASE}/batch`, { params });
+  return response.data;
+},
+
+async getBatchDetail(id: number): Promise<BatchTradeSimReport> {
+  const response = await api.get<BatchTradeSimReport>(`${BASE}/batch/${id}`);
+  return response.data;
+},
+```
+
+- [ ] **Step 3: BacktestForm 交易模拟模式增加批量子模式**
+
+在交易模拟表单的 `截止日` 字段处，增加单日/批量切换：
+
+```tsx
+{/* 在交易模拟模式下 */}
+<Form.Item label="回测模式">
+  <Radio.Group value={tradeSimMode} onChange={(e) => setTradeSimMode(e.target.value)}>
+    <Radio.Button value="single">单日</Radio.Button>
+    <Radio.Button value="batch">批量</Radio.Button>
+  </Radio.Group>
+</Form.Item>
+
+{tradeSimMode === 'single' ? (
+  <Form.Item label="截止日" required>
+    <DatePicker value={cutoffDate} onChange={setCutoffDate} style={{ width: '100%' }} />
+  </Form.Item>
+) : (
+  <>
+    <Form.Item label="日期范围" required>
+      <DatePicker.RangePicker
+        value={dateRange as any}
+        onChange={(v) => setDateRange(v as [dayjs.Dayjs, dayjs.Dayjs])}
+        style={{ width: '100%' }}
+      />
+    </Form.Item>
+    <Form.Item label="报告名称（可选）">
+      <Input placeholder="如：5月交易模拟" value={batchName} onChange={(e) => setBatchName(e.target.value)} allowClear />
+    </Form.Item>
+  </>
+)}
+```
+
+提交逻辑中增加批量分支：
+```typescript
+// 交易模拟批量模式
+if (backtestMode === 'trade-sim' && tradeSimMode === 'batch') {
+  // 校验...
+  const payload: BatchTradeSimCreate = {
+    strategy_id: currentStrategy.id,
+    start_date: dateRange![0].format('YYYYMMDD'),
+    end_date: dateRange![1].format('YYYYMMDD'),
+    name: batchName.trim() || undefined,
+    total_amount: totalAmount,
+    top_n: topN,
+    max_hold_days: maxHoldDays,
+    stop_factors: stopFactors,
+  };
+  const result = await tradeSimService.createBatch(payload);
+  message.success('批量交易模拟已提交');
+  navigate(`/backtests/trade-sim/batch/${result.id}`);
+  return;
+}
+```
+
+- [ ] **Step 4: BatchTradeSimDetail 组件**
+
+类似 TradeSimDetail，但显示每日结果的表格（每行一个交易日，展示：日期、交易笔数、胜率、平均回报率），点击行展开该日的完整 trade 明细。
+
+```typescript
+// 核心结构：
+// - 汇总区：总交易日数、完成天数、所有日汇总的平均胜率/回报率
+// - 每日结果表格（可展开），展开后复用 TradeSimDetail 的单日报表逻辑
+```
+
+（完整代码在 Task 中实现时补充细节）
+
+- [ ] **Step 5: 路由注册**
+
+```tsx
+// App.tsx 添加：
+import BatchTradeSimDetail from '@/pages/BatchTradeSimDetail';
+<Route path="/backtests/trade-sim/batch/:id" element={<BatchTradeSimDetail />} />
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/pages/BacktestForm.tsx frontend/src/pages/BatchTradeSimDetail.tsx frontend/src/App.tsx frontend/src/types/tradeSim.ts frontend/src/services/tradeSimService.ts
+git commit -m "feat: add batch trade sim frontend form and detail"
+```
+
+---
+
+### Task 16: 端到端验证（含批量）
+
+- [ ] **Step 1: 重启后端服务**
+- [ ] **Step 2: 验证单日 + 批量 API 端点均可访问**
+- [ ] **Step 3: 提交批量交易模拟，验证返回 daily_results**
+- [ ] **Step 4: 前端验证批量表单和批量详情页**
+
+---
+
+## 计划自审（更新）
 
 **Spec 覆盖率检查：**
 
