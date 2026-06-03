@@ -306,6 +306,13 @@ class BacktestEngine:
 
                 if ts_code:
                     sliced_daily = {ts_code: sliced_daily[ts_code]} if ts_code in sliced_daily else {}
+                    base_stock_count = 1
+                    filtered_stocks = stocks_data  # 单股模式不应用板块过滤
+                else:
+                    # 应用板块过滤（stocks_data 在循环外已全量加载）
+                    filtered_stocks, sliced_daily, base_stock_count = self._apply_board_filter(
+                        stocks_data, sliced_daily
+                    )
 
                 # 切片横截面数据到当日
                 sliced_hot_stocks = [r for r in loaded["hot_stocks"] if r.get("trade_date") == cutoff_date_fmt]
@@ -313,7 +320,7 @@ class BacktestEngine:
 
                 strategy_input = {
                     "cutoff_date": cutoff_date,
-                    "stocks": stocks_data,
+                    "stocks": filtered_stocks,
                     "daily": sliced_daily,
                     "daily_sector_flow": loaded["daily_sector_flow"],
                     "hot_stocks": sliced_hot_stocks,
@@ -328,9 +335,21 @@ class BacktestEngine:
                 if not recommendations or not isinstance(recommendations, list):
                     recommendations = []
 
+                # 0 入选日跳过
+                if len(recommendations) == 0:
+                    continue
+
+                # 截断前统计
+                total_qualifying = len(recommendations)
                 recommendations = recommendations[:MAX_RECOMMENDATIONS]
                 recommendations = self._track_performance(recommendations, cutoff_date, track_days)
                 summary = self._calculate_summary(recommendations, track_days)
+
+                summary["total_qualifying"] = total_qualifying
+                summary["base_stock_count"] = base_stock_count
+                summary["pick_rate"] = round(
+                    total_qualifying / base_stock_count, 6
+                ) if base_stock_count > 0 else 0.0
 
                 daily_result["status"] = "completed"
                 daily_result["recommendations"] = recommendations
