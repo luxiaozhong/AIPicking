@@ -18,7 +18,7 @@ function DailyTrackingPanel({ ts_code, cutoffDate }: { ts_code: string; cutoffDa
   const { data, loading } = useKLineData(ts_code, 180);
 
   if (loading || !data) {
-    return <Spin tip="加载中..." style={{ display: 'block', padding: 24 }} />;
+    return <Spin description="加载中..." style={{ display: 'block', padding: 24 }} />;
   }
 
   const cutoffDateStr = `${cutoffDate.slice(0, 4)}-${cutoffDate.slice(4, 6)}-${cutoffDate.slice(6, 8)}`;
@@ -96,7 +96,10 @@ function DailyPanel({
       key: 'ts_code',
       width: 110,
       render: (code: string, record: RecommendationItem) => (
-        <a onClick={(e) => { e.stopPropagation(); setSelectedStock(record); }}>{code}</a>
+        <a
+          onClick={(e) => { e.stopPropagation(); setSelectedStock(record); }}
+          style={{ cursor: 'pointer', color: '#1677ff', textDecoration: 'underline' }}
+        >{code}</a>
       ),
     },
     { title: '名称', dataIndex: 'name', key: 'name', width: 100 },
@@ -292,7 +295,7 @@ export default function BatchBacktestDetail() {
 
       {isPending && dailyResults.length === 0 && (
         <Card>
-          <Spin tip="执行中...">
+          <Spin description="执行中...">
             <div style={{ padding: 60, textAlign: 'center', color: '#999' }}>
               批量回测正在执行中，请稍候...
             </div>

@@ -31,7 +31,7 @@ export default function StockKLineModal({
       onCancel={onClose}
       width={960}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
       <KLineChart data={data?.items ?? []} loading={loading} height={520} />
