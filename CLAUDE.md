@@ -31,6 +31,7 @@ npm run test:e2e                     # Playwright E2E tests
 - **Auth**: JWT（access_token 30min + refresh_token 7d），角色分 admin/user
 - **AI**: DeepSeek API，相似度选股（非买卖信号），返回 top 10
 - **回测**: AST 沙箱 + 线程池执行，详见 `docs/backtest-engine.md`
+- **交易模拟**: 策略选股 → 资金分配 → 逐日追踪 → 止损止盈，详见 `docs/trade-sim.md`
 
 ## Key Conventions
 
@@ -54,18 +55,18 @@ backend/app/
 ├── main.py          — 入口，CORS，路由注册
 ├── config.py        — 环境变量
 ├── database.py      — 异步 engine + get_db / async_session
-├── models/          — Strategy, BacktestReport, StrategyRun, AIStrategyTask
-├── api/             — strategies, backtests, factors, ai, auth, users, stocks
+├── models/          — Strategy, BacktestReport, BatchBacktestReport, StrategyRun, AIStrategyTask, TradeSimReport, BatchTradeSimReport
+├── api/             — strategies, backtests, batch_backtests, trade_sims, factors, ai, auth, users, stocks, education
 ├── middleware/       — get_current_user, require_admin
-├── services/        — strategy, backtest, backtest_engine, llm, ai_strategy, code_generator
-└── factors/         — momentum/, trend/, volume/, pattern/, risk/
+├── services/        — strategy, backtest, backtest_engine, trade_sim_engine, trade_sim_service, llm, ai_strategy, code_generator
+└── factors/         — momentum/, trend/, volume/, pattern/, risk/, trade_sim_stops.py
 
 frontend/src/
 ├── App.tsx          — 路由定义
 ├── services/        — api.ts (Axios + auth 拦截器), *Service
 ├── stores/          — auth, strategy, backtest, theme, aiStrategy (Zustand)
-├── pages/           — AIStrategyBuilder, Login, Dashboard 等
-└── components/      — TaskHistoryPanel 等
+├── pages/           — 策略管理、简单回测（含单策略/批量切换）、交易模拟、仪表盘 等
+└── components/      — TaskHistoryPanel, Layout/AppLayout, OnboardingWalkthrough 等
 ```
 
 ## Deep Dives
@@ -79,6 +80,7 @@ frontend/src/
 | 历史数据采集管线、cron 定时任务、日志 | `docs/data-pipeline.md` |
 | AI 选股完整流程、状态机、DeepSeek 调用 | `docs/ai-strategy.md` |
 | 前端路由、组件、状态管理 | `docs/frontend.md` |
+| 交易模拟引擎、止损止盈因子 | `docs/trade-sim.md` |
 | 部署、systemd、手动更新 | `docs/deployment.md` |
 | Oversold manually report | `docs/oversold-bounce-strategy.md` |
 | 临时回测脚本与 HTML 报告 | `backend/TmpScriptsBackTest/` |

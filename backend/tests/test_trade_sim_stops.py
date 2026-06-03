@@ -22,17 +22,20 @@ def make_daily(closes, adj_closes=None):
 
 class TestStopPrevLow:
     def test_not_triggered_when_above(self):
-        """当前价高于前低，不触发"""
-        df = make_daily([10.0] * 19 + [10.5])
+        """当前价高于过去20日最低价，不触发（需 ref_days+1=21 根K线）"""
+        df = make_daily([10.0] * 20 + [10.5])
         result = _check_stop_prev_low(df, {}, {"ref_days": 20})
         assert result is None
 
     def test_triggered_when_below(self):
-        """当前价低于20日前，触发"""
-        df = make_daily([12.0] + [10.0] * 18 + [9.5])
+        """当前价低于过去20日最低价，触发破前低"""
+        # 过去20天最低 12.0，今天 9.5 < 12.0 → 触发
+        df = make_daily([12.0] * 20 + [9.5])
         result = _check_stop_prev_low(df, {}, {"ref_days": 20})
         assert result is not None
         assert "破前低止损" in result.reason
+        assert "20日最低收盘价" in result.reason
+        assert "12.00" in result.reason
 
     def test_not_enough_data(self):
         """数据不足，不触发"""

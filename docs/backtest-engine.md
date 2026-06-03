@@ -8,6 +8,8 @@
 
 支持 `run(data)` 函数接口，适用于买入/卖出信号类和相似度匹配类策略。推荐结果必须包含 `signal` 字段。
 
+> **交易模拟** (`TradeSimEngine`) 通过组合方式复用本引擎的策略加载 (`_load_data`) 和数据加载能力，在此基础上增加资金分配、逐日追踪、止损止盈逻辑。详见 `docs/trade-sim.md`。
+
 ## Factor Library (`app/factors/`)
 
 | 目录 | 因子 |

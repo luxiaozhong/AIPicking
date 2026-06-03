@@ -257,10 +257,10 @@ export default function BatchBacktestDetail() {
       <PageHeader
         title={report.name || `批量回测 #${report.id}`}
         breadcrumb={[
-          { title: '批量回测', path: '/backtests/batch' },
+          { title: '简单回测', path: '/backtests' },
           { title: report.name || `#${report.id}` },
         ]}
-        extra={<Button onClick={() => navigate('/backtests/batch')}>返回列表</Button>}
+        extra={<Button onClick={() => navigate('/backtests')}>返回列表</Button>}
       />
 
       <Card style={{ marginBottom: 16 }}>

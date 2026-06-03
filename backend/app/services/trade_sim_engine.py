@@ -297,14 +297,19 @@ class TradeSimEngine:
                 if fid == "stop_prev_low":
                     ref_days = params.get("ref_days", 20)
                     if i >= ref_days:
-                        ref_day = daily[i - ref_days]
-                        ref_price = _get_price(ref_day)
-                        tracking_record["prev_low_ref"] = ref_price
+                        # 过去 ref_days 天（不含今天）的最低价，与 _check_stop_prev_low 一致
+                        ref_low = None
+                        for j in range(max(0, i - ref_days), i):
+                            p = _get_price(daily[j])
+                            if p is not None:
+                                if ref_low is None or p < ref_low:
+                                    ref_low = p
+                        tracking_record["prev_low_ref"] = round(ref_low, 2) if ref_low else None
                 elif fid == "stop_ma10_cross" and ma10 is not None:
                     coeff = params.get("coefficient", 0.93)
                     tracking_record["ma10_stop_line"] = round(ma10 * coeff, 4)
 
-            # 检查止损止盈
+            # 检查止损止盈（含买入当天：若买入日持续暴跌破位，次日止损卖出）
             if not triggered:
                 for sf in enabled_factors:
                     fid = sf.get("id")
