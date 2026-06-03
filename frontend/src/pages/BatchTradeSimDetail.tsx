@@ -176,19 +176,39 @@ export default function BatchTradeSimDetail() {
       );
     };
 
+    const s = record.summary;
     return (
-      <Table
-        dataSource={record.trades}
-        columns={tradeColumns}
-        rowKey="ts_code"
-        pagination={false}
-        size="small"
-        scroll={{ x: 700 }}
-        expandable={{
-          expandedRowRender: dailyTrackingRender,
-          rowExpandable: (trade: TradeItem) => (trade.daily_tracking?.length || 0) > 0,
-        }}
-      />
+      <>
+        {s && (s.total_qualifying != null || s.base_stock_count != null) && (
+          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+            <Col xs={12} sm={8}>
+              <StatCard title="入选总数" value={`${s.total_qualifying ?? '—'}`} color="#1677ff" />
+            </Col>
+            <Col xs={12} sm={8}>
+              <StatCard title="基础总股数" value={`${s.base_stock_count ?? '—'}`} color="#722ed1" />
+            </Col>
+            <Col xs={12} sm={8}>
+              <StatCard
+                title="入选率"
+                value={s.pick_rate != null ? `${(s.pick_rate * 100).toFixed(2)}%` : '—'}
+                color="#52c41a"
+              />
+            </Col>
+          </Row>
+        )}
+        <Table
+          dataSource={record.trades}
+          columns={tradeColumns}
+          rowKey="ts_code"
+          pagination={false}
+          size="small"
+          scroll={{ x: 700 }}
+          expandable={{
+            expandedRowRender: dailyTrackingRender,
+            rowExpandable: (trade: TradeItem) => (trade.daily_tracking?.length || 0) > 0,
+          }}
+        />
+      </>
     );
   };
 

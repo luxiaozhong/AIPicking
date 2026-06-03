@@ -60,11 +60,17 @@ class TradeSimEngine:
         )
 
     def run(self, cutoff_date: str) -> Dict[str, Any]:
-        """主入口，返回 {trades: [...], summary: {...}}"""
+        """主入口，返回 {trades: [...], summary: {...}, total_qualifying, base_stock_count, pick_rate}"""
         # 1. 选股
-        candidates = self._get_stock_candidates(cutoff_date)
+        candidates, total_qualifying, base_stock_count = self._get_stock_candidates(cutoff_date)
         if not candidates:
-            return {"trades": [], "summary": self._empty_summary()}
+            return {
+                "trades": [],
+                "summary": self._empty_summary(),
+                "total_qualifying": total_qualifying,
+                "base_stock_count": base_stock_count,
+                "pick_rate": round(total_qualifying / base_stock_count, 6) if base_stock_count > 0 else 0.0,
+            }
 
         # 2. 加载追踪数据
         ts_codes = [c["ts_code"] for c in candidates]
@@ -95,18 +101,27 @@ class TradeSimEngine:
 
         # 4. 汇总
         summary = self._calculate_summary(trades)
+        summary["total_qualifying"] = total_qualifying
+        summary["base_stock_count"] = base_stock_count
+        summary["pick_rate"] = round(total_qualifying / base_stock_count, 6) if base_stock_count > 0 else 0.0
 
-        return {"trades": trades, "summary": summary}
+        return {
+            "trades": trades,
+            "summary": summary,
+            "total_qualifying": total_qualifying,
+            "base_stock_count": base_stock_count,
+            "pick_rate": summary["pick_rate"],
+        }
 
-    def _get_stock_candidates(self, cutoff_date: str) -> List[dict]:
-        """运行策略选股，按 score 降序取前 N 只"""
+    def _get_stock_candidates(self, cutoff_date: str) -> tuple:
+        """运行策略选股，按 score 降序取前 N 只。返回 (candidates, total_qualifying, base_stock_count)"""
         loaded = self._backtest_engine._load_data(cutoff_date)
 
         stocks_data = loaded["stocks"]
         daily_data = loaded["daily"]
 
         # 应用板块过滤
-        filtered_stocks, filtered_daily, _ = self._backtest_engine._apply_board_filter(
+        filtered_stocks, filtered_daily, base_stock_count = self._backtest_engine._apply_board_filter(
             stocks_data, daily_data
         )
 
@@ -124,7 +139,9 @@ class TradeSimEngine:
             raise RuntimeError(f"策略执行失败: {e}")
 
         if not recommendations or not isinstance(recommendations, list):
-            return []
+            return [], 0, base_stock_count
+
+        total_qualifying = len(recommendations)
 
         # 按 score 降序排序，无 score 按名称排序
         recommendations.sort(
@@ -133,7 +150,7 @@ class TradeSimEngine:
         )
 
         top_n = self.config.get("top_n", 5)
-        return recommendations[:top_n]
+        return recommendations[:top_n], total_qualifying, base_stock_count
 
     def _load_tracking_data(self, ts_codes: List[str], cutoff_date: str) -> dict:
         """加载截止日后所有日线数据（含30日历史用于MA等指标计算）"""
@@ -456,6 +473,9 @@ class TradeSimEngine:
             "profit_loss_ratio": 0.0,
             "max_consecutive_wins": 0,
             "max_consecutive_losses": 0,
+            "total_qualifying": 0,
+            "base_stock_count": 0,
+            "pick_rate": 0.0,
             "return_distribution": {
                 "lt_-10": 0, "-10_0": 0, "0_5": 0, "5_10": 0, "gt_10": 0,
             },

@@ -79,6 +79,9 @@ class TradeSimSummary(BaseModel):
     profit_loss_ratio: float = 0.0
     max_consecutive_wins: int = 0
     max_consecutive_losses: int = 0
+    total_qualifying: int = 0
+    base_stock_count: int = 0
+    pick_rate: float = 0.0
     return_distribution: ReturnDistribution = Field(default_factory=ReturnDistribution)
 
 

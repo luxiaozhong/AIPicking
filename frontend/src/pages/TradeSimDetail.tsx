@@ -224,6 +224,21 @@ export default function TradeSimDetail() {
               <StatCard title="最大连续亏损" value={`${summary.max_consecutive_losses} 笔`} color="#3f8600" />
             </Col>
           </Row>
+          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+            <Col xs={12} sm={6}>
+              <StatCard title="入选总数" value={`${summary.total_qualifying ?? '—'}`} color="#1677ff" />
+            </Col>
+            <Col xs={12} sm={6}>
+              <StatCard title="基础总股数" value={`${summary.base_stock_count ?? '—'}`} color="#722ed1" />
+            </Col>
+            <Col xs={12} sm={6}>
+              <StatCard
+                title="入选率"
+                value={summary.pick_rate != null ? `${(summary.pick_rate * 100).toFixed(2)}%` : '—'}
+                color="#52c41a"
+              />
+            </Col>
+          </Row>
 
           {distChartOption && (
             <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
