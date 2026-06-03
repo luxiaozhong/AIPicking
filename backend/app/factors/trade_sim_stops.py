@@ -72,22 +72,31 @@ class StopFactorRegistry:
 # ========== 内置因子 ==========
 
 def _check_stop_prev_low(df: list, position: dict, params: dict) -> Optional[TriggerResult]:
-    """破前低止损：当日收盘价 < ref_days 个交易日前的收盘价"""
+    """破前低止损：当日收盘价 < 过去 ref_days 个交易日最低收盘价（不含今日）"""
     ref_days = params.get("ref_days", 20)
-    if len(df) < ref_days:
+    if len(df) < ref_days + 1:  # 至少需要 ref_days 天历史 + 今天
         return None
 
     today = df[-1]
-    ref_day = df[-ref_days]
+    # 过去 ref_days 天（不含今天），找最低收盘价作为"前低"
+    lookback = df[-(ref_days + 1):-1]
 
     close_price = _get_price(today)
-    ref_price = _get_price(ref_day)
-
-    if close_price is None or ref_price is None:
+    if close_price is None:
         return None
 
-    if close_price < ref_price:
-        return TriggerResult(reason=f"破前低止损（{ref_days}日前收盘价 {ref_price:.2f}）")
+    ref_low = None
+    for day in lookback:
+        p = _get_price(day)
+        if p is not None:
+            if ref_low is None or p < ref_low:
+                ref_low = p
+
+    if ref_low is None:
+        return None
+
+    if close_price < ref_low:
+        return TriggerResult(reason=f"破前低止损（{ref_days}日最低收盘价 {ref_low:.2f}）")
     return None
 
 
