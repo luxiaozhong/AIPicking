@@ -195,6 +195,29 @@ class BacktestEngine:
                         return False, f"禁止调用函数: {node.func.id}"
         return True, ""
 
+    def _apply_board_filter(
+        self,
+        stocks_data: List[Dict],
+        daily_data: Dict[str, List[Dict]],
+    ) -> Tuple[List[Dict], Dict[str, List[Dict]], int]:
+        """按 config.board_filter 过滤 stocks 和 daily，返回 (filtered_stocks, filtered_daily, base_count)"""
+        board_filter = (self.config or {}).get("board_filter")
+        if not board_filter or not isinstance(board_filter, list) or len(board_filter) == 0:
+            # 未设置板块过滤，默认全板块
+            board_filter = ["60", "00", "688", "689", "300", "301"]
+
+        def _matches_board(ts_code: str) -> bool:
+            return any(ts_code.startswith(prefix) for prefix in board_filter)
+
+        filtered_stocks = [s for s in stocks_data if _matches_board(s["ts_code"])]
+        filtered_codes = {s["ts_code"] for s in filtered_stocks}
+        filtered_daily = {
+            code: rows for code, rows in daily_data.items()
+            if code in filtered_codes
+        }
+
+        return filtered_stocks, filtered_daily, len(filtered_stocks)
+
     def run(
         self,
         cutoff_date: str,
@@ -648,6 +671,9 @@ class BacktestEngine:
     def _empty_summary(self) -> Dict[str, Any]:
         return {
             "total_recommendations": 0,
+            "total_qualifying": 0,
+            "base_stock_count": 0,
+            "pick_rate": 0.0,
             "avg_return_3d": 0.0, "win_rate_3d": 0.0,
             "best_return_3d": 0.0, "worst_return_3d": 0.0,
             "avg_return_7d": 0.0, "win_rate_7d": 0.0,
