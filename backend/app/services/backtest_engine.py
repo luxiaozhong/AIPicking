@@ -195,12 +195,38 @@ class BacktestEngine:
                         return False, f"禁止调用函数: {node.func.id}"
         return True, ""
 
+    # 指数代码前缀（不应被板块过滤移除，策略市场择时需要这些数据）
+    _INDEX_PREFIXES = ("399", "880", "881", "999")
+    # 上证系列指数：000xxx.SH（需区分 000xxx.SZ 深主板个股）
+    _SH_INDEX_PREFIX = "000"
+
+    @classmethod
+    def _is_market_index(cls, ts_code: str) -> bool:
+        """判断是否为市场指数代码（非个股），板块过滤不应移除指数数据
+
+        覆盖：
+        - 399xxx(.SZ/.SH)：深证系列指数（创业板指、深证成指等）
+        - 000xxx.SH：上证系列指数（上证指数、上证50、沪深300等）
+        - 880/881：通达信行业/概念指数
+        - 999：其他指数
+        """
+        if any(ts_code.startswith(p) for p in cls._INDEX_PREFIXES):
+            return True
+        # 000xxx.SH 是上证指数，000xxx.SZ 是深主板个股
+        if ts_code.startswith(cls._SH_INDEX_PREFIX) and ts_code.endswith(".SH"):
+            return True
+        return False
+
     def _apply_board_filter(
         self,
         stocks_data: List[Dict],
         daily_data: Dict[str, List[Dict]],
     ) -> Tuple[List[Dict], Dict[str, List[Dict]], int]:
-        """按 config.board_filter 过滤 stocks 和 daily，返回 (filtered_stocks, filtered_daily, base_count)"""
+        """按 config.board_filter 过滤 stocks 和 daily，返回 (filtered_stocks, filtered_daily, base_count)
+
+        注意：市场指数数据（如 399006.SZ 创业板指）不受板块过滤影响，
+        始终保留在 daily_data 中，确保策略的市场择时功能正常工作。
+        """
         board_filter = (self.config or {}).get("board_filter")
         if not board_filter or not isinstance(board_filter, list) or len(board_filter) == 0:
             # 未设置板块过滤，默认全板块
@@ -212,9 +238,10 @@ class BacktestEngine:
         filtered_stocks = [s for s in stocks_data if _matches_board(s["ts_code"])]
         # daily_data 按板块前缀独立过滤，不依赖 stocks_data
         # （daily 表包含退市/摘牌股票，这些股票不在 stocks 表但策略仍需要）
+        # 指数代码（399/880/881/999 前缀）始终保留，不受板块过滤影响
         filtered_daily = {
             code: rows for code, rows in daily_data.items()
-            if _matches_board(code)
+            if _matches_board(code) or self._is_market_index(code)
         }
 
         return filtered_stocks, filtered_daily, len(filtered_stocks)
