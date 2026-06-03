@@ -17,6 +17,9 @@ class BacktestSummary(BaseModel):
     win_rate_15d: float = Field(..., description="15天胜率")
     best_return_15d: float = Field(..., description="15天最高涨幅")
     worst_return_15d: float = Field(..., description="15天最大跌幅")
+    total_qualifying: int = Field(0, description="满足策略条件的股票总数（topN 截断前）")
+    base_stock_count: int = Field(0, description="选中板块的股票总数（池子大小）")
+    pick_rate: float = Field(0.0, description="入选率 = total_qualifying / base_stock_count")
 
 
 class RecommendationItem(BaseModel):
