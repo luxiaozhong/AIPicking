@@ -13,6 +13,16 @@ import type { TradeSimCreate, BatchTradeSimCreate } from '@/types/tradeSim';
 const { Text } = Typography;
 const { Group: CheckboxGroup } = Checkbox;
 
+function boardFilterToPrefixes(selected: string[]): string[] {
+  const map: Record<string, string[]> = {
+    '60': ['60'],
+    '00': ['00'],
+    '688/689': ['688', '689'],
+    '300/301': ['300', '301'],
+  };
+  return selected.flatMap(k => map[k] || []);
+}
+
 const TRACK_DAY_OPTIONS = [
   { label: '3天', value: 3 },
   { label: '7天', value: 7 },
@@ -45,6 +55,15 @@ export default function BacktestForm() {
     { id: 'stop_ma10_cross', enabled: false, params: { coefficient: 0.93, buffer_days: 2 } },
     { id: 'take_profit_pct', enabled: true, params: { profit_pct: 5.0 } },
   ]);
+
+  const BOARD_OPTIONS = [
+    { label: '上证', value: '60' },
+    { label: '深圳', value: '00' },
+    { label: '科创', value: '688/689' },
+    { label: '创业', value: '300/301' },
+  ];
+
+  const [boardFilter, setBoardFilter] = useState<string[]>(['60', '00', '688/689', '300/301']);
 
   const [availableFactors, setAvailableFactors] = useState<Record<string, any>>({});
 
@@ -167,7 +186,9 @@ export default function BacktestForm() {
           payload.name = batchName.trim();
         }
         if (stockCode.trim()) {
-          payload.config = { ts_code: stockCode.trim() };
+          payload.config = { ts_code: stockCode.trim(), board_filter: boardFilterToPrefixes(boardFilter) };
+        } else {
+          payload.config = { board_filter: boardFilterToPrefixes(boardFilter) };
         }
         const result = await backtestService.createBatchBacktest(payload);
         message.success('批量回测任务已提交');
@@ -194,7 +215,9 @@ export default function BacktestForm() {
         track_days: trackDays,
       };
       if (stockCode.trim()) {
-        payload.config = { ts_code: stockCode.trim() };
+        payload.config = { ts_code: stockCode.trim(), board_filter: boardFilterToPrefixes(boardFilter) };
+      } else {
+        payload.config = { board_filter: boardFilterToPrefixes(boardFilter) };
       }
       const result = await createBacktest(payload);
       message.success('回测任务已提交');
@@ -299,6 +322,21 @@ export default function BacktestForm() {
                   onChange={setStockCode}
                   placeholder="输入股票代码或名称搜索（留空则全市场选股）"
                 />
+              </Form.Item>
+
+              <Form.Item label="基础板块" required>
+                <CheckboxGroup
+                  options={BOARD_OPTIONS}
+                  value={boardFilter}
+                  onChange={(values) => {
+                    if (values.length > 0) {
+                      setBoardFilter(values as string[]);
+                    }
+                  }}
+                />
+                <Text type="secondary" style={{ marginLeft: 12, fontSize: 12 }}>
+                  用于计算入选率的分母，至少选一个
+                </Text>
               </Form.Item>
             </>
           ) : (
@@ -420,6 +458,21 @@ export default function BacktestForm() {
                     </Card>
                   );
                 })}
+              </Form.Item>
+
+              <Form.Item label="基础板块" required>
+                <CheckboxGroup
+                  options={BOARD_OPTIONS}
+                  value={boardFilter}
+                  onChange={(values) => {
+                    if (values.length > 0) {
+                      setBoardFilter(values as string[]);
+                    }
+                  }}
+                />
+                <Text type="secondary" style={{ marginLeft: 12, fontSize: 12 }}>
+                  用于计算入选率的分母，至少选一个
+                </Text>
               </Form.Item>
             </>
           )}
