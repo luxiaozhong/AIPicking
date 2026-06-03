@@ -228,16 +228,25 @@ class BacktestEngine:
         daily_data = loaded["daily"]
 
         ts_code = (self.config or {}).get("ts_code", "").strip()
+
+        # 单股诊断模式：不应用板块过滤
         if ts_code:
             if ts_code in daily_data:
                 daily_data = {ts_code: daily_data[ts_code]}
             else:
                 return {"recommendations": [], "summary": self._empty_summary()}
+            base_stock_count = 1
+        else:
+            # 应用板块过滤
+            stocks_data, daily_data, base_stock_count = self._apply_board_filter(
+                stocks_data, daily_data
+            )
 
         strategy_input = {
             "cutoff_date": cutoff_date,
             **loaded,
-            "daily": daily_data,  # 覆盖 loaded 中未过滤的 daily
+            "stocks": stocks_data,
+            "daily": daily_data,
             "config": self.config or {},
         }
 
@@ -249,9 +258,18 @@ class BacktestEngine:
         if not recommendations or not isinstance(recommendations, list):
             return {"recommendations": [], "summary": self._empty_summary()}
 
+        # 截断前统计
+        total_qualifying = len(recommendations)
         recommendations = recommendations[:MAX_RECOMMENDATIONS]
         recommendations = self._track_performance(recommendations, cutoff_date, track_days)
         summary = self._calculate_summary(recommendations, track_days)
+
+        # 写入板块统计
+        summary["total_qualifying"] = total_qualifying
+        summary["base_stock_count"] = base_stock_count
+        summary["pick_rate"] = round(
+            total_qualifying / base_stock_count, 6
+        ) if base_stock_count > 0 else 0.0
 
         return {"recommendations": recommendations, "summary": summary}
 
