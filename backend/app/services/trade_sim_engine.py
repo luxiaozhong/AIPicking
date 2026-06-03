@@ -6,6 +6,7 @@
 """
 
 from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -88,6 +89,7 @@ class TradeSimEngine:
                 daily=daily,
                 stop_factors=stop_factors,
                 max_hold_days=max_hold_days,
+                cutoff_date=cutoff_date,
             )
             trades.append(trade)
 
@@ -124,7 +126,11 @@ class TradeSimEngine:
         return recommendations[:top_n]
 
     def _load_tracking_data(self, ts_codes: List[str], cutoff_date: str) -> dict:
-        """加载截止日后所有日线数据（用于追踪）"""
+        """加载截止日后所有日线数据（含30日历史用于MA等指标计算）"""
+        # 往前取30天用于MA10等需要历史数据的指标
+        cutoff_dt = datetime.strptime(cutoff_date, "%Y%m%d")
+        pre_date = (cutoff_dt - timedelta(days=40)).strftime("%Y%m%d")
+
         session = _get_db()
         try:
             stmt = select(
@@ -132,7 +138,7 @@ class TradeSimEngine:
                 Daily.low, Daily.close, Daily.adj_close, Daily.vol, Daily.amount,
             ).where(
                 Daily.ts_code.in_(ts_codes),
-                Daily.trade_date > cutoff_date,
+                Daily.trade_date > pre_date,
             ).order_by(Daily.ts_code, Daily.trade_date)
 
             rows = [dict(row._mapping) for row in session.execute(stmt)]
@@ -165,8 +171,13 @@ class TradeSimEngine:
         daily: list,
         stop_factors: list,
         max_hold_days: int,
+        cutoff_date: str = "",
     ) -> dict:
-        """模拟单只股票的一笔交易"""
+        """模拟单只股票的一笔交易
+
+        daily 包含截止日前约30天+截止日后所有日线数据。
+        买入日为 daily 中第一个 trade_date > cutoff_date 的交易日。
+        """
 
         # 构建基础 trade 对象
         trade = {
@@ -192,8 +203,18 @@ class TradeSimEngine:
             trade["sell_reason"] = "数据缺失（无后续日线）"
             return trade
 
-        # a. 买入日 = 截止日后第一个交易日
-        buy_day = daily[0]
+        # a. 找到买入日：daily 中第一个 trade_date > cutoff_date 的交易日
+        buy_idx = None
+        for idx, d in enumerate(daily):
+            if d["trade_date"] > cutoff_date:
+                buy_idx = idx
+                break
+
+        if buy_idx is None:
+            trade["sell_reason"] = "数据缺失（无后续日线）"
+            return trade
+
+        buy_day = daily[buy_idx]
         buy_price = buy_day.get("open")
         if buy_price is None or buy_price <= 0:
             trade["sell_reason"] = "数据缺失（无开盘价）"
@@ -213,9 +234,12 @@ class TradeSimEngine:
             if sf.get("enabled") and sf.get("id")
         ]
 
-        # c. 逐日循环
+        # c. 逐日循环（从买入日开始，i 为 absolute index，hold_i 为持仓天数0-based）
         triggered = False
-        for i, day in enumerate(daily):
+        for i in range(buy_idx, len(daily)):
+            day = daily[i]
+            hold_i = i - buy_idx
+
             close_price = _get_price(day)
             open_price = day.get("open")
             day_high = day.get("high")
@@ -230,7 +254,7 @@ class TradeSimEngine:
             if day_low is not None and day_low < low_price:
                 low_price = day_low
 
-            # 计算 MA10（需要至少 10 天数据）
+            # 计算 MA10（i 为 absolute index，从第0天起算；买入日前已有历史数据）
             ma10 = None
             if i >= 9:
                 ma10_closes = []
@@ -280,7 +304,7 @@ class TradeSimEngine:
                         # 从买入日到当天的 slice
                         result = check_fn(
                             daily[: i + 1],
-                            {"buy_price": buy_price, "buy_date": trade["buy_date"], "buy_idx": 0},
+                            {"buy_price": buy_price, "buy_date": trade["buy_date"], "buy_idx": buy_idx},
                             params,
                         )
                         if result is not None:
@@ -298,7 +322,7 @@ class TradeSimEngine:
                             trade["sell_price"] = sell_price
                             trade["sell_date"] = sell_date
                             trade["sell_reason"] = result.reason
-                            trade["hold_days"] = i + 1
+                            trade["hold_days"] = hold_i + 1
                             trade["return_pct"] = round((sell_price - buy_price) / buy_price * 100, 2)
                             tracking_record["status"] = "stopped" if "止损" in result.reason else "take_profit"
                             break
@@ -306,14 +330,14 @@ class TradeSimEngine:
                         continue
 
             # 强制平仓检查
-            if not triggered and i + 1 >= max_hold_days:
+            if not triggered and hold_i + 1 >= max_hold_days:
                 triggered = True
                 sell_price = close_price
                 sell_date = day["trade_date"]
                 trade["sell_price"] = sell_price
                 trade["sell_date"] = sell_date
                 trade["sell_reason"] = f"强制平仓（持有超过{max_hold_days}天）"
-                trade["hold_days"] = i + 1
+                trade["hold_days"] = hold_i + 1
                 trade["return_pct"] = round((sell_price - buy_price) / buy_price * 100, 2)
                 tracking_record["status"] = "force_close"
 
