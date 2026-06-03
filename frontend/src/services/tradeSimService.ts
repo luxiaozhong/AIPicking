@@ -56,6 +56,10 @@ export const tradeSimService = {
     const response = await api.get<BatchTradeSimReport>(`${BASE}/batch/${id}`);
     return response.data;
   },
+
+  async deleteBatch(id: number): Promise<void> {
+    await api.delete(`${BASE}/batch/${id}`);
+  },
 };
 
 export default tradeSimService;

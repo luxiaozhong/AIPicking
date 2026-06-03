@@ -8,7 +8,7 @@ import StatusTag from '@/components/shared/StatusTag';
 import ReturnLabel from '@/components/shared/ReturnLabel';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import { tradeSimService } from '@/services/tradeSimService';
-import type { TradeSimReport } from '@/types/tradeSim';
+import type { TradeSimReport, BatchTradeSimReport } from '@/types/tradeSim';
 
 export default function BacktestList() {
   const navigate = useNavigate();
@@ -28,7 +28,7 @@ export default function BacktestList() {
 
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [stockSearch, setStockSearch] = useState<string>('');
-  const [listMode, setListMode] = useState<'simple' | 'trade-sim'>('simple');
+  const [listMode, setListMode] = useState<'simple' | 'trade-sim' | 'batch-trade-sim'>('simple');
 
   // 交易模拟列表
   const [tradeSims, setTradeSims] = useState<TradeSimReport[]>([]);
@@ -36,6 +36,13 @@ export default function BacktestList() {
   const [tsPage, setTsPage] = useState(1);
   const [tsLimit, setTsLimit] = useState(20);
   const [tsLoading, setTsLoading] = useState(false);
+
+  // 批量交易模拟列表
+  const [batchTs, setBatchTs] = useState<BatchTradeSimReport[]>([]);
+  const [btsTotal, setBtsTotal] = useState(0);
+  const [btsPage, setBtsPage] = useState(1);
+  const [btsLimit, setBtsLimit] = useState(20);
+  const [btsLoading, setBtsLoading] = useState(false);
 
   const doSearch = (stock: string) => {
     fetchBacktests({ page: 1, status: statusFilter, stock: stock || undefined });
@@ -73,8 +80,29 @@ export default function BacktestList() {
   useEffect(() => {
     if (listMode === 'trade-sim') {
       fetchTradeSims();
+    } else if (listMode === 'batch-trade-sim') {
+      fetchBatchTradeSims();
     }
   }, [listMode]);
+
+  // 批量交易模拟列表
+  const fetchBatchTradeSims = async (params?: { page?: number; limit?: number }) => {
+    setBtsLoading(true);
+    try {
+      const res = await tradeSimService.getBatchList({
+        page: params?.page || btsPage,
+        limit: params?.limit || btsLimit,
+      });
+      setBatchTs(res.items);
+      setBtsTotal(res.total);
+      setBtsPage(res.page);
+      setBtsLimit(res.limit);
+    } catch {
+      // handled by user
+    } finally {
+      setBtsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (error) {
@@ -226,6 +254,66 @@ export default function BacktestList() {
     },
   ];
 
+  const btsColumns = [
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
+    {
+      title: '名称', dataIndex: 'name', key: 'name',
+      render: (text: string, record: BatchTradeSimReport) => (
+        <Button type="link" onClick={() => navigate(`/backtests/trade-sim/batch/${record.id}`)}>
+          {text || `批量 #${record.id}`}
+        </Button>
+      ),
+    },
+    {
+      title: '日期范围', key: 'date_range', width: 200,
+      render: (_: unknown, record: BatchTradeSimReport) =>
+        `${record.start_date} ~ ${record.end_date}`,
+    },
+    {
+      title: '状态', dataIndex: 'status', key: 'status', width: 90,
+      render: (status: string) => <StatusTag status={status} type="backtest" />,
+    },
+    {
+      title: '进度', key: 'progress', width: 100,
+      render: (_: unknown, record: BatchTradeSimReport) =>
+        `${record.completed_days || 0} / ${record.total_days || 0}`,
+    },
+    {
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 170,
+    },
+    {
+      title: '操作', key: 'action', width: 120,
+      render: (_: unknown, record: BatchTradeSimReport) => (
+        <Space size="small">
+          <Button type="link" size="small" onClick={() => navigate(`/backtests/trade-sim/batch/${record.id}`)}>
+            查看
+          </Button>
+          <Popconfirm
+            title="确定删除？"
+            onConfirm={async () => {
+              try {
+                await tradeSimService.deleteBatch(record.id);
+                message.success('已删除');
+                fetchBatchTradeSims();
+              } catch {
+                message.error('删除失败');
+              }
+            }}
+            okText="确定" cancelText="取消"
+          >
+            <Button type="link" size="small" danger>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  const refreshCurrent = () => {
+    if (listMode === 'simple') fetchBacktests();
+    else if (listMode === 'trade-sim') fetchTradeSims();
+    else fetchBatchTradeSims();
+  };
+
   return (
     <>
       <PageHeader
@@ -233,7 +321,7 @@ export default function BacktestList() {
         extra={
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => listMode === 'simple' ? fetchBacktests() : fetchTradeSims()}
+            onClick={refreshCurrent}
           >
             刷新
           </Button>
@@ -245,6 +333,7 @@ export default function BacktestList() {
           <Radio.Group value={listMode} onChange={(e) => setListMode(e.target.value)}>
             <Radio.Button value="simple">简单回测</Radio.Button>
             <Radio.Button value="trade-sim">交易模拟</Radio.Button>
+            <Radio.Button value="batch-trade-sim">批量交易模拟</Radio.Button>
           </Radio.Group>
           <Space>
             <span>状态筛选：</span>
@@ -254,7 +343,7 @@ export default function BacktestList() {
                 setStatusFilter(v);
                 if (listMode === 'simple') {
                   fetchBacktests({ page: 1, status: v, stock: stockSearch || undefined });
-                } else {
+                } else if (listMode === 'trade-sim') {
                   fetchTradeSims({ page: 1, status: v });
                 }
               }}
@@ -287,7 +376,7 @@ export default function BacktestList() {
           )}
         </div>
 
-        {listMode === 'simple' ? (
+        {listMode === 'simple' && (
           <Table
             dataSource={backtests}
             columns={columns}
@@ -303,7 +392,8 @@ export default function BacktestList() {
               showTotal: (t: number) => `共 ${t} 条`,
             }}
           />
-        ) : (
+        )}
+        {listMode === 'trade-sim' && (
           <Table
             dataSource={tradeSims}
             columns={tsColumns}
@@ -315,6 +405,23 @@ export default function BacktestList() {
               pageSize: tsLimit,
               total: tsTotal,
               onChange: (p, l) => fetchTradeSims({ page: p, limit: l }),
+              showSizeChanger: true,
+              showTotal: (t: number) => `共 ${t} 条`,
+            }}
+          />
+        )}
+        {listMode === 'batch-trade-sim' && (
+          <Table
+            dataSource={batchTs}
+            columns={btsColumns}
+            rowKey="id"
+            loading={btsLoading}
+            scroll={{ x: 800 }}
+            pagination={{
+              current: btsPage,
+              pageSize: btsLimit,
+              total: btsTotal,
+              onChange: (p, l) => fetchBatchTradeSims({ page: p, limit: l }),
               showSizeChanger: true,
               showTotal: (t: number) => `共 ${t} 条`,
             }}
