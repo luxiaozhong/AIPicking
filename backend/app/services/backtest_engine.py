@@ -210,10 +210,11 @@ class BacktestEngine:
             return any(ts_code.startswith(prefix) for prefix in board_filter)
 
         filtered_stocks = [s for s in stocks_data if _matches_board(s["ts_code"])]
-        filtered_codes = {s["ts_code"] for s in filtered_stocks}
+        # daily_data 按板块前缀独立过滤，不依赖 stocks_data
+        # （daily 表包含退市/摘牌股票，这些股票不在 stocks 表但策略仍需要）
         filtered_daily = {
             code: rows for code, rows in daily_data.items()
-            if code in filtered_codes
+            if _matches_board(code)
         }
 
         return filtered_stocks, filtered_daily, len(filtered_stocks)
