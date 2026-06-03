@@ -319,6 +319,10 @@ class TradeSimEngine:
 
             trade["daily_tracking"].append(tracking_record)
 
+            # 触发止损/止盈/强制平仓后，停止追踪（持仓已平仓）
+            if triggered:
+                break
+
         # 更新极值
         trade["high_price"] = round(high_price, 2)
         trade["low_price"] = round(low_price, 2)
