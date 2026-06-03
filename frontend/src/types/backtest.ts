@@ -23,6 +23,9 @@ export interface BacktestSummary {
   win_rate_15d: number;
   best_return_15d: number;
   worst_return_15d: number;
+  total_qualifying: number;
+  base_stock_count: number;
+  pick_rate: number;
 }
 
 export interface BacktestReport {
