@@ -151,6 +151,7 @@ export default function KLineChart({ data, loading, height = 500, buyMarker, sel
           yAxisIndex: 0,
           smooth: true,
           lineStyle: { color: m.color, width: 1 },
+          itemStyle: { color: m.color },
           symbol: 'none' as const,
         })),
         {
