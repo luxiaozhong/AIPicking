@@ -166,10 +166,10 @@ export default function TradeSimDetail() {
       <PageHeader
         title="交易模拟回测详情"
         breadcrumb={[
-          { title: '回测报告', path: '/backtests' },
+          { title: '交易模拟报告', path: '/backtests/trade-sim' },
           { title: `交易模拟 #${report.id}` },
         ]}
-        extra={<Button onClick={() => navigate('/backtests')}>返回列表</Button>}
+        extra={<Button onClick={() => navigate('/backtests/trade-sim')}>返回列表</Button>}
       />
 
       <Card style={{ marginBottom: 16 }}>
