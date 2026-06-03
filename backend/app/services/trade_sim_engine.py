@@ -299,9 +299,8 @@ class TradeSimEngine:
                     coeff = params.get("coefficient", 0.93)
                     tracking_record["ma10_stop_line"] = round(ma10 * coeff, 4)
 
-            # 检查止损止盈（买入当天 hold_i==0 不检查，避免买入前已存在的
-            # 历史价格关系（如破前低）在买入瞬间就触发止损，导致正收益+止损的矛盾结果）
-            if not triggered and hold_i > 0:
+            # 检查止损止盈（含买入当天：若买入日持续暴跌破位，次日止损卖出）
+            if not triggered:
                 for sf in enabled_factors:
                     fid = sf.get("id")
                     params = sf.get("params", {})
