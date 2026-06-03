@@ -10,7 +10,6 @@ import ReturnComparisonChart from '@/components/charts/ReturnComparisonChart';
 import WinRateDonutChart from '@/components/charts/WinRateDonutChart';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import type { BatchBacktestReport, DailyResultItem, RecommendationItem, BacktestSummary } from '@/types/backtest';
-import ReactECharts from 'echarts-for-react';
 import type { KLineItem } from '@/types/stock';
 import { useKLineData } from '@/hooks/useKLineData';
 
@@ -39,27 +38,9 @@ function DailyTrackingPanel({ ts_code, cutoffDate }: { ts_code: string; cutoffDa
     { title: '成交量', dataIndex: 'vol', key: 'vol', width: 100, render: (v: number) => (v / 10000).toFixed(0) + '万' },
   ];
 
-  const chartOption = {
-    tooltip: { trigger: 'axis' },
-    grid: { left: 50, right: 20, top: 10, bottom: 30 },
-    xAxis: {
-      type: 'category',
-      data: trackedItems.map((d: KLineItem) => d.trade_date.slice(5)),
-      axisLabel: { fontSize: 10 },
-    },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-    series: [{
-      type: 'line',
-      data: trackedItems.map((d: KLineItem) => d.close),
-      smooth: true,
-      lineStyle: { width: 2 },
-      itemStyle: { color: '#1677ff' },
-    }],
-  };
-
   return (
     <div style={{ padding: 16 }}>
-      <Card size="small" title={`每日追踪 — 截止日 ${cutoffDateStr}`} style={{ marginBottom: 12 }}>
+      <Card size="small" title={`每日追踪 — 截止日 ${cutoffDateStr}`}>
         <Table
           dataSource={trackedItems}
           columns={trackingCols}
@@ -69,7 +50,6 @@ function DailyTrackingPanel({ ts_code, cutoffDate }: { ts_code: string; cutoffDa
           scroll={{ x: 600 }}
         />
       </Card>
-      <ReactECharts option={chartOption} style={{ height: 200 }} />
     </div>
   );
 }

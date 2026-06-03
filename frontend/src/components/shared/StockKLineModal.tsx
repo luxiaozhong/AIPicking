@@ -8,6 +8,10 @@ interface StockKLineModalProps {
   open: boolean;
   onClose: () => void;
   days?: number;
+  buyDate?: string;
+  buyPrice?: number;
+  sellDate?: string;
+  sellPrice?: number;
 }
 
 export default function StockKLineModal({
@@ -16,6 +20,10 @@ export default function StockKLineModal({
   open,
   onClose,
   days = 365,
+  buyDate,
+  buyPrice,
+  sellDate,
+  sellPrice,
 }: StockKLineModalProps) {
   const { data, loading, error } = useKLineData(open ? ts_code : null, days);
 
@@ -34,7 +42,13 @@ export default function StockKLineModal({
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
-      <KLineChart data={data?.items ?? []} loading={loading} height={520} />
+      <KLineChart
+        data={data?.items ?? []}
+        loading={loading}
+        height={520}
+        buyMarker={buyDate && buyPrice != null ? { date: buyDate, price: buyPrice } : undefined}
+        sellMarker={sellDate && sellPrice != null ? { date: sellDate, price: sellPrice } : undefined}
+      />
     </Modal>
   );
 }

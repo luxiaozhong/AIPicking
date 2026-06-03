@@ -3,10 +3,18 @@ import type { EChartsOption } from 'echarts';
 import EChartsWrapper from '@/components/charts/EChartsWrapper';
 import type { KLineItem } from '@/types/stock';
 
+export interface TradeMarker {
+  date: string;
+  price: number;
+  label?: string;
+}
+
 interface KLineChartProps {
   data: KLineItem[];
   loading?: boolean;
   height?: number;
+  buyMarker?: TradeMarker;
+  sellMarker?: TradeMarker;
 }
 
 function calcMA(data: number[], period: number): (number | null)[] {
@@ -29,7 +37,7 @@ const MA_LINES = [
   { period: 60, name: 'MA60', color: '#1e88e5' },
 ] as const;
 
-export default function KLineChart({ data, loading, height = 500 }: KLineChartProps) {
+export default function KLineChart({ data, loading, height = 500, buyMarker, sellMarker }: KLineChartProps) {
   const option: EChartsOption = useMemo(() => {
     if (!data.length) return {};
 
@@ -37,6 +45,35 @@ export default function KLineChart({ data, loading, height = 500 }: KLineChartPr
     const ohlc = data.map((d) => [d.open, d.close, d.low, d.high]);
     const volumes = data.map((d) => d.vol);
     const closes = data.map((d) => d.close);
+
+    // 规范化日期为 YYYY-MM-DD
+    const normDate = (d: string) => d.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+
+    // 构建买卖标记（使用 as const 确保类型兼容 ECharts）
+    const buyMark = buyMarker ? {
+      name: buyMarker.label || '买入',
+      coord: [normDate(buyMarker.date), buyMarker.price] as [string, number],
+      value: '买',
+      symbol: 'arrow' as const,
+      symbolRotate: 180,
+      symbolSize: 14,
+      symbolOffset: [0, -10] as [number, number],
+      itemStyle: { color: '#ef5350' },
+      label: { show: true, fontSize: 11, fontWeight: 'bold' as const, color: '#ef5350', formatter: `买\n${buyMarker.price.toFixed(2)}` },
+    } : null;
+
+    const sellMark = sellMarker ? {
+      name: sellMarker.label || '卖出',
+      coord: [normDate(sellMarker.date), sellMarker.price] as [string, number],
+      value: '卖',
+      symbol: 'arrow' as const,
+      symbolSize: 14,
+      symbolOffset: [0, 10] as [number, number],
+      itemStyle: { color: '#26a69a' },
+      label: { show: true, fontSize: 11, fontWeight: 'bold' as const, color: '#26a69a', formatter: `卖\n${sellMarker.price.toFixed(2)}` },
+    } : null;
+
+    const markPointData = [buyMark, sellMark].filter((x): x is NonNullable<typeof x> => x != null);
 
     return {
       tooltip: {
@@ -104,6 +141,7 @@ export default function KLineChart({ data, loading, height = 500 }: KLineChartPr
             borderColor: '#ef5350',
             borderColor0: '#26a69a',
           },
+          ...(markPointData.length > 0 ? { markPoint: { data: markPointData, symbolOffset: [0, 0] } } : {}),
         },
         ...MA_LINES.map((m) => ({
           name: m.name,
@@ -130,7 +168,7 @@ export default function KLineChart({ data, loading, height = 500 }: KLineChartPr
         },
       ],
     };
-  }, [data]);
+  }, [data, buyMarker, sellMarker]);
 
   return <EChartsWrapper options={option} loading={loading} height={height} empty={!data.length} />;
 }
