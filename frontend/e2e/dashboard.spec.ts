@@ -12,7 +12,7 @@ test.describe('仪表盘', () => {
 
     // 统计卡片（Statistic 组件在 Row > Col > Card 中，用 .first() 避免匹配到"快速入门"中的文字）
     await expect(page.locator('.ant-statistic').filter({ hasText: '策略管理' }).first()).toBeVisible();
-    await expect(page.locator('.ant-statistic').filter({ hasText: '回测报告' }).first()).toBeVisible();
+    await expect(page.locator('.ant-statistic').filter({ hasText: '简单回测' }).first()).toBeVisible();
     await expect(page.locator('.ant-statistic').filter({ hasText: '已完成回测' }).first()).toBeVisible();
     await expect(page.locator('.ant-statistic').filter({ hasText: '15天胜率' }).first()).toBeVisible();
 
@@ -28,11 +28,11 @@ test.describe('仪表盘', () => {
     await expect(page.getByRole('heading', { name: '策略管理' })).toBeVisible();
   });
 
-  test('应能从仪表盘导航到回测报告', async ({ page }) => {
-    const backtestCard = page.locator('.ant-card').filter({ hasText: '回测报告' }).first();
+  test('应能从仪表盘导航到简单回测', async ({ page }) => {
+    const backtestCard = page.locator('.ant-card').filter({ hasText: '简单回测' }).first();
     await backtestCard.click();
     await page.waitForURL('**/backtests');
-    await expect(page.getByRole('heading', { name: '回测报告' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '简单回测' })).toBeVisible();
   });
 
   test('应能通过快捷操作进入策略构建器', async ({ page }) => {

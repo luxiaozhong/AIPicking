@@ -7,20 +7,30 @@ test.describe('批量回测功能', () => {
   });
 
   // ============================================================
-  // 批量回测列表页
+  // 批量回测列表页（现已合并到简单回测页面）
   // ============================================================
 
-  test('应能加载批量回测列表页', async ({ page }) => {
-    await page.goto('/backtests/batch');
+  test('应能加载简单回测页并切换到批量回测', async ({ page }) => {
+    await page.goto('/backtests');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('heading', { name: '批量回测' })).toBeVisible({ timeout: 10000 });
+    // 统一页面标题为"简单回测"
+    await expect(page.getByRole('heading', { name: '简单回测' })).toBeVisible({ timeout: 10000 });
+
+    // 切换到批量回测 tab
+    await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
+    await page.waitForTimeout(300);
+
     await expect(page.locator('.ant-table')).toBeVisible();
   });
 
   test('应显示批量回测表格列', async ({ page }) => {
-    await page.goto('/backtests/batch');
+    await page.goto('/backtests');
     await page.waitForLoadState('networkidle');
+
+    // 切换到批量回测 tab
+    await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
+    await page.waitForTimeout(300);
 
     const tableHeader = page.locator('.ant-table-thead');
     await expect(tableHeader).toBeVisible();
@@ -32,18 +42,22 @@ test.describe('批量回测功能', () => {
     await expect(tableHeader.getByText('操作')).toBeVisible();
   });
 
-  test('应能通过侧边栏导航到批量回测', async ({ page }) => {
+  test('应能通过侧边栏导航到简单回测', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
 
-    await navigateViaSidebar(page, '批量回测');
-    await expect(page).toHaveURL(/\/backtests\/batch/);
-    await expect(page.getByRole('heading', { name: '批量回测' })).toBeVisible();
+    await navigateViaSidebar(page, '简单回测');
+    await expect(page).toHaveURL(/\/backtests/);
+    await expect(page.getByRole('heading', { name: '简单回测' })).toBeVisible();
   });
 
   test('应能按策略筛选批量回测', async ({ page }) => {
-    await page.goto('/backtests/batch');
+    await page.goto('/backtests');
     await page.waitForLoadState('networkidle');
+
+    // 切换到批量回测 tab
+    await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
+    await page.waitForTimeout(300);
 
     const strategySelect = page.locator('.ant-select').filter({ hasText: '按策略筛选' });
     await expect(strategySelect).toBeVisible();
@@ -62,7 +76,7 @@ test.describe('批量回测功能', () => {
   });
 
   // ============================================================
-  // 批量回测表单 — 模式切换
+  // 批量回测表单 — 模式切换（BacktestForm 页面内部）
   // ============================================================
 
   test.describe('回测表单 - 批量模式', () => {
@@ -108,7 +122,6 @@ test.describe('批量回测功能', () => {
         return;
       }
 
-      // Ant Design Radio.Button 渲染为 .ant-radio-button-wrapper，底层 input 是 hidden
       const singleRadio = page.locator('.ant-radio-button-wrapper').filter({ hasText: '单日回测' });
       const batchRadio = page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' });
 
@@ -127,7 +140,7 @@ test.describe('批量回测功能', () => {
       const singleRadio = page.locator('.ant-radio-button-wrapper-checked').filter({ hasText: '单日回测' });
       await expect(singleRadio).toBeVisible({ timeout: 5000 });
 
-      // 验证标签 "截止日" 存在（Ant Design 表单的 label）
+      // 验证标签 "截止日" 存在
       await expect(page.locator('.ant-form-item').filter({ hasText: '截止日' }).first()).toBeVisible();
     });
 
@@ -138,7 +151,7 @@ test.describe('批量回测功能', () => {
         return;
       }
 
-      // 切换到批量模式 — 点击可见的 label 包装元素
+      // 切换到批量模式
       await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
       await page.waitForTimeout(300);
 
@@ -163,7 +176,7 @@ test.describe('批量回测功能', () => {
       await page.locator('.ant-radio-button-wrapper').filter({ hasText: '单日回测' }).click();
       await page.waitForTimeout(300);
 
-      // 应恢复截止日选择器（用 label exact 匹配避免"追踪推荐股票在截止日后的涨跌表现"干扰）
+      // 应恢复截止日选择器
       await expect(page.locator('label.ant-form-item-required').filter({ hasText: '截止日' })).toBeVisible();
       await expect(page.locator('label').filter({ hasText: '日期范围' })).not.toBeVisible();
     });
@@ -204,7 +217,7 @@ test.describe('批量回测功能', () => {
       await expect(page.getByText('7天')).toBeVisible();
       await expect(page.getByText('15天')).toBeVisible();
 
-      // 切换到批量模式 — 使用可见的 label 元素
+      // 切换到批量模式
       await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
       await page.waitForTimeout(300);
 
@@ -225,7 +238,7 @@ test.describe('批量回测功能', () => {
       const stockInput = page.locator('input[placeholder*="300328.SZ"]');
       await expect(stockInput).toBeVisible();
 
-      // 切到批量模式 — 使用可见的 label 元素
+      // 切到批量模式
       await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
       await page.waitForTimeout(300);
 
@@ -240,13 +253,15 @@ test.describe('批量回测功能', () => {
 
   test.describe('批量回测详情页', () => {
     test.beforeEach(async ({ page }) => {
-      await page.goto('/backtests/batch');
+      await page.goto('/backtests');
       await page.waitForLoadState('networkidle');
+      // 切换到批量回测 tab
+      await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
       await page.waitForTimeout(2000);
     });
 
     test('应能从列表页点击名称进入详情页', async ({ page }) => {
-      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('a').first();
+      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('.ant-btn-link').first();
 
       if (await firstRowLink.isVisible({ timeout: 5000 }).catch(() => false)) {
         await firstRowLink.click();
@@ -261,7 +276,7 @@ test.describe('批量回测功能', () => {
     });
 
     test('详情页应显示基本信息', async ({ page }) => {
-      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('a').first();
+      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('.ant-btn-link').first();
 
       if (!(await firstRowLink.isVisible({ timeout: 5000 }).catch(() => false))) {
         test.skip(true, '没有批量回测数据');
@@ -283,7 +298,7 @@ test.describe('批量回测功能', () => {
     });
 
     test('详情页应有返回列表按钮', async ({ page }) => {
-      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('a').first();
+      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('.ant-btn-link').first();
 
       if (!(await firstRowLink.isVisible({ timeout: 5000 }).catch(() => false))) {
         test.skip(true, '没有批量回测数据');
@@ -298,12 +313,11 @@ test.describe('批量回测功能', () => {
       await expect(backBtn).toBeVisible();
 
       await backBtn.click();
-      await expect(page).toHaveURL(/\/backtests\/batch(?!\/\d+)/, { timeout: 10000 });
+      // 返回简单回测页
+      await expect(page).toHaveURL(/\/backtests(?!\/\w)/, { timeout: 10000 });
     });
 
     test('已完成的批量回测应显示每日结果折叠面板', async ({ page }) => {
-      const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('a').first();
-
       // 先检查列表里是否有已完成的报告
       const completedRow = page.locator('.ant-table-tbody tr').filter({ hasText: '已完成' }).first();
       const hasCompleted = await completedRow.isVisible({ timeout: 3000 }).catch(() => false);
@@ -314,7 +328,7 @@ test.describe('批量回测功能', () => {
       }
 
       // 点击已完成的报告
-      const completedLink = completedRow.locator('a').first();
+      const completedLink = completedRow.locator('.ant-btn-link').first();
       await completedLink.click();
       await page.waitForURL(/\/backtests\/batch\/\d+/, { timeout: 10000 });
       await page.waitForLoadState('networkidle');
@@ -337,8 +351,10 @@ test.describe('批量回测功能', () => {
 
   test.describe('删除批量回测', () => {
     test.beforeEach(async ({ page }) => {
-      await page.goto('/backtests/batch');
+      await page.goto('/backtests');
       await page.waitForLoadState('networkidle');
+      // 切换到批量回测 tab
+      await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
       await page.waitForTimeout(2000);
     });
 
@@ -396,21 +412,23 @@ test.describe('批量回测功能', () => {
   // 导航联动测试
   // ============================================================
 
-  test('侧边栏高亮 - 批量回测页应高亮对应菜单项', async ({ page }) => {
-    await page.goto('/backtests/batch');
+  test('侧边栏高亮 - 简单回测页应高亮对应菜单项', async ({ page }) => {
+    await page.goto('/backtests');
     await page.waitForLoadState('networkidle');
 
     const activeMenuItem = page.locator('.ant-menu-item-selected');
     await expect(activeMenuItem).toBeVisible({ timeout: 5000 });
-    await expect(activeMenuItem.filter({ hasText: '批量回测' })).toBeVisible();
+    await expect(activeMenuItem.filter({ hasText: '简单回测' })).toBeVisible();
   });
 
-  test('侧边栏高亮 - 批量回测详情页也应高亮批量回测菜单', async ({ page }) => {
-    await page.goto('/backtests/batch');
+  test('侧边栏高亮 - 批量回测详情页也应高亮简单回测菜单', async ({ page }) => {
+    await page.goto('/backtests');
     await page.waitForLoadState('networkidle');
+    // 切换到批量回测 tab
+    await page.locator('.ant-radio-button-wrapper').filter({ hasText: '批量回测' }).click();
     await page.waitForTimeout(2000);
 
-    const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('a').first();
+    const firstRowLink = page.locator('.ant-table-tbody tr').first().locator('.ant-btn-link').first();
     if (!(await firstRowLink.isVisible({ timeout: 5000 }).catch(() => false))) {
       test.skip(true, '没有批量回测数据');
       return;
@@ -420,16 +438,19 @@ test.describe('批量回测功能', () => {
     await page.waitForURL(/\/backtests\/batch\/\d+/, { timeout: 10000 });
     await page.waitForLoadState('networkidle');
 
-    // 侧边栏高亮仍应为"批量回测"
+    // 侧边栏高亮应为"简单回测"
     const activeMenuItem = page.locator('.ant-menu-item-selected');
-    await expect(activeMenuItem.filter({ hasText: '批量回测' })).toBeVisible({ timeout: 5000 });
+    await expect(activeMenuItem.filter({ hasText: '简单回测' })).toBeVisible({ timeout: 5000 });
   });
 
-  test('批量回测不应破坏单日回测页面的功能', async ({ page }) => {
+  test('简单回测页应默认为单策略回测 tab', async ({ page }) => {
     await page.goto('/backtests');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('heading', { name: '回测报告' })).toBeVisible({ timeout: 10000 });
+    // 默认选中"单策略回测"
+    const singleRadio = page.locator('.ant-radio-button-wrapper-checked').filter({ hasText: '单策略回测' });
+    await expect(singleRadio).toBeVisible({ timeout: 5000 });
+
     await expect(page.locator('.ant-table')).toBeVisible();
   });
 });

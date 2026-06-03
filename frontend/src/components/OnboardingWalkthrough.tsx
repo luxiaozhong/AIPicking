@@ -61,7 +61,7 @@ const STEPS: StepDef[] = [
     key: 'sidebar',
     title: '功能导航',
     description:
-      '左侧导航栏汇集了所有功能：仪表盘、学习中心、策略管理、回测报告和批量回测。点击即可切换。',
+      '左侧导航栏汇集了所有功能：仪表盘、学习中心、策略管理、简单回测和交易模拟。点击即可切换。',
     target: () => qs('.ant-layout-sider'),
     page: null,
   },
@@ -86,7 +86,7 @@ const STEPS: StepDef[] = [
     title: '回测验证',
     description:
       '策略创建完成后，在这里提交回测任务，验证策略在历史数据上的表现。支持单策略回测和批量多日期回测。',
-    target: () => menuItemByText('回测报告'),
+    target: () => menuItemByText('简单回测'),
     page: null,
   },
   {

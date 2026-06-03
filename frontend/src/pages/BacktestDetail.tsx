@@ -80,7 +80,7 @@ export default function BacktestDetail() {
       <PageHeader
         title="回测报告详情"
         breadcrumb={[
-          { title: '回测报告', path: '/backtests' },
+          { title: '简单回测', path: '/backtests' },
           { title: bt?.name || `报告 #${bt?.id}` },
         ]}
         extra={

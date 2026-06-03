@@ -9,7 +9,7 @@ test.describe('回测功能', () => {
   });
 
   test('应能正确加载回测列表页', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: '回测报告' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: '简单回测' })).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole('button', { name: '刷新' })).toBeVisible();
     await expect(page.getByText('状态筛选')).toBeVisible();
     await expect(page.locator('.ant-table')).toBeVisible();
@@ -48,13 +48,13 @@ test.describe('回测功能', () => {
     }
   });
 
-  test('应能通过侧边栏导航到回测报告', async ({ page }) => {
+  test('应能通过侧边栏导航到简单回测', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
 
-    await navigateViaSidebar(page, '回测报告');
+    await navigateViaSidebar(page, '简单回测');
     await expect(page).toHaveURL(/\/backtests/);
-    await expect(page.getByRole('heading', { name: '回测报告' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '简单回测' })).toBeVisible();
   });
 
   test('应能从回测页导航到策略页', async ({ page }) => {

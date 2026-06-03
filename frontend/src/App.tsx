@@ -14,7 +14,6 @@ import BacktestForm from '@/pages/BacktestForm';
 import TradeSimList from '@/pages/TradeSimList';
 import TradeSimDetail from '@/pages/TradeSimDetail';
 import BatchTradeSimDetail from '@/pages/BatchTradeSimDetail';
-import BatchBacktestList from '@/pages/BatchBacktestList';
 import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
 import Dashboard from '@/pages/Dashboard';
 import LoginPage from '@/pages/LoginPage';
@@ -128,11 +127,7 @@ const App: React.FC = () => {
         />
         <Route
           path="/backtests/batch"
-          element={
-            <ProtectedRoute>
-              <BatchBacktestList />
-            </ProtectedRoute>
-          }
+          element={<Navigate to="/backtests" replace />}
         />
         <Route
           path="/backtests/batch/:id"

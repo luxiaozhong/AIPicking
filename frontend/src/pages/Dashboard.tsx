@@ -39,7 +39,7 @@ export default function Dashboard() {
       onClick: () => navigate('/strategies'),
     },
     {
-      title: '回测报告',
+      title: '简单回测',
       value: backtests.length,
       icon: <BarChartOutlined style={{ fontSize: 32, color: '#52c41a' }} />,
       onClick: () => navigate('/backtests'),
@@ -104,8 +104,8 @@ export default function Dashboard() {
                 },
                 {
                   icon: <BarChartOutlined style={{ fontSize: 24, color: '#faad14' }} />,
-                  title: '回测报告',
-                  description: '查看历史回测结果、收益曲线和胜率分析。',
+                  title: '简单回测',
+                  description: '查看历史回测结果、收益曲线和胜率分析，支持单策略和批量回测。',
                   path: '/backtests',
                 },
               ].map((action) => (

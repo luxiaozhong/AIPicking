@@ -288,9 +288,8 @@ const UserManagement: React.FC = () => {
             </p>
             <ul style={{ color: '#ff4d4f', marginBottom: 16, paddingLeft: 20 }}>
               <li>策略</li>
-              <li>回测报告</li>
+              <li>回测报告（含批量回测）</li>
               <li>运行记录</li>
-              <li>批量回测报告</li>
               <li>AI 分析任务</li>
             </ul>
             <p>

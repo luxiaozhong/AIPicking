@@ -28,13 +28,15 @@ app/
 ├── main.py          — 入口，CORS，路由注册
 ├── config.py        — 环境变量配置（DEEPSEEK_API_KEY, DATABASE_URL 等）
 ├── database.py      — 异步 SQLAlchemy engine + get_db / async_session
-├── models/          — Strategy, BacktestReport, StrategyRun, AIStrategyTask
-├── api/             — strategies, backtests, factors, ai, auth, users, stocks
+├── models/          — Strategy, BacktestReport, BatchBacktestReport, StrategyRun, AIStrategyTask, TradeSimReport, BatchTradeSimReport
+├── api/             — strategies, backtests, batch_backtests, trade_sims, factors, ai, auth, users, stocks, education
 ├── middleware/       — auth.py (get_current_user, require_admin)
 ├── services/
 │   ├── strategy_service.py      — 策略创建（上传 & factor-config）
 │   ├── backtest_service.py      — 回测编排与生命周期管理
 │   ├── backtest_engine.py       — 策略执行 + 性能跟踪（详见 backtest-engine.md）
+│   ├── trade_sim_engine.py      — 交易模拟引擎（详见 trade-sim.md）
+│   ├── trade_sim_service.py     — 交易模拟编排与生命周期管理
 │   ├── llm_service.py           — DeepSeek API 调用（带 tenacity 重试）
 │   ├── ai_strategy_service.py   — 相似度选股代码生成 + 运行时校验
 │   └── code_generator.py        — 旧版 factor-config 策略代码生成
@@ -43,7 +45,8 @@ app/
     ├── trend/      — Breakout, MA cross, MA support
     ├── volume/     — OBV, turnover, volume ratio
     ├── pattern/    — Engulfing, hammer, morning star
-    └── risk/       — Fixed stop, take profit, trailing stop
+    ├── risk/       — Fixed stop, take profit, trailing stop
+    └── trade_sim_stops.py — 交易模拟止损止盈因子注册表
 ```
 
 ## API Response Format
