@@ -102,9 +102,19 @@ class TradeSimEngine:
         """运行策略选股，按 score 降序取前 N 只"""
         loaded = self._backtest_engine._load_data(cutoff_date)
 
+        stocks_data = loaded["stocks"]
+        daily_data = loaded["daily"]
+
+        # 应用板块过滤
+        filtered_stocks, filtered_daily, _ = self._backtest_engine._apply_board_filter(
+            stocks_data, daily_data
+        )
+
         strategy_input = {
             "cutoff_date": cutoff_date,
             **loaded,
+            "stocks": filtered_stocks,
+            "daily": filtered_daily,
             "config": self.config,
         }
 
