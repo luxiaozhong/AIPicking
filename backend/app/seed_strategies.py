@@ -41,6 +41,12 @@ BUILTIN_STRATEGIES = [
         "tags": "超跌反弹,量价,创业板,科创板,技术面",
     },
     {
+        "name": "Oversold Bounce SS",
+        "description": "主板超跌反弹策略：三阶段信号链捕捉放量急跌后的止跌反弹。仅限上证主板(600/601/603/605)+深证主板(000/001/002/003)。",
+        "file_path": "app/strategies/examples/oversold_bounce_ss.py",
+        "tags": "超跌反弹,量价,上证,深证,主板,技术面",
+    },
+    {
         "name": "动量",
         "description": "",
         "file_path": "app/strategies/examples/auto_20_动量.py",
