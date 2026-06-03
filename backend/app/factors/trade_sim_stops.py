@@ -115,12 +115,15 @@ def _check_stop_ma10_cross(df: list, position: dict, params: dict) -> Optional[T
     coefficient = params.get("coefficient", 0.93)
     buffer_days = params.get("buffer_days", 2)
 
+    buy_idx = position.get("buy_idx", 0)
+
     if len(df) < 9 + buffer_days:  # 至少需要 10 天算 MA10 + 缓冲窗口
         return None
 
-    # 计算最近 buffer_days 天是否都满足条件
+    # 计算最近 buffer_days 天是否都满足条件（从买入日开始，不含买入前的日期）
     consecutive = 0
-    for i in range(len(df) - buffer_days, len(df)):
+    start_check = max(buy_idx, len(df) - buffer_days)
+    for i in range(start_check, len(df)):
         day = df[i]
         close_price = _get_price(day)
         if close_price is None:
