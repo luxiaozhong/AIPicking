@@ -63,6 +63,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       icon: <BarChartOutlined />,
       label: '批量回测',
     },
+    {
+      key: '/backtests/trade-sim',
+      icon: <BarChartOutlined />,
+      label: '交易模拟',
+    },
     ...(isAdmin
       ? [
           {
@@ -76,6 +81,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
   const selectedKey = (() => {
     if (location.pathname.startsWith('/users')) return '/users';
+    if (location.pathname.startsWith('/backtests/trade-sim')) return '/backtests/trade-sim';
     if (location.pathname.startsWith('/backtests/batch')) return '/backtests/batch';
     if (location.pathname.startsWith('/backtests')) return '/backtests';
     if (location.pathname.startsWith('/strategies')) return '/strategies';
