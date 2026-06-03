@@ -8,6 +8,7 @@ import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
 import StatCard from '@/components/shared/StatCard';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import { tradeSimService } from '@/services/tradeSimService';
 import type { TradeSimReport, TradeItem, DailyTrackingItem } from '@/types/tradeSim';
 import ReactECharts from 'echarts-for-react';
@@ -34,6 +35,7 @@ export default function TradeSimDetail() {
   const [report, setReport] = useState<TradeSimReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedStock, setSelectedStock] = useState<TradeItem | null>(null);
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -72,7 +74,12 @@ export default function TradeSimDetail() {
 
   const tradeColumns = [
     { title: '排名', key: 'index', width: 60, render: (_: any, __: any, i: number) => i + 1 },
-    { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 110 },
+    { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 110,
+      render: (code: string, record: TradeItem) => (
+        <a onClick={(e) => { e.stopPropagation(); setSelectedStock(record); }}
+           style={{ cursor: 'pointer', color: '#1677ff', textDecoration: 'underline' }}>{code}</a>
+      ),
+    },
     { title: '股票名称', dataIndex: 'name', key: 'name', width: 100 },
     { title: '分数', dataIndex: 'score', key: 'score', width: 70 },
     { title: '买入价', dataIndex: 'buy_price', key: 'buy_price', width: 80, render: (v: number) => v?.toFixed(2) },
@@ -249,13 +256,19 @@ export default function TradeSimDetail() {
 
       {isPending && (
         <Card>
-          <Spin tip={report.status === 'pending' ? '等待中...' : '执行中...'}>
+          <Spin description={report.status === 'pending' ? '等待中...' : '执行中...'}>
             <div style={{ padding: 60, textAlign: 'center', color: '#999' }}>
               {report.status === 'pending' ? '任务已提交，等待执行...' : '正在模拟交易，请稍候...'}
             </div>
           </Spin>
         </Card>
       )}
+      <StockKLineModal
+        ts_code={selectedStock?.ts_code ?? ''}
+        name={selectedStock?.name}
+        open={!!selectedStock}
+        onClose={() => setSelectedStock(null)}
+      />
     </>
   );
 }

@@ -7,8 +7,9 @@ import PageHeader from '@/components/shared/PageHeader';
 import StatusTag from '@/components/shared/StatusTag';
 import StatCard from '@/components/shared/StatCard';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import { tradeSimService } from '@/services/tradeSimService';
-import type { BatchTradeSimReport, BatchDailyResult, TradeItem } from '@/types/tradeSim';
+import type { BatchTradeSimReport, BatchDailyResult, TradeItem, DailyTrackingItem } from '@/types/tradeSim';
 import ReactECharts from 'echarts-for-react';
 
 const { Text } = Typography;
@@ -33,6 +34,7 @@ export default function BatchTradeSimDetail() {
   const [report, setReport] = useState<BatchTradeSimReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedStock, setSelectedStock] = useState<TradeItem | null>(null);
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -100,7 +102,12 @@ export default function BatchTradeSimDetail() {
     }
 
     const tradeColumns = [
-      { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 110 },
+      { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 110,
+        render: (code: string, trade: TradeItem) => (
+          <a onClick={(e) => { e.stopPropagation(); setSelectedStock(trade); }}
+             style={{ cursor: 'pointer', color: '#1677ff', textDecoration: 'underline' }}>{code}</a>
+        ),
+      },
       { title: '股票名称', dataIndex: 'name', key: 'name', width: 100 },
       { title: '买入价', dataIndex: 'buy_price', key: 'buy_price', width: 80, render: (v: number) => v?.toFixed(2) },
       { title: '卖出价', dataIndex: 'sell_price', key: 'sell_price', width: 80, render: (v: number | null) => v?.toFixed(2) ?? '—' },
@@ -112,6 +119,63 @@ export default function BatchTradeSimDetail() {
       { title: '卖出原因', dataIndex: 'sell_reason', key: 'sell_reason' },
     ];
 
+    const dailyTrackingRender = (trade: TradeItem) => {
+      if (!trade.daily_tracking || trade.daily_tracking.length === 0) {
+        return <Text type="secondary">无追踪数据</Text>;
+      }
+
+      const trackingCols = [
+        { title: '日期', dataIndex: 'date', key: 'date', width: 110 },
+        { title: '开盘', dataIndex: 'open', key: 'open', width: 80, render: (v: number) => v?.toFixed(2) },
+        { title: '收盘', dataIndex: 'close', key: 'close', width: 80, render: (v: number) => v?.toFixed(2) },
+        { title: '最高', dataIndex: 'high', key: 'high', width: 80, render: (v: number) => v?.toFixed(2) },
+        { title: '最低', dataIndex: 'low', key: 'low', width: 80, render: (v: number) => v?.toFixed(2) },
+        { title: 'MA10', dataIndex: 'ma10', key: 'ma10', width: 80, render: (v: number | null) => v?.toFixed(2) ?? '—' },
+        { title: '止损线', dataIndex: 'ma10_stop_line', key: 'ma10_stop_line', width: 80, render: (v: number | null) => v?.toFixed(2) ?? '—' },
+        {
+          title: '浮盈', dataIndex: 'return_pct', key: 'return_pct', width: 90,
+          render: (v: number) => <Text style={{ color: pctColor(v) }}>{formatPct(v)}</Text>,
+        },
+        {
+          title: '状态', dataIndex: 'status', key: 'status', width: 90,
+          render: (v: string) => {
+            const colorMap: Record<string, string> = { holding: '#1677ff', stopped: '#ff4d4f', take_profit: '#52c41a', force_close: '#faad14' };
+            return <Text style={{ color: colorMap[v] || '#999' }}>{v}</Text>;
+          },
+        },
+      ];
+
+      const chartOption = {
+        tooltip: { trigger: 'axis' },
+        grid: { left: 50, right: 20, top: 10, bottom: 30 },
+        xAxis: { type: 'category', data: trade.daily_tracking.map((d: DailyTrackingItem) => d.date.slice(5)), axisLabel: { fontSize: 10 } },
+        yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+        series: [{
+          type: 'line',
+          data: trade.daily_tracking.map((d: DailyTrackingItem) => d.close),
+          smooth: true,
+          lineStyle: { width: 2 },
+          itemStyle: { color: '#1677ff' },
+        }],
+      };
+
+      return (
+        <div style={{ padding: 16 }}>
+          <Card size="small" title="每日追踪" style={{ marginBottom: 12 }}>
+            <Table
+              dataSource={trade.daily_tracking}
+              columns={trackingCols}
+              rowKey="date"
+              pagination={false}
+              size="small"
+              scroll={{ x: 800 }}
+            />
+          </Card>
+          <ReactECharts option={chartOption} style={{ height: 200 }} />
+        </div>
+      );
+    };
+
     return (
       <Table
         dataSource={record.trades}
@@ -120,9 +184,16 @@ export default function BatchTradeSimDetail() {
         pagination={false}
         size="small"
         scroll={{ x: 700 }}
+        expandable={{
+          expandedRowRender: dailyTrackingRender,
+          rowExpandable: (trade: TradeItem) => (trade.daily_tracking?.length || 0) > 0,
+        }}
       />
     );
   };
+
+  // 过滤掉 0 交易的日期
+  const daysWithTrades = dailyResults.filter(d => d.status === 'completed' && (d.trades?.length || 0) > 0);
 
   return (
     <>
@@ -177,10 +248,10 @@ export default function BatchTradeSimDetail() {
         </Card>
       )}
 
-      {report.status === 'completed' && dailyResults.length > 0 && (
-        <Card title={`每日结果（共 ${dailyResults.length} 天）`}>
+      {report.status === 'completed' && daysWithTrades.length > 0 && (
+        <Card title={`每日结果（${daysWithTrades.length} 天有交易）`}>
           <Table
-            dataSource={dailyResults}
+            dataSource={daysWithTrades}
             columns={dayColumns}
             rowKey="cutoff_date"
             pagination={false}
@@ -196,13 +267,19 @@ export default function BatchTradeSimDetail() {
 
       {isPending && (
         <Card>
-          <Spin tip={report.status === 'pending' ? '等待中...' : '执行中...'}>
+          <Spin description={report.status === 'pending' ? '等待中...' : '执行中...'}>
             <div style={{ padding: 60, textAlign: 'center', color: '#999' }}>
               {report.status === 'pending' ? '批量任务已提交，等待执行...' : `正在回测（${report.completed_days}/${report.total_days}）...`}
             </div>
           </Spin>
         </Card>
       )}
+      <StockKLineModal
+        ts_code={selectedStock?.ts_code ?? ''}
+        name={selectedStock?.name}
+        open={!!selectedStock}
+        onClose={() => setSelectedStock(null)}
+      />
     </>
   );
 }
