@@ -9,8 +9,7 @@ import StatCard from '@/components/shared/StatCard';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import { tradeSimService } from '@/services/tradeSimService';
-import type { BatchTradeSimReport, BatchDailyResult, TradeItem, DailyTrackingItem } from '@/types/tradeSim';
-import ReactECharts from 'echarts-for-react';
+import type { BatchTradeSimReport, BatchDailyResult, TradeItem } from '@/types/tradeSim';
 
 const { Text } = Typography;
 
@@ -18,6 +17,16 @@ function formatPct(v: number | null | undefined): string {
   if (v == null) return '—';
   const sign = v > 0 ? '+' : '';
   return `${sign}${v.toFixed(2)}%`;
+}
+
+function formatMoney(v: number | null | undefined): string {
+  if (v == null) return '—';
+  const sign = v > 0 ? '+' : '';
+  const abs = Math.abs(v);
+  if (abs >= 10000) {
+    return `${sign}${(abs / 10000).toFixed(2)}万`;
+  }
+  return `${sign}${abs.toFixed(2)}`;
 }
 
 function pctColor(v: number | null | undefined): string {
@@ -73,27 +82,39 @@ export default function BatchTradeSimDetail() {
   const dailyResults = report.daily_results || [];
   const completedDays = dailyResults.filter(d => d.status === 'completed');
   const totalTrades = completedDays.reduce((sum, d) => sum + (d.summary?.total_trades || 0), 0);
-  const avgWinRate = completedDays.length > 0
-    ? completedDays.reduce((sum, d) => sum + (d.summary?.win_rate || 0), 0) / completedDays.length
-    : 0;
+  const totalWins = completedDays.reduce((sum, d) => sum + (d.summary?.win_count || 0), 0);
+  const overallWinRate = totalTrades > 0 ? (totalWins / totalTrades * 100) : 0;
   const avgReturn = completedDays.length > 0
     ? completedDays.reduce((sum, d) => sum + (d.summary?.avg_return || 0), 0) / completedDays.length
     : 0;
+  const totalPnl = completedDays.reduce((sum, d) => sum + (d.summary?.total_pnl || 0), 0);
+  const avgPnlPerDay = completedDays.length > 0 ? totalPnl / completedDays.length : 0;
 
   const dayColumns = [
     { title: '日期', dataIndex: 'cutoff_date', key: 'cutoff_date', width: 120 },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 100,
+    { title: '状态', dataIndex: 'status', key: 'status', width: 90,
       render: (v: string) => <StatusTag status={v} type="backtest" /> },
-    { title: '交易笔数', key: 'total_trades', width: 100,
+    { title: '交易笔数', key: 'total_trades', width: 90,
       render: (_: any, record: BatchDailyResult) => record.summary?.total_trades ?? '—' },
-    { title: '胜率', key: 'win_rate', width: 90,
+    { title: '胜率', key: 'win_rate', width: 80,
       render: (_: any, record: BatchDailyResult) => record.summary ? `${record.summary.win_rate?.toFixed(1)}%` : '—' },
-    { title: '平均回报率', key: 'avg_return', width: 110,
+    { title: '平均回报率', key: 'avg_return', width: 100,
       render: (_: any, record: BatchDailyResult) => {
         const v = record.summary?.avg_return;
         return v != null ? <Text style={{ color: pctColor(v), fontWeight: 'bold' }}>{formatPct(v)}</Text> : '—';
       }},
-    { title: '错误信息', dataIndex: 'error_message', key: 'error_message' },
+    { title: '入选总数', key: 'total_qualifying', width: 90,
+      render: (_: any, record: BatchDailyResult) => record.summary?.total_qualifying ?? '—' },
+    { title: '基础总股数', key: 'base_stock_count', width: 90,
+      render: (_: any, record: BatchDailyResult) => record.summary?.base_stock_count ?? '—' },
+    { title: '入选率', key: 'pick_rate', width: 80,
+      render: (_: any, record: BatchDailyResult) => record.summary?.pick_rate != null ? `${(record.summary.pick_rate * 100).toFixed(2)}%` : '—' },
+    { title: '当日盈亏', key: 'total_pnl', width: 100,
+      render: (_: any, record: BatchDailyResult) => {
+        const v = record.summary?.total_pnl;
+        return v != null ? <Text style={{ color: pctColor(v), fontWeight: 'bold' }}>{formatMoney(v)}</Text> : '—';
+      }},
+    { title: '错误信息', dataIndex: 'error_message', key: 'error_message', width: 150 },
   ];
 
   const expandedDayRender = (record: BatchDailyResult) => {
@@ -145,23 +166,9 @@ export default function BatchTradeSimDetail() {
         },
       ];
 
-      const chartOption = {
-        tooltip: { trigger: 'axis' },
-        grid: { left: 50, right: 20, top: 10, bottom: 30 },
-        xAxis: { type: 'category', data: trade.daily_tracking.map((d: DailyTrackingItem) => d.date.slice(5)), axisLabel: { fontSize: 10 } },
-        yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-        series: [{
-          type: 'line',
-          data: trade.daily_tracking.map((d: DailyTrackingItem) => d.close),
-          smooth: true,
-          lineStyle: { width: 2 },
-          itemStyle: { color: '#1677ff' },
-        }],
-      };
-
       return (
         <div style={{ padding: 16 }}>
-          <Card size="small" title="每日追踪" style={{ marginBottom: 12 }}>
+          <Card size="small" title="每日追踪">
             <Table
               dataSource={trade.daily_tracking}
               columns={trackingCols}
@@ -171,31 +178,12 @@ export default function BatchTradeSimDetail() {
               scroll={{ x: 800 }}
             />
           </Card>
-          <ReactECharts option={chartOption} style={{ height: 200 }} />
         </div>
       );
     };
 
-    const s = record.summary;
     return (
       <>
-        {s && (s.total_qualifying != null || s.base_stock_count != null) && (
-          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-            <Col xs={12} sm={8}>
-              <StatCard title="入选总数" value={`${s.total_qualifying ?? '—'}`} color="#1677ff" />
-            </Col>
-            <Col xs={12} sm={8}>
-              <StatCard title="基础总股数" value={`${s.base_stock_count ?? '—'}`} color="#722ed1" />
-            </Col>
-            <Col xs={12} sm={8}>
-              <StatCard
-                title="入选率"
-                value={s.pick_rate != null ? `${(s.pick_rate * 100).toFixed(2)}%` : '—'}
-                color="#52c41a"
-              />
-            </Col>
-          </Row>
-        )}
         <Table
           dataSource={record.trades}
           columns={tradeColumns}
@@ -247,21 +235,32 @@ export default function BatchTradeSimDetail() {
       {report.status === 'completed' && (
         <Card title="汇总指标" style={{ marginBottom: 16 }}>
           <Row gutter={[16, 16]}>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
+              <StatCard
+                title="总投入"
+                value={report.config?.total_amount != null ? `${(report.config.total_amount / 10000).toFixed(0)}万` : '—'}
+                color="#1677ff"
+              />
+            </Col>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="总交易日" value={`${report.total_days}`} color="#1677ff" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="完成天数" value={`${report.completed_days}`} color="#52c41a" />
             </Col>
-            <Col xs={12} sm={6}>
-              <StatCard title="平均胜率" value={`${avgWinRate.toFixed(1)}%`} color="#722ed1" />
-            </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="总交易笔数" value={`${totalTrades}`} color="#fa8c16" />
             </Col>
-          </Row>
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
+              <StatCard title="总盈亏" value={formatMoney(totalPnl)} color={totalPnl > 0 ? '#cf1322' : totalPnl < 0 ? '#3f8600' : '#999'} />
+            </Col>
+            <Col xs={12} sm={6} md={4}>
+              <StatCard title="日均盈亏" value={formatMoney(avgPnlPerDay)} color={avgPnlPerDay > 0 ? '#cf1322' : avgPnlPerDay < 0 ? '#3f8600' : '#999'} />
+            </Col>
+            <Col xs={12} sm={6} md={4}>
+              <StatCard title="胜率" value={`${overallWinRate.toFixed(1)}%`} color="#722ed1" />
+            </Col>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="平均回报率" value={formatPct(avgReturn)} color={avgReturn > 0 ? '#cf1322' : '#3f8600'} />
             </Col>
           </Row>
@@ -299,6 +298,10 @@ export default function BatchTradeSimDetail() {
         name={selectedStock?.name}
         open={!!selectedStock}
         onClose={() => setSelectedStock(null)}
+        buyDate={selectedStock?.buy_date}
+        buyPrice={selectedStock?.buy_price}
+        sellDate={selectedStock?.sell_date ?? undefined}
+        sellPrice={selectedStock?.sell_price ?? undefined}
       />
     </>
   );

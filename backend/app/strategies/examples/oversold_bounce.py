@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 # ── 参数（可通过 config 覆盖）──────────────────────────────
-TOP_PICKS = 10
+TOP_PICKS = 100
 MIN_HISTORY = 60  # 最低交易日数（替代 list_date 过滤）
 
 # 急跌参数

@@ -74,6 +74,7 @@ export interface TradeSimSummary {
   profit_loss_ratio: number;
   max_consecutive_wins: number;
   max_consecutive_losses: number;
+  total_pnl: number;
   total_qualifying: number;
   base_stock_count: number;
   pick_rate: number;

@@ -10,7 +10,7 @@ import StatCard from '@/components/shared/StatCard';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import { tradeSimService } from '@/services/tradeSimService';
-import type { TradeSimReport, TradeItem, DailyTrackingItem } from '@/types/tradeSim';
+import type { TradeSimReport, TradeItem } from '@/types/tradeSim';
 import ReactECharts from 'echarts-for-react';
 
 const { Text } = Typography;
@@ -19,6 +19,16 @@ function formatPct(v: number | null | undefined): string {
   if (v == null) return '—';
   const sign = v > 0 ? '+' : '';
   return `${sign}${v.toFixed(2)}%`;
+}
+
+function formatMoney(v: number | null | undefined): string {
+  if (v == null) return '—';
+  const sign = v > 0 ? '+' : '';
+  const abs = Math.abs(v);
+  if (abs >= 10000) {
+    return `${sign}${(abs / 10000).toFixed(2)}万`;
+  }
+  return `${sign}${abs.toFixed(2)}`;
 }
 
 function pctColor(v: number | null | undefined): string {
@@ -118,23 +128,9 @@ export default function TradeSimDetail() {
       },
     ];
 
-    const chartOption = {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 50, right: 20, top: 10, bottom: 30 },
-      xAxis: { type: 'category', data: record.daily_tracking.map((d: DailyTrackingItem) => d.date.slice(5)), axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-      series: [{
-        type: 'line',
-        data: record.daily_tracking.map((d: DailyTrackingItem) => d.close),
-        smooth: true,
-        lineStyle: { width: 2 },
-        itemStyle: { color: '#1677ff' },
-      }],
-    };
-
     return (
       <div style={{ padding: 16 }}>
-        <Card size="small" title="每日追踪" style={{ marginBottom: 12 }}>
+        <Card size="small" title="每日追踪">
           <Table
             dataSource={record.daily_tracking}
             columns={trackingCols}
@@ -144,7 +140,6 @@ export default function TradeSimDetail() {
             scroll={{ x: 800 }}
           />
         </Card>
-        <ReactECharts option={chartOption} style={{ height: 200 }} />
       </div>
     );
   };
@@ -200,38 +195,44 @@ export default function TradeSimDetail() {
       {report.status === 'completed' && summary && (
         <Card title="汇总指标" style={{ marginBottom: 16 }}>
           <Row gutter={[16, 16]}>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
+              <StatCard
+                title="总投入"
+                value={report.config?.total_amount != null ? `${(report.config.total_amount / 10000).toFixed(0)}万` : '—'}
+                color="#1677ff"
+              />
+            </Col>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="总交易笔数" value={`${summary.total_trades}`} color="#1677ff" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
+              <StatCard title="总盈亏" value={formatMoney(summary.total_pnl)} color={summary.total_pnl > 0 ? '#cf1322' : summary.total_pnl < 0 ? '#3f8600' : '#999'} />
+            </Col>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="胜率" value={`${summary.win_rate?.toFixed(1)}%`} color="#52c41a" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="平均回报率" value={formatPct(summary.avg_return)} color={summary.avg_return > 0 ? '#cf1322' : '#3f8600'} />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="平均亏损率" value={formatPct(summary.avg_loss)} color="#3f8600" />
             </Col>
-          </Row>
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="盈亏比" value={summary.profit_loss_ratio?.toFixed(2) || '—'} color="#722ed1" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="最大连续盈利" value={`${summary.max_consecutive_wins} 笔`} color="#cf1322" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="最大连续亏损" value={`${summary.max_consecutive_losses} 笔`} color="#3f8600" />
             </Col>
-          </Row>
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="入选总数" value={`${summary.total_qualifying ?? '—'}`} color="#1677ff" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard title="基础总股数" value={`${summary.base_stock_count ?? '—'}`} color="#722ed1" />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={12} sm={6} md={4}>
               <StatCard
                 title="入选率"
                 value={summary.pick_rate != null ? `${(summary.pick_rate * 100).toFixed(2)}%` : '—'}
@@ -283,6 +284,10 @@ export default function TradeSimDetail() {
         name={selectedStock?.name}
         open={!!selectedStock}
         onClose={() => setSelectedStock(null)}
+        buyDate={selectedStock?.buy_date}
+        buyPrice={selectedStock?.buy_price}
+        sellDate={selectedStock?.sell_date ?? undefined}
+        sellPrice={selectedStock?.sell_price ?? undefined}
       />
     </>
   );

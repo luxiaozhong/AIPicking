@@ -447,6 +447,12 @@ class TradeSimEngine:
             else:
                 dist["gt_10"] += 1
 
+        # 总盈亏金额（每笔 allocated_amount * return_pct / 100 求和）
+        total_pnl = sum(
+            t.get("allocated_amount", 0) * t.get("return_pct", 0) / 100
+            for t in closed
+        )
+
         return {
             "total_trades": total_trades,
             "win_count": win_count,
@@ -458,6 +464,7 @@ class TradeSimEngine:
             "profit_loss_ratio": round(profit_loss_ratio, 2),
             "max_consecutive_wins": max_consecutive_wins,
             "max_consecutive_losses": max_consecutive_losses,
+            "total_pnl": round(total_pnl, 2),
             "return_distribution": dist,
         }
 
@@ -473,6 +480,7 @@ class TradeSimEngine:
             "profit_loss_ratio": 0.0,
             "max_consecutive_wins": 0,
             "max_consecutive_losses": 0,
+            "total_pnl": 0.0,
             "total_qualifying": 0,
             "base_stock_count": 0,
             "pick_rate": 0.0,
