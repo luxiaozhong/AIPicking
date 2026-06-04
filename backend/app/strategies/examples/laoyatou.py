@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 
 # ── 参数 ─────────────────────────────────────────────────
-TOP_PICKS = 10
+TOP_PICKS = 200  # 返回全部合格股票给引擎统计入选率，引擎侧 MAX_RECOMMENDATIONS=10 控制最终输出
 MIN_HISTORY = 80  # 至少需要 80 个交易日数据
 
 # 均线
