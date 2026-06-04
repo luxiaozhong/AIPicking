@@ -21,7 +21,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 
 # HTTP 客户端
-httpx==0.28.1          # LLM API 调用
+httpx>=0.25.0,<0.26.0   # LLM API 调用（与 mootdx 兼容）
 requests>=2.31.0       # 数据采集（同花顺/东财/北向）
 mootdx>=0.10            # 通达信行情+财务（TCP 7709，不封IP）
 
