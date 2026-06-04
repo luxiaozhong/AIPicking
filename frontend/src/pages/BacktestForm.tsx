@@ -53,7 +53,10 @@ export default function BacktestForm() {
   const [stopFactors, setStopFactors] = useState<Array<{ id: string; enabled: boolean; params: Record<string, number> }>>([
     { id: 'stop_prev_low', enabled: true, params: { ref_days: 20 } },
     { id: 'stop_ma10_cross', enabled: false, params: { coefficient: 0.93, buffer_days: 2 } },
+    { id: 'stop_ma60_cross', enabled: false, params: { ma_period: 60, coefficient: 0.97, buffer_days: 1 } },
+    { id: 'stop_trailing_drawdown', enabled: false, params: { drawdown_pct: 8.0 } },
     { id: 'take_profit_pct', enabled: true, params: { profit_pct: 5.0 } },
+    { id: 'take_profit_prev_high', enabled: false, params: { lookback_days: 60 } },
   ]);
 
   const BOARD_OPTIONS = [

@@ -153,6 +153,9 @@ export default function BatchTradeSimDetail() {
         { title: '最低', dataIndex: 'low', key: 'low', width: 80, render: (v: number) => v?.toFixed(2) },
         { title: 'MA10', dataIndex: 'ma10', key: 'ma10', width: 80, render: (v: number | null) => v?.toFixed(2) ?? '—' },
         { title: '止损线', dataIndex: 'ma10_stop_line', key: 'ma10_stop_line', width: 80, render: (v: number | null) => v?.toFixed(2) ?? '—' },
+        { title: 'MA60线', dataIndex: 'ma60_stop_line', key: 'ma60_stop_line', width: 85, render: (v: number | null) => v?.toFixed(2) ?? '—' },
+        { title: '追踪线', dataIndex: 'trailing_stop_line', key: 'trailing_stop_line', width: 85, render: (v: number | null) => v?.toFixed(2) ?? '—' },
+        { title: '前高', dataIndex: 'prev_high_target', key: 'prev_high_target', width: 80, render: (v: number | null) => v?.toFixed(2) ?? '—' },
         {
           title: '浮盈', dataIndex: 'return_pct', key: 'return_pct', width: 90,
           render: (v: number) => <Text style={{ color: pctColor(v) }}>{formatPct(v)}</Text>,

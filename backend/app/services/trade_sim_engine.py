@@ -319,6 +319,17 @@ class TradeSimEngine:
                 if len(ma10_closes) >= 10:
                     ma10 = sum(ma10_closes) / len(ma10_closes)
 
+            # 计算 MA60（用于止损参考线展示）
+            ma60 = None
+            if i >= 59:
+                ma60_closes = []
+                for j in range(i - 59, i + 1):
+                    c = _get_price(daily[j])
+                    if c is not None:
+                        ma60_closes.append(c)
+                if len(ma60_closes) >= 60:
+                    ma60 = sum(ma60_closes) / len(ma60_closes)
+
             # 构建追踪记录
             current_return = (close_price - buy_price) / buy_price * 100
             tracking_record = {
@@ -330,6 +341,9 @@ class TradeSimEngine:
                 "ma10": round(ma10, 4) if ma10 else None,
                 "prev_low_ref": None,
                 "ma10_stop_line": None,
+                "ma60_stop_line": None,
+                "trailing_stop_line": None,
+                "prev_high_target": None,
                 "return_pct": round(current_return, 2),
                 "status": "holding",
             }
@@ -352,6 +366,30 @@ class TradeSimEngine:
                 elif fid == "stop_ma10_cross" and ma10 is not None:
                     coeff = params.get("coefficient", 0.93)
                     tracking_record["ma10_stop_line"] = round(ma10 * coeff, 4)
+                elif fid == "stop_ma60_cross" and ma60 is not None:
+                    coeff = params.get("coefficient", 0.97)
+                    tracking_record["ma60_stop_line"] = round(ma60 * coeff, 4)
+                elif fid == "stop_trailing_drawdown":
+                    drawdown_pct = params.get("drawdown_pct", 8.0)
+                    # 买入至今最高收盘价
+                    highest_since_buy = None
+                    for j in range(buy_idx, i + 1):
+                        p = _get_price(daily[j])
+                        if p is not None:
+                            if highest_since_buy is None or p > highest_since_buy:
+                                highest_since_buy = p
+                    if highest_since_buy is not None:
+                        tracking_record["trailing_stop_line"] = round(highest_since_buy * (1 - drawdown_pct / 100), 4)
+                elif fid == "take_profit_prev_high":
+                    lookback_days = params.get("lookback_days", 60)
+                    prev_high = None
+                    for j in range(max(0, buy_idx - lookback_days), buy_idx):
+                        p = _get_price(daily[j])
+                        if p is not None:
+                            if prev_high is None or p > prev_high:
+                                prev_high = p
+                    if prev_high is not None:
+                        tracking_record["prev_high_target"] = round(prev_high, 2)
 
             # 检查止损止盈（含买入当天：若买入日持续暴跌破位，次日止损卖出）
             if not triggered:

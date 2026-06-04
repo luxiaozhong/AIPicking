@@ -32,6 +32,9 @@ export interface DailyTrackingItem {
   ma10: number | null;
   prev_low_ref: number | null;
   ma10_stop_line: number | null;
+  ma60_stop_line: number | null;
+  trailing_stop_line: number | null;
+  prev_high_target: number | null;
   return_pct: number;
   status: 'holding' | 'stopped' | 'take_profit' | 'force_close';
 }

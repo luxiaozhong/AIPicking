@@ -81,6 +81,12 @@ BUILTIN_STRATEGIES = [
             "risk_factors": [],
         }),
     },
+    {
+        "name": "laoyatou",
+        "description": "老鸭头形态策略：经典技术形态选股 — 上升趋势中回调不破MA60后金叉再启动。五阶段检测：鸭颈多头确认→鸭头顶回调→MA60支撑→鸭嘴放量金叉→鸭眼MACD确认",
+        "file_path": "app/strategies/examples/laoyatou.py",
+        "tags": "老鸭头,形态,均线,MACD,量能,技术面",
+    },
 ]
 
 
