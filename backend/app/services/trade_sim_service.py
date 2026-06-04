@@ -270,7 +270,7 @@ class TradeSimService:
     @staticmethod
     def _run_batch(report_id: int, start_date: str, end_date: str):
         """执行批量交易模拟（线程池中）"""
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, update as sql_update
         from sqlalchemy.orm import sessionmaker
         from ..config import settings
         from ..models.trade_sim import BatchTradeSimReport
@@ -309,11 +309,17 @@ class TradeSimService:
                     config=config,
                 )
 
-                # 进度回调：每个交易日完成后立即更新 DB，前端轮询可见实时进度
+                # 进度回调：用直接 UPDATE 避免 ORM 对象 commit 后过期导致 session 异常
                 def update_progress(completed_count, total_count):
-                    report.total_days = total_count
-                    report.completed_days = completed_count
-                    db.commit()
+                    try:
+                        db.execute(
+                            sql_update(BatchTradeSimReport)
+                            .where(BatchTradeSimReport.id == report_id)
+                            .values(total_days=total_count, completed_days=completed_count)
+                        )
+                        db.commit()
+                    except Exception:
+                        pass  # 进度更新失败不应中断批量回测
 
                 daily_results = engine_obj.run_batch(
                     start_date, end_date,
@@ -321,6 +327,10 @@ class TradeSimService:
                 )
 
                 # 最终写入完整结果
+                report = db.query(BatchTradeSimReport).filter(BatchTradeSimReport.id == report_id).first()
+                if not report:
+                    return
+
                 report.daily_results = json.dumps(daily_results, ensure_ascii=False, cls=NumpyEncoder)
 
                 if report.completed_days == 0 and report.total_days > 0:
