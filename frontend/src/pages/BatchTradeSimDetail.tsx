@@ -9,7 +9,7 @@ import StatCard from '@/components/shared/StatCard';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import { tradeSimService } from '@/services/tradeSimService';
-import type { BatchTradeSimReport, BatchDailyResult, TradeItem } from '@/types/tradeSim';
+import type { BatchTradeSimReport, BatchDailyResult, TradeItem, StopFactorMeta } from '@/types/tradeSim';
 
 const { Text } = Typography;
 
@@ -44,6 +44,7 @@ export default function BatchTradeSimDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedStock, setSelectedStock] = useState<TradeItem | null>(null);
+  const [factorMeta, setFactorMeta] = useState<Record<string, StopFactorMeta>>({});
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -72,6 +73,10 @@ export default function BatchTradeSimDetail() {
   useEffect(() => {
     if (error) message.error(error);
   }, [error]);
+
+  useEffect(() => {
+    tradeSimService.getStopFactors().then(setFactorMeta).catch(() => {});
+  }, []);
 
   if (loading) return <LoadingSkeleton type="detail" />;
   if (!report) return <Alert type="error" title="报告不存在" />;
@@ -228,6 +233,31 @@ export default function BatchTradeSimDetail() {
             </Space>
           </Descriptions.Item>
           <Descriptions.Item label="进度">{report.completed_days} / {report.total_days} 天</Descriptions.Item>
+          {report.config?.top_n != null && (
+            <Descriptions.Item label="选股数量">{report.config.top_n} 只</Descriptions.Item>
+          )}
+          {report.config?.max_hold_days != null && (
+            <Descriptions.Item label="最大持仓">{report.config.max_hold_days} 天</Descriptions.Item>
+          )}
+          <Descriptions.Item label="止盈止损" span={2}>
+            {report.config?.stop_factors?.length ? (
+              <Space direction="vertical" size={2}>
+                {report.config.stop_factors.map((sf) => {
+                  const meta = factorMeta[sf.id];
+                  const name = meta?.name || sf.id;
+                  const paramsStr = sf.enabled && meta
+                    ? meta.params.map((p) => `${p.description}: ${sf.params[p.name] ?? p.default}`).join(', ')
+                    : '';
+                  return (
+                    <Text key={sf.id} type={sf.enabled ? 'success' : 'secondary'} style={{ fontSize: 13 }}>
+                      {sf.enabled ? '✓ ' : '✗ '}{name}
+                      {paramsStr ? `（${paramsStr}）` : ''}
+                    </Text>
+                  );
+                })}
+              </Space>
+            ) : '—'}
+          </Descriptions.Item>
         </Descriptions>
       </Card>
 
