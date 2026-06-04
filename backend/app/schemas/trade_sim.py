@@ -44,8 +44,8 @@ class TradeItem(BaseModel):
     score: float
     allocated_amount: float
     shares: float
-    buy_price: float
-    buy_date: str
+    buy_price: Optional[float] = None
+    buy_date: Optional[str] = None
     sell_price: Optional[float] = None
     sell_date: Optional[str] = None
     sell_reason: Optional[str] = None
