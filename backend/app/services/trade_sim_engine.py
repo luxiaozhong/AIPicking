@@ -59,10 +59,13 @@ class TradeSimEngine:
             config=config,
         )
 
-    def run(self, cutoff_date: str) -> Dict[str, Any]:
-        """主入口，返回 {trades: [...], summary: {...}, total_qualifying, base_stock_count, pick_rate}"""
+    def run(self, cutoff_date: str, preloaded: dict = None) -> Dict[str, Any]:
+        """主入口，返回 {trades: [...], summary: {...}, total_qualifying, base_stock_count, pick_rate}
+
+        preloaded: 可选，预加载的全时段数据字典（由 run_batch 传入），避免重复查库
+        """
         # 1. 选股
-        candidates, total_qualifying, base_stock_count = self._get_stock_candidates(cutoff_date)
+        candidates, total_qualifying, base_stock_count = self._get_stock_candidates(cutoff_date, preloaded)
         if not candidates:
             return {
                 "trades": [],
@@ -113,9 +116,33 @@ class TradeSimEngine:
             "pick_rate": summary["pick_rate"],
         }
 
-    def _get_stock_candidates(self, cutoff_date: str) -> tuple:
-        """运行策略选股，按 score 降序取前 N 只。返回 (candidates, total_qualifying, base_stock_count)"""
-        loaded = self._backtest_engine._load_data(cutoff_date)
+    def _get_stock_candidates(self, cutoff_date: str, preloaded: dict = None) -> tuple:
+        """运行策略选股，按 score 降序取前 N 只。返回 (candidates, total_qualifying, base_stock_count)
+
+        preloaded: 可选，预加载的全时段数据。传入时从中切片当天数据，跳过 _load_data 查库。
+        """
+        if preloaded is not None:
+            # 从预加载数据中切片（批量模式，避免每个交易日重复查库）
+            cutoff_date_fmt = datetime.strptime(cutoff_date, "%Y%m%d").strftime("%Y-%m-%d")
+            stocks_data = preloaded["stocks"]
+            raw_daily = preloaded["daily"]
+            # 切片日线到 <= cutoff_date
+            daily_data = {}
+            for code, rows in raw_daily.items():
+                sliced = [r for r in rows if r["trade_date"] <= cutoff_date]
+                if sliced:
+                    daily_data[code] = sliced
+            # 切片横截面数据到当日
+            hot_stocks = [r for r in preloaded.get("hot_stocks", []) if r.get("trade_date") == cutoff_date_fmt]
+            hot_themes = [r for r in preloaded.get("hot_themes", []) if r.get("trade_date") == cutoff_date_fmt]
+            loaded = {
+                **preloaded,
+                "daily": daily_data,
+                "hot_stocks": hot_stocks,
+                "hot_themes": hot_themes,
+            }
+        else:
+            loaded = self._backtest_engine._load_data(cutoff_date)
 
         stocks_data = loaded["stocks"]
         daily_data = loaded["daily"]
@@ -489,9 +516,17 @@ class TradeSimEngine:
             },
         }
 
-    def run_batch(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
-        """批量交易模拟：遍历每个交易日运行交易模拟"""
-        # 加载全时段数据用于策略选股
+    def run_batch(
+        self,
+        start_date: str,
+        end_date: str,
+        progress_callback=None,
+    ) -> List[Dict[str, Any]]:
+        """批量交易模拟：遍历每个交易日运行交易模拟
+
+        progress_callback: 可选，每完成一个交易日回调 progress_callback(completed_count, total_count)
+        """
+        # 一次性加载全时段数据（后续每个交易日切片使用，避免重复查库）
         loaded = self._backtest_engine._load_data_range(start_date, end_date)
         daily_data = loaded["daily"]
 
@@ -504,7 +539,8 @@ class TradeSimEngine:
         results = []
         for cutoff_date in trading_days:
             try:
-                result = self.run(cutoff_date)
+                # 传入 preloaded 数据，run() 内部切片，不再重复查库
+                result = self.run(cutoff_date, preloaded=loaded)
                 result["cutoff_date"] = cutoff_date
                 result["status"] = "completed"
             except Exception as e:
@@ -514,5 +550,8 @@ class TradeSimEngine:
                     "error_message": str(e),
                 }
             results.append(result)
+
+            if progress_callback:
+                progress_callback(len(results), len(trading_days))
 
         return results

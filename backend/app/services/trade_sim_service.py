@@ -309,10 +309,18 @@ class TradeSimService:
                     config=config,
                 )
 
-                daily_results = engine_obj.run_batch(start_date, end_date)
+                # 进度回调：每个交易日完成后立即更新 DB，前端轮询可见实时进度
+                def update_progress(completed_count, total_count):
+                    report.total_days = total_count
+                    report.completed_days = completed_count
+                    db.commit()
 
-                report.total_days = len(daily_results)
-                report.completed_days = len([r for r in daily_results if r.get("status") == "completed"])
+                daily_results = engine_obj.run_batch(
+                    start_date, end_date,
+                    progress_callback=update_progress,
+                )
+
+                # 最终写入完整结果
                 report.daily_results = json.dumps(daily_results, ensure_ascii=False, cls=NumpyEncoder)
 
                 if report.completed_days == 0 and report.total_days > 0:
