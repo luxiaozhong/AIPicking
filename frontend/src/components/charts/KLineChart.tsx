@@ -33,8 +33,6 @@ function calcMA(data: number[], period: number): (number | null)[] {
 const MA_LINES = [
   { period: 5, name: 'MA5', color: '#757575' },
   { period: 10, name: 'MA10', color: '#f5a623' },
-  { period: 20, name: 'MA20', color: '#e040fb' },
-  { period: 60, name: 'MA60', color: '#1e88e5' },
 ] as const;
 
 export default function KLineChart({ data, loading, height = 500, buyMarker, sellMarker }: KLineChartProps) {
@@ -79,7 +77,58 @@ export default function KLineChart({ data, loading, height = 500, buyMarker, sel
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'cross' },
-        valueFormatter: (value: unknown) => (typeof value === 'number' ? value.toFixed(2) : String(value)),
+        formatter: (params: any) => {
+          if (!Array.isArray(params) || params.length === 0) return '';
+          const dataIndex = (params[0] as any).dataIndex;
+          const current = data[dataIndex];
+          const prev = dataIndex > 0 ? data[dataIndex - 1] : null;
+          const changePct = prev ? ((current.close - prev.close) / prev.close * 100) : null;
+
+          let html = `<div style="font-weight:bold;margin-bottom:4px">${dates[dataIndex]}</div>`;
+
+          // K 线
+          const klineParam = params.find((p: any) => p.seriesName === 'K 线');
+          if (klineParam) {
+            const ohlc = klineParam.value as number[];
+            const marker = ohlc[1] >= ohlc[0]
+              ? `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:50%;background:#ef5350"></span>`
+              : `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:50%;background:#26a69a"></span>`;
+            html += `${marker}开 ${ohlc[0].toFixed(2)} 收 ${ohlc[1].toFixed(2)} 高 ${ohlc[3].toFixed(2)} 低 ${ohlc[2].toFixed(2)}<br/>`;
+
+            // 当日涨幅
+            if (changePct !== null) {
+              const color = changePct >= 0 ? '#ef5350' : '#26a69a';
+              const sign = changePct >= 0 ? '+' : '';
+              html += `<span style="color:${color};font-weight:bold">涨幅 ${sign}${changePct.toFixed(2)}%</span><br/>`;
+            }
+          }
+
+          // 均线
+          for (const ma of MA_LINES) {
+            const maParam = params.find((p: any) => p.seriesName === ma.name);
+            if (maParam && maParam.value != null) {
+              html += `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:50%;background:${ma.color}"></span>${ma.name} ${Number(maParam.value).toFixed(2)}<br/>`;
+            }
+          }
+
+          // 成交量（直接取数据，因成交量 series 在 xAxisIndex:1，不会出现在上方 K 线面板的 params 中）
+          const vol = volumes[dataIndex];
+          if (vol != null) {
+            const volStr = vol >= 1e8 ? `${(vol / 1e8).toFixed(1)}亿` : vol >= 1e4 ? `${(vol / 1e4).toFixed(0)}万` : vol.toString();
+            html += `<span style="display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:2px;background:#999"></span>成交量 ${volStr}`;
+
+            // 成交量相对昨日增幅
+            if (prev) {
+              const volChange = ((vol - prev.vol) / prev.vol * 100);
+              const volColor = volChange >= 0 ? '#ef5350' : '#26a69a';
+              const volSign = volChange >= 0 ? '+' : '';
+              html += ` <span style="color:${volColor}">${volSign}${volChange.toFixed(2)}%</span>`;
+            }
+            html += '<br/>';
+          }
+
+          return `<div style="font-size:12px;line-height:1.8">${html}</div>`;
+        },
       },
       legend: {
         data: ['K 线', ...MA_LINES.map((m) => m.name)],
