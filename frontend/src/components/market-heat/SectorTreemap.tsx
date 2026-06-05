@@ -17,9 +17,20 @@ const SectorTreemap: React.FC<Props> = ({
   const option = useMemo(() => {
     if (!sectors.length) return {};
 
-    const data = sectors.map((s) => ({
+    // 按净流入排序：正流入多→少，负流出少→多（绝对值小→大）
+    const sorted = [...sectors].sort((a, b) => {
+      if (a.net_inflow >= 0 && b.net_inflow >= 0) return b.net_inflow - a.net_inflow;
+      if (a.net_inflow < 0 && b.net_inflow < 0) return a.net_inflow - b.net_inflow;
+      return a.net_inflow >= 0 ? -1 : 1;
+    });
+
+    // 将净流入偏移到正值以用作 treemap 面积，同时保持排序方向
+    const minInflow = Math.min(...sorted.map((s) => s.net_inflow || 0), 0);
+    const shift = Math.abs(minInflow) + 1;
+
+    const data = sorted.map((s) => ({
       name: s.sector_name,
-      value: Math.abs(s.net_inflow || 0.01),
+      value: (s.net_inflow || 0) + shift,
       itemStyle: {
         color: s.change_pct >= 0
           ? `rgba(207, 19, 34, ${Math.min(Math.abs(s.change_pct) / 8, 0.9)})`
