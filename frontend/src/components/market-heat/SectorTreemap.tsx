@@ -14,14 +14,12 @@ interface Props {
 const SectorTreemap: React.FC<Props> = ({
   sectors, sectorType, loading, onSectorTypeChange, onSectorClick,
 }) => {
-  // 按净流入排序：正流入(多→少) → 负流出(绝对值小→大)
+  // 按净流入绝对值降序排列（最大波动在最上）
   const sorted = useMemo(() => {
     if (!sectors.length) return [];
-    return [...sectors].sort((a, b) => {
-      if (a.net_inflow >= 0 && b.net_inflow >= 0) return b.net_inflow - a.net_inflow;
-      if (a.net_inflow < 0 && b.net_inflow < 0) return a.net_inflow - b.net_inflow;
-      return a.net_inflow >= 0 ? -1 : 1;
-    });
+    return [...sectors].sort((a, b) =>
+      Math.abs(b.net_inflow || 0) - Math.abs(a.net_inflow || 0)
+    );
   }, [sectors]);
 
   const option = useMemo(() => {
@@ -61,7 +59,7 @@ const SectorTreemap: React.FC<Props> = ({
       yAxis: {
         type: 'category',
         data: names,
-        inverse: true,
+        inverse: false,
         axisLabel: { fontSize: 10, width: 85, overflow: 'truncate' },
         axisTick: { show: false },
         axisLine: { show: false },
