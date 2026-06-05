@@ -18,11 +18,11 @@ export interface OverviewData {
     up_count: number;
     down_count: number;
   } | null;
-  leading_sector: {
+  leading_sectors: {
     sector_name: string;
     change_pct: number;
     main_net_yi: number;
-  } | null;
+  }[];
 }
 
 export interface SectorItem {

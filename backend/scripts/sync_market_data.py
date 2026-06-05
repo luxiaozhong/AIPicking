@@ -329,6 +329,22 @@ HSGT_HEADERS = {
 
 
 def fetch_northbound_flow(date_str: str) -> Optional[dict]:
+    """Fetch northbound capital flow from hexin dayChart API.
+
+    IMPORTANT: The dayChart endpoint only returns TODAY's intraday data.
+    It does NOT support historical dates.  Attempting to backfill historical
+    northbound data via this function will silently store today's values for
+    every date, producing identical rows.  For today's data this works
+    correctly because the cron runs at 18:30 CST after market close.
+    """
+    today_str = date.today().strftime("%Y-%m-%d")
+    if date_str != today_str:
+        logging.warning(
+            f"Northbound dayChart API only returns today's data "
+            f"(today={today_str}, requested={date_str}). Skipping."
+        )
+        return None
+
     url = "https://data.hexin.cn/market/hsgtApi/method/dayChart/"
     try:
         r = requests.get(url, headers=HSGT_HEADERS, timeout=10)

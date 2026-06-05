@@ -66,9 +66,9 @@ const TemperatureCard: React.FC<Props> = ({
     },
     {
       label: '🏆 领涨板块',
-      value: overview.leading_sector?.sector_name || '--',
-      sub: overview.leading_sector
-        ? `${overview.leading_sector.change_pct > 0 ? '+' : ''}${overview.leading_sector.change_pct.toFixed(1)}% · 净流入 ${overview.leading_sector.main_net_yi.toFixed(1)}亿`
+      value: overview.leading_sectors?.[0]?.sector_name || '--',
+      sub: overview.leading_sectors?.length
+        ? overview.leading_sectors.map((s, i) => `${i + 1}.${s.sector_name} ${s.change_pct > 0 ? '+' : ''}${s.change_pct.toFixed(1)}%`).join('  ')
         : '--',
       gradient: 'linear-gradient(135deg, #722ed1, #531dab)',
       onClick: onLeadingSectorClick,

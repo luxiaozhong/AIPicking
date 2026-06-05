@@ -34,7 +34,7 @@ class MarketHeatService:
 
         if not daily_date:
             return {"trade_date": None, "temperature": None, "northbound": None,
-                    "advance_decline": None, "leading_sector": None}
+                    "advance_decline": None, "leading_sectors": []}
 
         # 北向资金（用 northbound_flow 自己表的日期，或用户指定日期转格式）
         northbound = None
@@ -63,17 +63,15 @@ class MarketHeatService:
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
 
-        # 领涨板块（用 sector_flow 自己表的日期，无数据时回退到最新）
-        leading = None
-        query_sector_date = sector_date  # sector_date 已经是该表最新日期
-        if query_sector_date:
+        # 领涨板块 Top 3（用 sector_flow 自己表的最新日期）
+        leading = []
+        if sector_date:
             sector_stmt = select(DailySectorFlow.__table__).where(
-                DailySectorFlow.trade_date == query_sector_date,
+                DailySectorFlow.trade_date == sector_date,
                 DailySectorFlow.sector_type == "industry"
-            ).order_by(DailySectorFlow.change_pct.desc()).limit(1)
+            ).order_by(DailySectorFlow.change_pct.desc()).limit(3)
             sector_result = await db.execute(sector_stmt)
-            leading_row = sector_result.mappings().first()
-            leading = dict(leading_row) if leading_row else None
+            leading = [dict(r) for r in sector_result.mappings().all()]
 
         # 计算市场温度
         temperature = MarketHeatService._calc_temperature(
@@ -88,11 +86,14 @@ class MarketHeatService:
             "temperature": temperature,
             "northbound": northbound,
             "advance_decline": adv,
-            "leading_sector": {
-                "sector_name": leading["sector_name"],
-                "change_pct": leading["change_pct"],
-                "main_net_yi": leading["main_net_yi"],
-            } if leading else None,
+            "leading_sectors": [
+                {
+                    "sector_name": s["sector_name"],
+                    "change_pct": s["change_pct"],
+                    "main_net_yi": s["main_net_yi"],
+                }
+                for s in leading
+            ],
         }
 
     # ── 板块资金流 ────────────────────────────────────────────
