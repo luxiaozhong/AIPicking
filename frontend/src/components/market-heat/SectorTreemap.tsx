@@ -14,59 +14,80 @@ interface Props {
 const SectorTreemap: React.FC<Props> = ({
   sectors, sectorType, loading, onSectorTypeChange, onSectorClick,
 }) => {
-  const option = useMemo(() => {
-    if (!sectors.length) return {};
-
-    // 按净流入排序：正流入(多→少) → 负流出(少→多)
-    const sorted = [...sectors].sort((a, b) => {
+  // 按净流入排序：正流入(多→少) → 负流出(绝对值小→大)
+  const sorted = useMemo(() => {
+    if (!sectors.length) return [];
+    return [...sectors].sort((a, b) => {
       if (a.net_inflow >= 0 && b.net_inflow >= 0) return b.net_inflow - a.net_inflow;
       if (a.net_inflow < 0 && b.net_inflow < 0) return a.net_inflow - b.net_inflow;
       return a.net_inflow >= 0 ? -1 : 1;
     });
+  }, [sectors]);
 
-    const data = sorted.map((s) => ({
-      name: s.sector_name,
-      value: Math.abs(s.net_inflow || 0.01),
-      itemStyle: {
-        color: s.change_pct >= 0
-          ? `rgba(207, 19, 34, ${Math.min(Math.abs(s.change_pct) / 8, 0.9)})`
-          : `rgba(35, 149, 74, ${Math.min(Math.abs(s.change_pct) / 8, 0.9)})`,
-      },
-      sectorData: s,
-    }));
+  const option = useMemo(() => {
+    if (!sorted.length) return {};
+
+    const names = sorted.map((s) => s.sector_name);
+    const values = sorted.map((s) => s.net_inflow || 0);
+    const absVals = sorted.map((s) => Math.abs(s.net_inflow || 0));
+    const maxAbs = Math.max(...absVals, 1);
 
     return {
       tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          const d = params.data?.sectorData;
-          if (!d) return params.name;
+          const d = params[0];
+          const i = d.dataIndex;
+          const s = sorted[i];
+          if (!s) return '';
           return [
-            `<strong>${d.sector_name}</strong>`,
-            `涨跌幅: ${d.change_pct > 0 ? '+' : ''}${d.change_pct?.toFixed(2)}%`,
-            `主力净流入: ${d.main_net_yi?.toFixed(2)}亿`,
-            `上涨/下跌: ${d.up_count}/${d.down_count}`,
-            `领涨股: ${d.leader_stock} ${d.leader_change > 0 ? '+' : ''}${d.leader_change?.toFixed(2)}%`,
+            `<strong>${s.sector_name}</strong>`,
+            `净流入: ${s.net_inflow > 0 ? '+' : ''}${s.net_inflow?.toFixed(2)}亿`,
+            `涨跌幅: ${s.change_pct > 0 ? '+' : ''}${s.change_pct?.toFixed(2)}%`,
+            `上涨/下跌: ${s.up_count}/${s.down_count}`,
+            `领涨股: ${s.leader_stock} ${s.leader_change > 0 ? '+' : ''}${s.leader_change?.toFixed(2)}%`,
           ].join('<br/>');
         },
       },
+      grid: { left: 90, right: 30, top: 5, bottom: 5 },
+      xAxis: {
+        type: 'value',
+        min: -maxAbs * 1.15,
+        max: maxAbs * 1.15,
+        axisLabel: { formatter: (v: number) => `${v.toFixed(0)}亿`, fontSize: 10 },
+        splitLine: { lineStyle: { type: 'dashed', color: '#e8e8e8' } },
+      },
+      yAxis: {
+        type: 'category',
+        data: names,
+        inverse: true,
+        axisLabel: { fontSize: 10, width: 85, overflow: 'truncate' },
+        axisTick: { show: false },
+        axisLine: { show: false },
+      },
       series: [{
-        type: 'treemap',
-        width: '100%',
-        height: '100%',
-        roam: false,
-        nodeClick: false,
-        breadcrumb: { show: false },
-        label: {
-          show: true,
-          formatter: '{b}',
-          fontSize: 11,
-          overflow: 'truncate',
-        },
-        upperLabel: { show: true, height: 20 },
-        data,
+        type: 'bar',
+        data: values.map((v, i) => ({
+          value: v,
+          itemStyle: {
+            color: v >= 0
+              ? `rgba(207, 19, 34, ${0.4 + Math.abs(v) / maxAbs * 0.55})`
+              : `rgba(35, 149, 74, ${0.4 + Math.abs(v) / maxAbs * 0.55})`,
+            borderRadius: v >= 0 ? [4, 0, 0, 4] : [0, 4, 4, 0],
+          },
+        })),
+        barMaxWidth: 20,
+      }],
+      dataZoom: [{
+        type: 'slider',
+        yAxisIndex: 0,
+        width: 12,
+        right: 2,
+        show: sorted.length > 30,
       }],
     };
-  }, [sectors]);
+  }, [sorted]);
 
   return (
     <Card
@@ -90,11 +111,12 @@ const SectorTreemap: React.FC<Props> = ({
       ) : (
         <ReactECharts
           option={option}
-          style={{ height: 350 }}
+          style={{ height: Math.max(350, sectors.length * 20) }}
           onEvents={{
             click: (params: any) => {
-              if (params.data?.sectorData) {
-                onSectorClick(params.data.sectorData);
+              const i = params.dataIndex;
+              if (i != null && sorted[i]) {
+                onSectorClick(sorted[i]);
               }
             },
           }}
