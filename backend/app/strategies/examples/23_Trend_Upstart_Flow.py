@@ -483,7 +483,7 @@ def run(data):
             continue
 
         df = pd.DataFrame(rows)
-        df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d")
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
         df = df.sort_values("trade_date")
 
         if len(df) < MIN_HISTORY:

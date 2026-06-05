@@ -52,7 +52,7 @@ def calc_sector_heatmap(daily, stocks, cutoff_date):
         if ind and ind != "其他":
             tc_industry[stock["ts_code"]] = ind
 
-    cutoff_dt = pd.to_datetime(cutoff_date, format="%Y%m%d")
+    cutoff_dt = pd.to_datetime(cutoff_date)
 
     sector_gains = {}
     for ts_code, rows in daily.items():
@@ -61,7 +61,7 @@ def calc_sector_heatmap(daily, stocks, cutoff_date):
             continue
 
         df = pd.DataFrame(rows)
-        df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d")
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
         df = df.sort_values("trade_date")
         df = df[df["trade_date"] <= cutoff_dt]
 
@@ -399,7 +399,7 @@ def run(data):
             continue
 
         df = pd.DataFrame(rows)
-        df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d")
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
         df = df.sort_values("trade_date")
 
         if len(df) < MIN_HISTORY:
