@@ -6,18 +6,20 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Crontab (服务器)                              │
+│                    Crontab (服务器) — 仅一条                          │
 │                                                                     │
-│  17:00 ── update_daily.py        ──► daily (日线 + 市值)             │
-│  17:00 ── sync_dragon_tiger.py   ──► daily_dragon_tiger              │
-│                                      daily_dragon_tiger_seats        │
-│  17:05 ── update_index_daily.py  ──► daily (指数日线)                │
-│  17:12 ── sync_valuation.py      ──► daily_valuation (PE/PB/市值)     │
-│  18:30 ── sync_market_data.py    ──► daily_hot_stocks                │
-│                                      daily_hot_themes                │
-│                                      daily_northbound_flow           │
-│                                      daily_sector_flow               │
-│  19:00 ── sync_report.py         ──► 数据同步日报（通知）             │
+│  17:00 ── sync_all.py                                              │
+│            │                                                        │
+│            ├─ 1. update_daily.py        ──► daily (日线 + 市值)      │
+│            ├─ 2. update_index_daily.py  ──► daily (指数日线)         │
+│            ├─ 3. sync_dragon_tiger.py   ──► daily_dragon_tiger       │
+│            │                                daily_dragon_tiger_seats │
+│            ├─ 4. sync_valuation.py      ──► daily_valuation          │
+│            ├─ 5. sync_market_data.py    ──► daily_hot_stocks         │
+│            │                                daily_hot_themes         │
+│            │                                daily_northbound_flow    │
+│            │                                daily_sector_flow        │
+│            └─ 6. sync_report.py         ──► 数据同步日报（通知）      │
 │                                                                     │
 │  (未配置 cron，仅手动)                                               │
 │         sync_financials.py       ──► financial_reports（每季度一次）  │
@@ -26,25 +28,14 @@
 
 ## Crontab 配置（服务器上）
 
+所有同步任务由 `sync_all.py` 统一调度，cron 只需一条：
+
 ```cron
-# A 股日线 + 市值更新（每个工作日 17:00）
-0 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py >> /var/log/aipicking/update_daily.log 2>&1
-
-# 龙虎榜每日采集（每个工作日 17:00）
-0 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_dragon_tiger.py >> /var/log/aipicking/ingest.log 2>&1
-
-# 指数日线更新（每个工作日 17:05）
-5 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py >> /var/log/aipicking/update_daily.log 2>&1
-
-# 每日估值数据同步 PE/PB（每个工作日 17:12）
-12 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_valuation.py >> /var/log/aipicking/ingest.log 2>&1
-
-# A 股每日信号同步 — 同花顺热点 + 北向资金 + 东财板块（每个工作日 18:30）
-30 18 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_market_data.py >> /var/log/aipicking/ingest.log 2>&1
-
-# AIpicking 数据同步日报（工作日 19:00）
-0 19 * * 1-5 /usr/bin/python3 /opt/AIpicking/backend/scripts/sync_report.py >> /var/log/aipicking/report.log 2>&1
+# AIpicking 每日数据同步总调度（每个工作日 17:00）
+0 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
 ```
+
+`sync_all.py` 内部按依赖顺序串行执行 6 个脚本，任意一步失败不会阻断后续任务，最终打印成功/失败汇总。
 
 ## 所有 Job 详解
 
@@ -131,12 +122,8 @@
 # 登录服务器
 ssh root@101.35.254.125
 
-# 实时跟踪
-tail -f /var/log/aipicking/update_daily.log     # 日线更新
-tail -f /var/log/aipicking/ingest.log           # 龙虎榜 + 市场信号
-
-# 查看最近 N 行
-tail -100 /var/log/aipicking/ingest.log
+# 总调度日志（sync_all.py 输出）
+tail -f /var/log/aipicking/sync_all.log
 
 # 查看 cron 执行记录
 grep CRON /var/log/syslog | grep aipicking
@@ -148,23 +135,17 @@ grep CRON /var/log/syslog | grep aipicking
 # 在服务器上
 cd /opt/AIpicking/backend
 
-# 日线更新（智能模式）
-venv/bin/python scripts/update_daily.py
+# 一键执行全部同步（推荐）
+venv/bin/python scripts/sync_all.py                           # 默认日期
+venv/bin/python scripts/sync_all.py --date 2026-06-04         # 指定日期
+venv/bin/python scripts/sync_all.py --dry-run                 # 仅预览
+venv/bin/python scripts/sync_all.py --skip valuation report   # 跳过某些任务
 
-# 龙虎榜
-venv/bin/python scripts/sync_dragon_tiger.py                  # 今天
-venv/bin/python scripts/sync_dragon_tiger.py --date 2026-05-30
-
-# 市场信号
-venv/bin/python scripts/sync_market_data.py                   # 今天
-venv/bin/python scripts/sync_market_data.py --date 2026-05-29
-
-# 估值数据
-venv/bin/python scripts/sync_valuation.py                     # 增量
-venv/bin/python scripts/sync_valuation.py --init              # 全量 365 天
-
-# 指数日线
-venv/bin/python scripts/update_index_daily.py                 # 今天
+# 单独执行某个脚本
+venv/bin/python scripts/update_daily.py                       # 日线更新
+venv/bin/python scripts/sync_dragon_tiger.py                  # 龙虎榜
+venv/bin/python scripts/sync_valuation.py                     # 估值（增量）
+venv/bin/python scripts/sync_valuation.py --init              # 估值（全量 365 天）
 
 # 财报数据（未配置 cron，按需手动跑）
 venv/bin/python scripts/sync_financials.py                    # 增量
@@ -193,5 +174,5 @@ venv/bin/python scripts/sync_financials.py --init             # 全量近 5 年
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-05 | `sync_valuation.py` 加入 cron（17:12），文档更新估值同步为已配置 |
-| 2026-06-05 | 补充 `update_index_daily.py`（17:05）和 `sync_report.py`（19:00）的 cron 及文档 |
+| 2026-06-05 | 所有同步任务整合为 `sync_all.py` 总调度，cron 简化为一条（17:00） |
+| 2026-06-05 | `sync_valuation.py` 加入 cron，补充 `update_index_daily.py` 和 `sync_report.py` 文档 |
