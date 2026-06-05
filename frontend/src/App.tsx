@@ -16,6 +16,7 @@ import TradeSimDetail from '@/pages/TradeSimDetail';
 import BatchTradeSimDetail from '@/pages/BatchTradeSimDetail';
 import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
 import Dashboard from '@/pages/Dashboard';
+import MarketHeat from '@/pages/MarketHeat';
 import LoginPage from '@/pages/LoginPage';
 import UserManagement from '@/pages/UserManagement';
 import EducationPage from '@/pages/EducationPage';
@@ -57,6 +58,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/market-heat"
+          element={
+            <ProtectedRoute>
+              <MarketHeat />
             </ProtectedRoute>
           }
         />

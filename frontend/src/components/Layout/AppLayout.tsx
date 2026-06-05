@@ -11,6 +11,7 @@ import {
   LogoutOutlined,
   ReadOutlined,
   QuestionCircleOutlined,
+  FireOutlined,
 } from '@ant-design/icons';
 import { useThemeStore } from '@/stores/themeStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -42,6 +43,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       key: '/dashboard',
       icon: <DashboardOutlined />,
       label: '仪表盘',
+    },
+    {
+      key: '/market-heat',
+      icon: <FireOutlined />,
+      label: '市场热度',
     },
     {
       key: '/education',
@@ -80,6 +86,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     if (location.pathname.startsWith('/backtests')) return '/backtests';
     if (location.pathname.startsWith('/strategies')) return '/strategies';
     if (location.pathname.startsWith('/education')) return '/education';
+    if (location.pathname.startsWith('/market-heat')) return '/market-heat';
     if (location.pathname.startsWith('/dashboard')) return '/dashboard';
     return '/dashboard';
   })();
