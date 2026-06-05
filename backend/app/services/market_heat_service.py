@@ -1,7 +1,6 @@
 """市场热度服务 — Core 级别 SQL 查询"""
-from datetime import datetime, timedelta
 from typing import Optional
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.stock_tables import (
@@ -59,7 +58,8 @@ class MarketHeatService:
             DailySectorFlow.sector_type == "industry"
         ).order_by(DailySectorFlow.change_pct.desc()).limit(1)
         sector_result = await db.execute(sector_stmt)
-        leading = dict(sector_result.mappings().first()) if sector_result else None
+        leading_row = sector_result.mappings().first()
+        leading = dict(leading_row) if leading_row else None
 
         # 计算市场温度
         temperature = MarketHeatService._calc_temperature(
@@ -112,7 +112,8 @@ class MarketHeatService:
             DailySectorFlow.sector_code == sector_code,
         )
         info_result = await db.execute(info_stmt)
-        info = dict(info_result.mappings().first()) if info_result else None
+        info_row = info_result.mappings().first()
+        info = dict(info_row) if info_row else None
 
         # 近 N 日趋势
         trend_stmt = select(DailySectorFlow.__table__).where(
@@ -222,24 +223,34 @@ class MarketHeatService:
         result = await db.execute(stmt)
         items = [dict(r) for r in result.mappings().all()]
 
-        # 为每个股票附加席位明细
-        for item in items:
+        # 批量加载席位明细（避免 N+1）
+        if items:
+            codes = [item["stock_code"] for item in items]
             seat_stmt = select(DailyDragonTigerSeat.__table__).where(
                 DailyDragonTigerSeat.trade_date == date,
-                DailyDragonTigerSeat.stock_code == item["stock_code"],
-            ).order_by(DailyDragonTigerSeat.seat_type, DailyDragonTigerSeat.rank)
+                DailyDragonTigerSeat.stock_code.in_(codes),
+            ).order_by(DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.seat_type, DailyDragonTigerSeat.rank)
             seat_result = await db.execute(seat_stmt)
-            item["seats"] = [dict(s) for s in seat_result.mappings().all()]
+            all_seats = [dict(s) for s in seat_result.mappings().all()]
+
+            # 按 stock_code 分组
+            seats_by_code: dict[str, list[dict]] = {}
+            for seat in all_seats:
+                code = seat["stock_code"]
+                seats_by_code.setdefault(code, []).append(seat)
+
+            for item in items:
+                item["seats"] = seats_by_code.get(item["stock_code"], [])
 
         return {"items": items, "total": total}
 
     @staticmethod
     async def get_northbound(db: AsyncSession, days: int = 30) -> list[dict]:
         stmt = select(DailyNorthboundFlow.__table__).order_by(
-            DailyNorthboundFlow.trade_date.desc()
+            DailyNorthboundFlow.__table__.c.trade_date.asc()
         ).limit(days)
         result = await db.execute(stmt)
-        return [dict(r) for r in reversed(list(result.mappings().all()))]
+        return [dict(r) for r in result.mappings().all()]
 
     @staticmethod
     async def get_available_dates(db: AsyncSession, days: int = 20) -> list[str]:
