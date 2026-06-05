@@ -130,22 +130,31 @@ class MarketHeatService:
         if not date:
             return {"trend": [], "stocks": [], "info": None}
 
-        # 基本信息
-        info_stmt = select(DailySectorFlow.__table__).where(
-            DailySectorFlow.trade_date == date,
-            DailySectorFlow.sector_code == sector_code,
-        )
-        info_result = await db.execute(info_stmt)
-        info_row = info_result.mappings().first()
-        info = dict(info_row) if info_row else None
+        async def _fetch(d: str) -> tuple:
+            info_stmt = select(DailySectorFlow.__table__).where(
+                DailySectorFlow.trade_date == d,
+                DailySectorFlow.sector_code == sector_code,
+            )
+            info_result = await db.execute(info_stmt)
+            info_row = info_result.mappings().first()
+            info = dict(info_row) if info_row else None
 
-        # 近 N 日趋势
-        trend_stmt = select(DailySectorFlow.__table__).where(
-            DailySectorFlow.sector_code == sector_code,
-            DailySectorFlow.trade_date <= date,
-        ).order_by(DailySectorFlow.trade_date.desc()).limit(days)
-        trend_result = await db.execute(trend_stmt)
-        trend = [dict(r) for r in reversed(list(trend_result.mappings().all()))]
+            trend_stmt = select(DailySectorFlow.__table__).where(
+                DailySectorFlow.sector_code == sector_code,
+                DailySectorFlow.trade_date <= d,
+            ).order_by(DailySectorFlow.trade_date.desc()).limit(days)
+            trend_result = await db.execute(trend_stmt)
+            trend = [dict(r) for r in reversed(list(trend_result.mappings().all()))]
+            return info, trend
+
+        info, trend = await _fetch(date)
+
+        # 指定日期无数据时自动回退到最新
+        if not info and trade_date:
+            fallback = await MarketHeatService._get_latest_date_for(db, DailySectorFlow.__table__.c)
+            if fallback and fallback != date:
+                info, trend = await _fetch(fallback)
+                date = fallback
 
         # 成分股 Top5（从 daily 表查当天该板块涨幅最大的 stock）
         # 注：daily 表的 industry 概念需通过 stocks.industry_l1/l2/l3 关联
