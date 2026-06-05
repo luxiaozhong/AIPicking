@@ -14,9 +14,9 @@ class MarketHeatService:
     # ── 工具方法 ─────────────────────────────────────────────
 
     @staticmethod
-    async def _get_latest_date(db: AsyncSession) -> Optional[str]:
-        """获取最新有数据的交易日"""
-        stmt = select(func.max(DailySectorFlow.__table__.c.trade_date))
+    async def _get_latest_date_for(db: AsyncSession, table) -> Optional[str]:
+        """获取指定表最新有数据的交易日"""
+        stmt = select(func.max(table.trade_date))
         result = await db.execute(stmt)
         return result.scalar()
 
@@ -25,7 +25,7 @@ class MarketHeatService:
     @staticmethod
     async def get_overview(db: AsyncSession, trade_date: Optional[str] = None) -> dict:
         """返回 4 个核心 KPI：市场温度、北向资金、涨跌比、领涨板块"""
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
         if not date:
             return {"trade_date": None, "temperature": None, "northbound": None,
                     "advance_decline": None, "leading_sector": None}
@@ -87,7 +87,7 @@ class MarketHeatService:
     async def get_sectors(
         db: AsyncSession, trade_date: Optional[str], sector_type: str = "industry"
     ) -> list[dict]:
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, DailySectorFlow.__table__.c)
         if not date:
             return []
         stmt = select(DailySectorFlow.__table__).where(
@@ -102,7 +102,7 @@ class MarketHeatService:
         db: AsyncSession, sector_code: str, trade_date: Optional[str], days: int = 10
     ) -> dict:
         """板块详情：近 N 日资金流趋势 + 成分股 Top5"""
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, DailySectorFlow.__table__.c)
         if not date:
             return {"trend": [], "stocks": [], "info": None}
 
@@ -153,7 +153,7 @@ class MarketHeatService:
 
     @staticmethod
     async def get_themes(db: AsyncSession, trade_date: Optional[str], limit: int = 20) -> list[dict]:
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyHotTheme.__table__.c)
         if not date:
             return []
         stmt = select(DailyHotTheme.__table__).where(
@@ -167,7 +167,7 @@ class MarketHeatService:
         db: AsyncSession, theme_name: str, trade_date: Optional[str]
     ) -> list[dict]:
         """主题关联股票：从 hot_stocks 的 reason 字段模糊匹配"""
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyHotStock.__table__.c)
         if not date:
             return []
         stmt = select(DailyHotStock.__table__).where(
@@ -183,7 +183,7 @@ class MarketHeatService:
     async def get_hot_stocks(
         db: AsyncSession, trade_date: Optional[str], page: int = 1, page_size: int = 20
     ) -> dict:
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyHotStock.__table__.c)
         if not date:
             return {"items": [], "total": 0}
 
@@ -206,7 +206,7 @@ class MarketHeatService:
     async def get_dragon_tiger(
         db: AsyncSession, trade_date: Optional[str], page: int = 1, page_size: int = 20
     ) -> dict:
-        date = trade_date or await MarketHeatService._get_latest_date(db)
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyDragonTiger.__table__.c)
         if not date:
             return {"items": [], "total": 0}
 
