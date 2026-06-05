@@ -172,7 +172,8 @@ class MarketHeatService:
                     (Stock.industry_l2 == info["sector_name"]) |
                     (Stock.industry_l1 == info["sector_name"]) |
                     (Stock.industry_l2 == base_name) |
-                    (Stock.industry_l1 == base_name),
+                    (Stock.industry_l1 == base_name) |
+                    Stock.concepts.ilike(f"%{base_name}%"),
                 )
                 .order_by(
                     ((Daily.close - Daily.open) / func.nullif(Daily.open, 0)).desc()
@@ -535,7 +536,8 @@ class MarketHeatService:
                 (Stock.industry_l2 == sector_name)
                 | (Stock.industry_l1 == sector_name)
                 | (Stock.industry_l2 == base_name)
-                | (Stock.industry_l1 == base_name),
+                | (Stock.industry_l1 == base_name)
+                | Stock.concepts.ilike(f"%{base_name}%"),
                 ~Stock.ts_code.like("%.IDX"),
             )
             .order_by(((Daily.close - Daily.open) / func.nullif(Daily.open, 0)).desc())
