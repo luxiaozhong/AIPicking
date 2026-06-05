@@ -109,7 +109,7 @@ class MarketHeatService:
             stmt = select(DailySectorFlow.__table__).where(
                 DailySectorFlow.trade_date == d,
                 DailySectorFlow.sector_type == sector_type,
-            ).order_by(DailySectorFlow.rank.asc())
+            ).order_by(DailySectorFlow.net_inflow.desc())
             result = await db.execute(stmt)
             return [dict(r) for r in result.mappings().all()]
 
