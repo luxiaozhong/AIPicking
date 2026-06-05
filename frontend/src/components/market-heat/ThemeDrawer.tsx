@@ -7,9 +7,10 @@ interface Props {
   themeName: string | null;
   tradeDate?: string;
   onClose: () => void;
+  onStockClick?: (code: string, name: string) => void;
 }
 
-const ThemeDrawer: React.FC<Props> = ({ open, themeName, tradeDate, onClose }) => {
+const ThemeDrawer: React.FC<Props> = ({ open, themeName, tradeDate, onClose, onStockClick }) => {
   const [stocks, setStocks] = useState<HotStockItem[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -23,7 +24,12 @@ const ThemeDrawer: React.FC<Props> = ({ open, themeName, tradeDate, onClose }) =
   }, [open, themeName, tradeDate]);
 
   const columns = [
-    { title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100 },
+    {
+      title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100,
+      render: (_: any, r: HotStockItem) => (
+        <a onClick={() => onStockClick?.(r.stock_code, r.stock_name)}>{r.stock_name}</a>
+      ),
+    },
     {
       title: '涨幅',
       dataIndex: 'change_pct',

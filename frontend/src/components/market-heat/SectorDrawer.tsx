@@ -9,9 +9,10 @@ interface Props {
   sectorName: string | null;
   tradeDate?: string;
   onClose: () => void;
+  onStockClick?: (code: string, name: string) => void;
 }
 
-const SectorDrawer: React.FC<Props> = ({ open, sectorCode, sectorName, tradeDate, onClose }) => {
+const SectorDrawer: React.FC<Props> = ({ open, sectorCode, sectorName, tradeDate, onClose, onStockClick }) => {
   const [data, setData] = useState<SectorDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -59,12 +60,18 @@ const SectorDrawer: React.FC<Props> = ({ open, sectorCode, sectorName, tradeDate
   }, [data]);
 
   const stockColumns = [
-    { title: '股票', dataIndex: 'name', key: 'name' },
+    {
+      title: '股票', dataIndex: 'name', key: 'name',
+      render: (_: any, record: any) => (
+        <a onClick={() => onStockClick?.(record.ts_code, record.name)}>{record.name}</a>
+      ),
+    },
     {
       title: '涨幅',
       dataIndex: 'change_pct',
       key: 'change_pct',
       render: (_: any, record: any) => {
+        if (!record.close || !record.open) return '-';
         const pct = ((record.close - record.open) / record.open * 100);
         return <span style={{ color: pct >= 0 ? '#cf1322' : '#389e0d' }}>{pct.toFixed(2)}%</span>;
       },

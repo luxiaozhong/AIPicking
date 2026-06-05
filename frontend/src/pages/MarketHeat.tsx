@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Row, Col, Card, Tabs, Table, Tag, DatePicker, Alert, Button } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -8,10 +8,19 @@ import SectorTreemap from '@/components/market-heat/SectorTreemap';
 import ThemeWordCloud from '@/components/market-heat/ThemeWordCloud';
 import SectorDrawer from '@/components/market-heat/SectorDrawer';
 import ThemeDrawer from '@/components/market-heat/ThemeDrawer';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import type { SectorItem, ThemeItem, HotStockItem, DragonTigerItem } from '@/services/marketHeatService';
+
+/** 纯数字股票代码 → ts_code（6→SH，其他→SZ）；已有后缀则原样返回 */
+function toTsCode(code: string): string {
+  if (code.includes('.')) return code;
+  if (code.startsWith('6') || code.startsWith('9')) return `${code}.SH`;
+  return `${code}.SZ`;
+}
 
 const MarketHeat: React.FC = () => {
   const store = useMarketHeatStore();
+  const [klineStock, setKlineStock] = useState<{ ts_code: string; name: string } | null>(null);
 
   useEffect(() => {
     store.fetchAvailableDates();
@@ -37,8 +46,22 @@ const MarketHeat: React.FC = () => {
     store.fetchNorthbound();
   };
 
+  const handleStockClick = (code: string, name: string) => {
+    setKlineStock({ ts_code: toTsCode(code), name });
+  };
+
+  /** 可点击的股票名链接 */
+  const stockNameLink = (code: string, name: string) => (
+    <a onClick={(e) => { e.stopPropagation(); handleStockClick(code, name); }}>
+      {name}
+    </a>
+  );
+
   const hotStockColumns = [
-    { title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100 },
+    {
+      title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100,
+      render: (_: string, r: HotStockItem) => stockNameLink(r.stock_code, r.stock_name),
+    },
     {
       title: '涨幅',
       dataIndex: 'change_pct',
@@ -46,15 +69,18 @@ const MarketHeat: React.FC = () => {
       width: 80,
       render: (v: number) => (
         <span style={{ color: v >= 0 ? '#cf1322' : '#389e0d', fontWeight: 600 }}>
-          {v > 0 ? '+' : ''}{v?.toFixed(2)}%
+          {v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '-'}
         </span>
       ),
     },
     {
       title: '换手率', dataIndex: 'turnover_pct', key: 'turnover_pct', width: 80,
-      render: (v: number) => `${v?.toFixed(2)}%`,
+      render: (v: number) => v != null ? `${v.toFixed(2)}%` : '-',
     },
-    { title: '收盘价', dataIndex: 'close', key: 'close', width: 80, render: (v: number) => v?.toFixed(2) },
+    {
+      title: '收盘价', dataIndex: 'close', key: 'close', width: 80,
+      render: (v: number) => v != null ? v.toFixed(2) : '-',
+    },
     {
       title: '上涨原因', dataIndex: 'reason', key: 'reason',
       render: (v: string) => (v || '').split('+').map((tag: string, i: number) => (
@@ -64,12 +90,15 @@ const MarketHeat: React.FC = () => {
   ];
 
   const dragonColumns = [
-    { title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100 },
+    {
+      title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100,
+      render: (_: string, r: DragonTigerItem) => stockNameLink(r.stock_code, r.stock_name),
+    },
     {
       title: '涨幅', dataIndex: 'change_pct', key: 'change_pct', width: 80,
       render: (v: number) => (
         <span style={{ color: v >= 0 ? '#cf1322' : '#389e0d', fontWeight: 600 }}>
-          {v > 0 ? '+' : ''}{v?.toFixed(2)}%
+          {v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '-'}
         </span>
       ),
     },
@@ -77,7 +106,7 @@ const MarketHeat: React.FC = () => {
       title: '净买入(万)', dataIndex: 'net_buy_wan', key: 'net_buy_wan', width: 100,
       render: (v: number) => (
         <span style={{ color: v >= 0 ? '#cf1322' : '#389e0d', fontWeight: 600 }}>
-          {v > 0 ? '+' : ''}{v?.toFixed(0)}
+          {v != null ? `${v > 0 ? '+' : ''}${v.toFixed(0)}` : '-'}
         </span>
       ),
     },
@@ -102,10 +131,6 @@ const MarketHeat: React.FC = () => {
             onChange: (p) => store.fetchHotStocks(p),
             showSizeChanger: false,
           }}
-          onRow={(record: HotStockItem) => ({
-            style: { cursor: 'pointer' },
-            onClick: () => window.open(`/strategies/${record.stock_code}`, '_blank'),
-          })}
         />
       ),
     },
@@ -227,12 +252,22 @@ const MarketHeat: React.FC = () => {
         sectorName={store.drawer.name}
         tradeDate={store.tradeDate}
         onClose={store.closeDrawer}
+        onStockClick={handleStockClick}
       />
       <ThemeDrawer
         open={store.drawer.open && store.drawer.type === 'theme'}
         themeName={store.drawer.name}
         tradeDate={store.tradeDate}
         onClose={store.closeDrawer}
+        onStockClick={handleStockClick}
+      />
+
+      {/* K线弹窗 */}
+      <StockKLineModal
+        ts_code={klineStock?.ts_code ?? ''}
+        name={klineStock?.name}
+        open={!!klineStock}
+        onClose={() => setKlineStock(null)}
       />
     </div>
   );
