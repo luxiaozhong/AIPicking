@@ -25,3 +25,14 @@ export interface KLineData {
   name: string;
   items: KLineItem[];
 }
+
+export interface ValuationData {
+  ts_code: string;
+  trade_date: string;
+  pe_ttm: number | null;
+  pe_static: number | null;
+  pb: number | null;
+  market_cap: number | null;
+  circ_market_cap: number | null;
+  dividend_yield: number | null;
+}

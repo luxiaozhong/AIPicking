@@ -1,5 +1,5 @@
 import api from './api';
-import type { StockSearchResponse, KLineData } from '@/types/stock';
+import type { StockSearchResponse, KLineData, ValuationData } from '@/types/stock';
 
 export const stockService = {
   async search(q: string, limit = 10) {
@@ -14,6 +14,15 @@ export const stockService = {
       params: { ts_code: tsCode, days },
     });
     return response.data.data;
+  },
+
+  async getValuation(tsCode: string): Promise<ValuationData | null> {
+    const response = await api.get<{ code: number; data: ValuationData[] }>(
+      `/v1/valuation/${tsCode}`,
+      { params: { days: 1 } },
+    );
+    const data = response.data.data;
+    return data?.[0] ?? null;
   },
 };
 

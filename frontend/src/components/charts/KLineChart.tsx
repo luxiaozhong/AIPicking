@@ -15,6 +15,9 @@ interface KLineChartProps {
   height?: number;
   buyMarker?: TradeMarker;
   sellMarker?: TradeMarker;
+  maValues?: { ma20?: number | null; ma60?: number | null };
+  pb?: number | null;
+  pe?: number | null;
 }
 
 function calcMA(data: number[], period: number): (number | null)[] {
@@ -33,9 +36,11 @@ function calcMA(data: number[], period: number): (number | null)[] {
 const MA_LINES = [
   { period: 5, name: 'MA5', color: '#757575' },
   { period: 10, name: 'MA10', color: '#f5a623' },
+  { period: 20, name: 'MA20', color: '#e040fb' },
+  { period: 60, name: 'MA60', color: '#1e88e5' },
 ] as const;
 
-export default function KLineChart({ data, loading, height = 500, buyMarker, sellMarker }: KLineChartProps) {
+export default function KLineChart({ data, loading, height = 500, buyMarker, sellMarker, maValues, pb, pe }: KLineChartProps) {
   const option: EChartsOption = useMemo(() => {
     if (!data.length) return {};
 
@@ -220,5 +225,41 @@ export default function KLineChart({ data, loading, height = 500, buyMarker, sel
     };
   }, [data, buyMarker, sellMarker]);
 
-  return <EChartsWrapper options={option} loading={loading} height={height} empty={!data.length} />;
+  // 计算最新 MA20/MA60 值（优先用 props，否则从 data 计算）
+  const computedMA = useMemo(() => {
+    if (!data.length) return { ma20: null as number | null, ma60: null as number | null };
+    const closes = data.map((d) => d.close);
+    const ma20Arr = calcMA(closes, 20);
+    const ma60Arr = calcMA(closes, 60);
+    return {
+      ma20: maValues?.ma20 ?? ma20Arr[ma20Arr.length - 1] ?? null,
+      ma60: maValues?.ma60 ?? ma60Arr[ma60Arr.length - 1] ?? null,
+    };
+  }, [data, maValues]);
+
+  const hasInfoBar = computedMA.ma20 != null || computedMA.ma60 != null || pb != null || pe != null;
+
+  return (
+    <div>
+      {hasInfoBar && (
+        <div style={{ display: 'flex', gap: 20, marginBottom: 8, fontSize: 13, flexWrap: 'wrap' }}>
+          {computedMA.ma20 != null && (
+            <span>
+              <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#e040fb', marginRight: 4 }} />
+              MA20 <strong>{computedMA.ma20.toFixed(2)}</strong>
+            </span>
+          )}
+          {computedMA.ma60 != null && (
+            <span>
+              <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#1e88e5', marginRight: 4 }} />
+              MA60 <strong>{computedMA.ma60.toFixed(2)}</strong>
+            </span>
+          )}
+          {pb != null && <span>PB <strong>{pb.toFixed(2)}</strong></span>}
+          {pe != null && <span>PE <strong>{pe.toFixed(2)}</strong></span>}
+        </div>
+      )}
+      <EChartsWrapper options={option} loading={loading} height={height} empty={!data.length} />
+    </div>
+  );
 }
