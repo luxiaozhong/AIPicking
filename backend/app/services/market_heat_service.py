@@ -157,9 +157,11 @@ class MarketHeatService:
                 date = fallback
 
         # 成分股 Top5（从 daily 表查当天该板块涨幅最大的 stock）
-        # 注：daily 表的 industry 概念需通过 stocks.industry_l1/l2/l3 关联
+        # 行业名可能有罗马数字后缀（如 电子化学品Ⅱ vs 电子化学品），做模糊匹配
         top5 = []
         if info:
+            import re
+            base_name = re.sub(r'[Ⅰ-Ⅷ]+$', '', info["sector_name"]).strip()
             from ..models.stock_tables import Stock
             stock_stmt = (
                 select(Stock.ts_code, Stock.name, Daily.close, Daily.open)
@@ -167,7 +169,9 @@ class MarketHeatService:
                 .where(
                     Daily.trade_date == date,
                     (Stock.industry_l2 == info["sector_name"]) |
-                    (Stock.industry_l1 == info["sector_name"])
+                    (Stock.industry_l1 == info["sector_name"]) |
+                    (Stock.industry_l2 == base_name) |
+                    (Stock.industry_l1 == base_name),
                 )
                 .order_by(
                     ((Daily.close - Daily.open) / func.nullif(Daily.open, 0)).desc()
@@ -463,3 +467,82 @@ class MarketHeatService:
             "level": level,
             "dimensions": scores,
         }
+
+    # ── 涨跌分布 ─────────────────────────────────────────────
+
+    @staticmethod
+    async def get_change_distribution(
+        db: AsyncSession, trade_date: Optional[str] = None
+    ) -> list[dict]:
+        """涨跌幅度分段统计（用于柱状图）"""
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
+        if not date:
+            return []
+
+        # 用当日 (close-open)/open 计算日内涨跌
+        change_expr = (Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100
+
+        buckets = [
+            (-100, -10, "-10%以下"),
+            (-10, -5, "-10%~-5%"),
+            (-5, -2, "-5%~-2%"),
+            (-2, 0, "-2%~0%"),
+            (0, 2, "0%~2%"),
+            (2, 5, "2%~5%"),
+            (5, 10, "5%~10%"),
+            (10, 100, "10%以上"),
+        ]
+
+        result = []
+        for lo, hi, label in buckets:
+            stmt = select(func.count()).select_from(Daily.__table__).where(
+                Daily.trade_date == date,
+                ~Daily.ts_code.like("%.IDX"),
+                change_expr >= lo,
+                change_expr < hi,
+            )
+            cnt = (await db.execute(stmt)).scalar() or 0
+            result.append({"label": label, "lo": lo, "hi": hi, "count": cnt})
+
+        return result
+
+    # ── 领涨板块个股 ──────────────────────────────────────────
+
+    @staticmethod
+    async def get_leading_sector_stocks(
+        db: AsyncSession, sector_name: str, trade_date: Optional[str] = None
+    ) -> list[dict]:
+        """领涨板块内涨幅前 15 个股（行业名模糊匹配，去除罗马数字等后缀）"""
+        date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
+        if not date:
+            return []
+
+        from ..models.stock_tables import Stock
+
+        # 去除 Ⅰ/Ⅱ/Ⅲ 等罗马数字后缀
+        import re
+        base_name = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', sector_name).strip()
+
+        stmt = (
+            select(
+                Stock.ts_code, Stock.name, Daily.close, Daily.open,
+                ((Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100).label("change_pct"),
+            )
+            .join(Daily, Stock.ts_code == Daily.ts_code)
+            .where(
+                Daily.trade_date == date,
+                (Stock.industry_l2 == sector_name)
+                | (Stock.industry_l1 == sector_name)
+                | (Stock.industry_l2 == base_name)
+                | (Stock.industry_l1 == base_name),
+                ~Stock.ts_code.like("%.IDX"),
+            )
+            .order_by(((Daily.close - Daily.open) / func.nullif(Daily.open, 0)).desc())
+            .limit(15)
+        )
+        result = await db.execute(stmt)
+        return [
+            {"ts_code": r.ts_code, "name": r.name, "close": r.close, "open": r.open,
+             "change_pct": round(r.change_pct, 2) if r.change_pct else None}
+            for r in result.all()
+        ]

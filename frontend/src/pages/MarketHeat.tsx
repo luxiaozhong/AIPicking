@@ -9,6 +9,7 @@ import ThemeWordCloud from '@/components/market-heat/ThemeWordCloud';
 import SectorDrawer from '@/components/market-heat/SectorDrawer';
 import ThemeDrawer from '@/components/market-heat/ThemeDrawer';
 import StockKLineModal from '@/components/shared/StockKLineModal';
+import KpiDetailModal from '@/components/market-heat/KpiDetailModal';
 import type { SectorItem, ThemeItem, HotStockItem, DragonTigerItem } from '@/services/marketHeatService';
 
 /** 纯数字股票代码 → ts_code（6→SH，其他→SZ）；已有后缀则原样返回 */
@@ -21,6 +22,10 @@ function toTsCode(code: string): string {
 const MarketHeat: React.FC = () => {
   const store = useMarketHeatStore();
   const [klineStock, setKlineStock] = useState<{ ts_code: string; name: string } | null>(null);
+  const [kpiDetail, setKpiDetail] = useState<{
+    type: 'northbound' | 'advance_decline' | 'leading_sector';
+    sectorName?: string;
+  } | null>(null);
 
   useEffect(() => {
     store.fetchAvailableDates();
@@ -217,7 +222,16 @@ const MarketHeat: React.FC = () => {
 
       {/* 第一层: KPI 卡片 */}
       <div style={{ marginBottom: 16 }}>
-        <TemperatureCard overview={store.overview} loading={store.overviewLoading} />
+        <TemperatureCard
+          overview={store.overview}
+          loading={store.overviewLoading}
+          onNorthboundClick={() => setKpiDetail({ type: 'northbound' })}
+          onAdvanceDeclineClick={() => setKpiDetail({ type: 'advance_decline' })}
+          onLeadingSectorClick={() => store.overview?.leading_sector && setKpiDetail({
+            type: 'leading_sector',
+            sectorName: store.overview.leading_sector.sector_name,
+          })}
+        />
       </div>
 
       {/* 第二层: 可视化 */}
@@ -268,6 +282,16 @@ const MarketHeat: React.FC = () => {
         name={klineStock?.name}
         open={!!klineStock}
         onClose={() => setKlineStock(null)}
+      />
+
+      {/* KPI 详情弹窗 */}
+      <KpiDetailModal
+        open={!!kpiDetail}
+        type={kpiDetail?.type ?? null}
+        tradeDate={store.tradeDate}
+        sectorName={kpiDetail?.sectorName}
+        onClose={() => setKpiDetail(null)}
+        onStockClick={handleStockClick}
       />
     </div>
   );

@@ -118,3 +118,26 @@ async def get_available_dates(
     """有数据的交易日列表（日期选择器用）"""
     data = await MarketHeatService.get_available_dates(db, days)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/change-distribution")
+async def get_change_distribution(
+    trade_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """涨跌幅度分段统计（柱状图数据源）"""
+    data = await MarketHeatService.get_change_distribution(db, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/leading-sector-stocks")
+async def get_leading_sector_stocks(
+    sector_name: str = Query(..., description="板块名称"),
+    trade_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """领涨板块内涨幅前 15 个股"""
+    data = await MarketHeatService.get_leading_sector_stocks(db, sector_name, trade_date)
+    return {"code": 0, "message": "ok", "data": data}

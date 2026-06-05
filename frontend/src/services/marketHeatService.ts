@@ -170,6 +170,37 @@ export const marketHeatService = {
     );
     return response.data.data;
   },
+
+  async getChangeDistribution(tradeDate?: string) {
+    const response = await api.get<{ code: number; data: ChangeBucket[] }>(
+      '/market-heat/change-distribution',
+      { params: { trade_date: tradeDate } },
+    );
+    return response.data.data;
+  },
+
+  async getLeadingSectorStocks(sectorName: string, tradeDate?: string) {
+    const response = await api.get<{ code: number; data: LeadingStock[] }>(
+      '/market-heat/leading-sector-stocks',
+      { params: { sector_name: sectorName, trade_date: tradeDate } },
+    );
+    return response.data.data;
+  },
 };
+
+export interface ChangeBucket {
+  label: string;
+  lo: number;
+  hi: number;
+  count: number;
+}
+
+export interface LeadingStock {
+  ts_code: string;
+  name: string;
+  close: number;
+  open: number;
+  change_pct: number | null;
+}
 
 export default marketHeatService;
