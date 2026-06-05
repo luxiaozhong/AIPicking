@@ -11,6 +11,8 @@ cron（每个交易日 16:15）：
     15 16 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
 """
 
+from __future__ import annotations
+
 import argparse
 import subprocess
 import sys
