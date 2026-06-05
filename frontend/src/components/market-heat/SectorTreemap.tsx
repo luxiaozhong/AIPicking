@@ -59,7 +59,7 @@ const SectorTreemap: React.FC<Props> = ({
       yAxis: {
         type: 'category',
         data: names,
-        inverse: false,
+        inverse: true,
         axisLabel: { fontSize: 10, width: 85, overflow: 'truncate' },
         axisTick: { show: false },
         axisLine: { show: false },
