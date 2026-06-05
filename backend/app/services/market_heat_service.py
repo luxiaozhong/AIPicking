@@ -1,6 +1,6 @@
 """市场热度服务 — Core 级别 SQL 查询"""
 from typing import Optional
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.stock_tables import (
@@ -24,53 +24,63 @@ class MarketHeatService:
 
     @staticmethod
     async def get_overview(db: AsyncSession, trade_date: Optional[str] = None) -> dict:
-        """返回 4 个核心 KPI：市场温度、北向资金、涨跌比、领涨板块"""
-        date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
-        if not date:
+        """返回 4 个核心 KPI：市场温度、北向资金、涨跌比、领涨板块
+        各子查询使用各自表的最新日期（日期格式不同）。"""
+
+        # 各表最新日期
+        daily_date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
+        nb_date = await MarketHeatService._get_latest_date_for(db, DailyNorthboundFlow.__table__.c)
+        sector_date = await MarketHeatService._get_latest_date_for(db, DailySectorFlow.__table__.c)
+
+        if not daily_date:
             return {"trade_date": None, "temperature": None, "northbound": None,
                     "advance_decline": None, "leading_sector": None}
 
-        # 北向资金
-        nb_stmt = select(DailyNorthboundFlow.__table__).where(
-            DailyNorthboundFlow.trade_date == date
-        )
-        nb_result = await db.execute(nb_stmt)
-        nb_row = nb_result.mappings().first()
-        northbound = dict(nb_row) if nb_row else None
+        # 北向资金（用 northbound_flow 自己表的日期）
+        northbound = None
+        if nb_date:
+            nb_stmt = select(DailyNorthboundFlow.__table__).where(
+                DailyNorthboundFlow.trade_date == nb_date
+            )
+            nb_result = await db.execute(nb_stmt)
+            nb_row = nb_result.mappings().first()
+            northbound = dict(nb_row) if nb_row else None
 
-        # 涨跌比：从 daily 表统计当日上涨/下跌家数
+        # 涨跌比（用 daily 表的日期）
         adv_stmt = select(
             func.count().label("total"),
             func.sum(
-                func.case((Daily.close > Daily.open, 1), else_=0)
+                case((Daily.close > Daily.open, 1), else_=0)
             ).label("up_count"),
             func.sum(
-                func.case((Daily.close < Daily.open, 1), else_=0)
+                case((Daily.close < Daily.open, 1), else_=0)
             ).label("down_count"),
-        ).where(Daily.trade_date == date, ~Daily.ts_code.like("%.IDX"))
+        ).where(Daily.trade_date == daily_date, ~Daily.ts_code.like("%.IDX"))
         adv_result = await db.execute(adv_stmt)
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
 
-        # 领涨板块：sector_flow 按 change_pct 降序取第一
-        sector_stmt = select(DailySectorFlow.__table__).where(
-            DailySectorFlow.trade_date == date,
-            DailySectorFlow.sector_type == "industry"
-        ).order_by(DailySectorFlow.change_pct.desc()).limit(1)
-        sector_result = await db.execute(sector_stmt)
-        leading_row = sector_result.mappings().first()
-        leading = dict(leading_row) if leading_row else None
+        # 领涨板块（用 sector_flow 自己表的日期）
+        leading = None
+        if sector_date:
+            sector_stmt = select(DailySectorFlow.__table__).where(
+                DailySectorFlow.trade_date == sector_date,
+                DailySectorFlow.sector_type == "industry"
+            ).order_by(DailySectorFlow.change_pct.desc()).limit(1)
+            sector_result = await db.execute(sector_stmt)
+            leading_row = sector_result.mappings().first()
+            leading = dict(leading_row) if leading_row else None
 
         # 计算市场温度
         temperature = MarketHeatService._calc_temperature(
             northbound=northbound,
             adv=adv,
-            date=date,
+            date=daily_date,
             db=db,
         )
 
         return {
-            "trade_date": date,
+            "trade_date": daily_date,
             "temperature": temperature,
             "northbound": northbound,
             "advance_decline": adv,
