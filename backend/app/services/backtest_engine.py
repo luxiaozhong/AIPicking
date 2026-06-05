@@ -328,7 +328,7 @@ class BacktestEngine:
             try:
                 sliced_daily = {}
                 for code, rows in daily_data.items():
-                    sliced_rows = [r for r in rows if r["trade_date"] <= cutoff_date]
+                    sliced_rows = [r for r in rows if r["trade_date"] <= cutoff_date_fmt]
                     if sliced_rows:
                         sliced_daily[code] = sliced_rows
 
@@ -405,7 +405,7 @@ class BacktestEngine:
 
             # 2. 日期范围
             cutoff_dt = datetime.strptime(cutoff_date, "%Y%m%d")
-            start_date = (cutoff_dt - timedelta(days=180)).strftime("%Y%m%d")
+            start_date = (cutoff_dt - timedelta(days=180)).strftime("%Y-%m-%d")
             flow_start_date = (cutoff_dt - timedelta(days=30)).strftime("%Y-%m-%d")
             cutoff_date_fmt = cutoff_dt.strftime("%Y-%m-%d")
 
@@ -415,7 +415,7 @@ class BacktestEngine:
                 Daily.low, Daily.close, Daily.vol, Daily.amount,
                 Daily.adj_close, Daily.market_cap, Daily.circ_market_cap
             ).where(
-                Daily.trade_date.between(start_date, cutoff_date)
+                Daily.trade_date.between(start_date, cutoff_date_fmt)
             ).order_by(Daily.ts_code, Daily.trade_date)
             daily_result = session.execute(daily_stmt)
             daily_rows = [dict(row._mapping) for row in daily_result]
@@ -518,7 +518,7 @@ class BacktestEngine:
             stocks_data = [dict(row._mapping) for row in session.execute(stmt)]
 
             start_dt = datetime.strptime(start_date, "%Y%m%d")
-            earliest_date = (start_dt - timedelta(days=180)).strftime("%Y%m%d")
+            earliest_date = (start_dt - timedelta(days=180)).strftime("%Y-%m-%d")
             flow_earliest_date = (start_dt - timedelta(days=30)).strftime("%Y-%m-%d")
             end_date_fmt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
 
@@ -621,6 +621,8 @@ class BacktestEngine:
         cutoff_date: str,
         track_days: List[int]
     ) -> List[Dict]:
+        # DB 统一用 YYYY-MM-DD，cutoff_date 输入为 YYYYMMDD
+        trade_date_fmt = f"{cutoff_date[:4]}-{cutoff_date[4:6]}-{cutoff_date[6:8]}"
         session = _get_db()
         try:
             ts_codes = [r['ts_code'] for r in recommendations]
@@ -632,7 +634,7 @@ class BacktestEngine:
                 Daily.ts_code, Daily.adj_close, Daily.close
             ).where(
                 Daily.ts_code.in_(ts_codes),
-                Daily.trade_date == cutoff_date
+                Daily.trade_date == trade_date_fmt
             )
             cutoff_prices = {}
             for row in session.execute(stmt):
@@ -646,7 +648,7 @@ class BacktestEngine:
                     Daily.adj_close, Daily.close
                 ).where(
                     Daily.ts_code == ts_code,
-                    Daily.trade_date < cutoff_date
+                    Daily.trade_date < trade_date_fmt
                 ).order_by(Daily.trade_date.desc()).limit(1)
                 prev_row = session.execute(prev_stmt).first()
                 if prev_row:
@@ -679,7 +681,7 @@ class BacktestEngine:
                     Daily.trade_date, Daily.adj_close, Daily.close
                 ).where(
                     Daily.ts_code == ts_code,
-                    Daily.trade_date > cutoff_date
+                    Daily.trade_date > trade_date_fmt
                 ).order_by(Daily.trade_date).limit(30)
                 future_rows = session.execute(future_stmt).all()
 

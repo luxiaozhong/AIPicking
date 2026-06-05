@@ -66,7 +66,7 @@ class DailyValuation(BaseModel):
     )
 
     ts_code = Column(String(20), nullable=False, index=True)
-    trade_date = Column(String(8), nullable=False)  # YYYYMMDD
+    trade_date = Column(String(10), nullable=False)  # YYYY-MM-DD
 
     pe_ttm = Column(Float)
     pe_static = Column(Float)

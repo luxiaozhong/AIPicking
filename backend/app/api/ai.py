@@ -193,7 +193,7 @@ async def analyze_stock(
     # 过滤到截止日期之前
     items = [
         r for r in kline["items"]
-        if r["trade_date"] <= req.date.replace("-", "")
+        if r["trade_date"] <= req.date
     ]
     if len(items) < 20:
         return {

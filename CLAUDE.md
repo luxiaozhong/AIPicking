@@ -42,7 +42,8 @@ npm run test:e2e                     # Playwright E2E tests
 3. **成交量列**: 因子函数需要同时兼容 `volume` 和 `vol`，先取 `volume`，找不到再回退 `vol`
 4. **.env 加载**: 由 `python-dotenv` 在 `config.py` 中手动加载，uvicorn 不会自动加载
 5. **部署方式**: 代码变更必须通过 git push → 服务器 git pull，**禁止** scp/sftp 直接拷贝文件到服务器。服务器上跑脚本、查日志等运维命令可以直接 SSH。详见 `docs/deployment.md`
-6. **分支规范**: 任何代码改动都必须在 **feature branch** 上进行，**禁止**直接提交到 `main` 分支。**在写第一行代码之前就要创建并切换到 feature branch**，不是 commit 前才切。分支命名：`feat/<描述>`、`fix/<描述>`、`refactor/<描述>`。工作流：切分支 → 写代码 → commit → push → PR/merge → 切回 main → git pull → 同步到服务器
+6. **分支规范**: 任何文档设计新建和改动前都必须在 **feature branch** 上进行，**禁止**直接提交到 `main` 分支。**在写第一行代码之前就要创建并切换到 feature branch**，不是 commit 前才切。分支命名：`feat/<描述>`、`fix/<描述>`、`refactor/<描述>`。工作流：切分支 → 写代码 → commit → push → PR/merge → 切回 main → git pull → 同步到服务器
+7. 所有日期格式都遵循数据库日期格式 ‘YYYY-MM-DD‘
 
 ### 路由定义顺序
 

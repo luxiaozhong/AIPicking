@@ -129,7 +129,7 @@ class TradeSimEngine:
             # 切片日线到 <= cutoff_date
             daily_data = {}
             for code, rows in raw_daily.items():
-                sliced = [r for r in rows if r["trade_date"] <= cutoff_date]
+                sliced = [r for r in rows if r["trade_date"] <= cutoff_date_fmt]
                 if sliced:
                     daily_data[code] = sliced
             # 切片横截面数据到当日
@@ -183,7 +183,7 @@ class TradeSimEngine:
         """加载截止日后所有日线数据（含30日历史用于MA等指标计算）"""
         # 往前取30天用于MA10等需要历史数据的指标
         cutoff_dt = datetime.strptime(cutoff_date, "%Y%m%d")
-        pre_date = (cutoff_dt - timedelta(days=40)).strftime("%Y%m%d")
+        pre_date = (cutoff_dt - timedelta(days=40)).strftime("%Y-%m-%d")
 
         session = _get_db()
         try:
@@ -232,6 +232,8 @@ class TradeSimEngine:
         daily 包含截止日前约30天+截止日后所有日线数据。
         买入日为 daily 中第一个 trade_date > cutoff_date 的交易日。
         """
+        # DB 统一用 YYYY-MM-DD，cutoff_date 输入为 YYYYMMDD
+        cutoff_date_fmt = f"{cutoff_date[:4]}-{cutoff_date[4:6]}-{cutoff_date[6:8]}"
 
         # 构建基础 trade 对象
         trade = {
@@ -260,7 +262,7 @@ class TradeSimEngine:
         # a. 找到买入日：daily 中第一个 trade_date > cutoff_date 的交易日
         buy_idx = None
         for idx, d in enumerate(daily):
-            if d["trade_date"] > cutoff_date:
+            if d["trade_date"] > cutoff_date_fmt:
                 buy_idx = idx
                 break
 

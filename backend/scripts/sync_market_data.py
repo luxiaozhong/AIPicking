@@ -20,9 +20,19 @@ Usage:
     cd backend
     venv/bin/python scripts/sync_market_data.py
     venv/bin/python scripts/sync_market_data.py --date 2026-05-29
+    venv/bin/python scripts/sync_market_data.py --intraday        # 盘中轻量同步
     venv/bin/python scripts/sync_market_data.py --pg-url postgresql://...
 
-Cron (weekdays 18:30 Beijing time):
+Cron:
+    # 盘中每 30 分钟同步板块（交易日 9:35–14:55）
+    35,5 9-11 * * 1-5 cd /opt/AIpicking/backend && \
+        venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
+    5,35 13-14 * * 1-5 cd /opt/AIpicking/backend && \
+        venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
+    55 14 * * 1-5 cd /opt/AIpicking/backend && \
+        venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
+
+    # 收盘后全量同步（18:30）
     30 18 * * 1-5 cd /opt/AIpicking/backend && \
         venv/bin/python scripts/sync_market_data.py >> /var/log/aipicking/ingest.log 2>&1
 """
@@ -415,6 +425,17 @@ _DATAAPI_KEYS = [
     ("f204","leader_stock",      None),                       # 领涨股名称
 ]
 
+# Intraday lightweight keys: essentials only (5 vs 9 full).  Fewer API calls =
+# lower risk of triggering Eastmoney rate limits during trading hours.
+# net_inflow is approximated from main_net_yi alone (no large/mid/small breakdown).
+_INTRODAY_KEYS = [
+    ("f62", "main_net_yi",       _yi),                        # 主力净流入 元→亿
+    ("f3",  "change_pct",        lambda v: round(float(v) / 100, 2) if v is not None else None),
+    ("f104","up_count",          lambda v: int(float(v)) if v is not None else None),
+    ("f105","down_count",        lambda v: int(float(v)) if v is not None else None),
+    ("f204","leader_stock",      None),                       # 领涨股名称
+]
+
 
 def _dataapi_get(code: str, key: str) -> dict:
     """Fetch all sectors from dataapi, return dict keyed by sector code (f12).
@@ -438,12 +459,16 @@ def _dataapi_get(code: str, key: str) -> dict:
     return {item["f12"]: item for item in items}
 
 
-def fetch_sectors(sector_type: str) -> list[dict]:
+def fetch_sectors(sector_type: str, keys: Optional[list] = None) -> list[dict]:
     """Fetch sector data via dataapi — multiple key calls merged by sector code.
 
     Args:
         sector_type: 'industry' (m:90+s:4) or 'concept' (m:90+s:3).
+        keys:       Override field list (default: _DATAAPI_KEYS for full sync).
+                    Pass _INTRODAY_KEYS for lightweight intraday sync.
     """
+    if keys is None:
+        keys = _DATAAPI_KEYS
     code = SECTOR_TYPES.get(sector_type)
     if not code:
         logging.warning(f"Unknown sector_type: {sector_type}")
@@ -459,7 +484,7 @@ def fetch_sectors(sector_type: str) -> list[dict]:
 
     # Fetch additional fields in parallel-minded sequence
     aux = {}
-    for key, _out_field, _converter in _DATAAPI_KEYS:
+    for key, _out_field, _converter in keys:
         if key == "f62":
             continue  # already fetched as primary
         data = _dataapi_get(code, key)
@@ -478,7 +503,7 @@ def fetch_sectors(sector_type: str) -> list[dict]:
         }
 
         # Merge all auxiliary fields
-        for key, out_field, converter in _DATAAPI_KEYS:
+        for key, out_field, converter in keys:
             # Get value from primary or auxiliary data
             val = None
             if key == "f62":
@@ -494,12 +519,10 @@ def fetch_sectors(sector_type: str) -> list[dict]:
                     val = None
             row[out_field] = val
 
-        # Compute net_inflow = main + large + mid + small
-        components = [
-            row.get(k) or 0.0
-            for k in ("main_net_yi", "large_net_yi", "mid_net_yi", "small_net_yi")
-        ]
-        row["net_inflow"] = round(sum(components), 2)
+        # Compute net_inflow from available fund-flow components
+        flow_keys = ("main_net_yi", "large_net_yi", "mid_net_yi", "small_net_yi")
+        components = [row.get(k) or 0.0 for k in flow_keys if k in row]
+        row["net_inflow"] = round(sum(components), 2) if components else row.get("main_net_yi") or 0.0
 
         # leader_change not directly available in dataapi
         row.setdefault("leader_change", None)
@@ -737,6 +760,66 @@ def sync(date_str: Optional[str] = None) -> dict:
     return result
 
 
+def sync_intraday(date_str: Optional[str] = None) -> dict:
+    """Intraday sector-only sync — lightweight, fewer API calls per run.
+
+    Only syncs industry + concept sectors (5 keys each instead of 9).
+    Skips hot stocks, northbound, themes — those don't change intraday.
+    Uses more conservative EM_MIN_INTERVAL to stay under rate-limit radar
+    during high-frequency trading-hours calls.
+    """
+    if date_str is None:
+        date_str = date.today().strftime("%Y-%m-%d")
+
+    # More conservative interval during trading hours (9 calls/day spread
+    # across 30-min gaps, but each individual run is still serial & throttled)
+    global EM_MIN_INTERVAL
+    EM_MIN_INTERVAL = 2.0
+
+    result = {
+        "date": date_str,
+        "hot_stocks_count": 0,
+        "themes_count": 0,
+        "northbound": False,
+        "industry_count": 0,
+        "concept_count": 0,
+        "errors": [],
+        "mode": "intraday",
+    }
+
+    # Industry sectors (lightweight keys)
+    try:
+        industries = fetch_sectors("industry", keys=_INTRODAY_KEYS)
+        if industries:
+            _save_sectors(date_str, industries)
+            result["industry_count"] = len(industries)
+    except Exception as e:
+        result["errors"].append(f"industry_sectors: {e}")
+        logging.error(f"industry sectors failed: {e}")
+
+    # Gap between industry and concept fetches
+    if industries:
+        gap = random.uniform(3.0, 8.0)
+        logging.info(f"Waiting {gap:.1f}s before concept sector fetch...")
+        time.sleep(gap)
+
+    # Concept sectors (lightweight keys)
+    try:
+        concepts = fetch_sectors("concept", keys=_INTRODAY_KEYS)
+        if concepts:
+            _save_sectors(date_str, concepts)
+            result["concept_count"] = len(concepts)
+    except Exception as e:
+        result["errors"].append(f"concept_sectors: {e}")
+        logging.error(f"concept sectors failed: {e}")
+
+    logging.info(
+        f"Intraday sync {date_str} complete: "
+        f"industries={result['industry_count']} concepts={result['concept_count']}"
+    )
+    return result
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # CLI
 # ═════════════════════════════════════════════════════════════════════════
@@ -745,6 +828,9 @@ def main():
     p = argparse.ArgumentParser(description="Daily A-share market data sync (PostgreSQL)")
     p.add_argument("--date", default=None,
                    help="Trade date YYYY-MM-DD (default: today)")
+    p.add_argument("--intraday", action="store_true",
+                   help="Intraday mode: sector-only, lightweight keys, "
+                        "conservative throttling (for 30-min trading-hours cron)")
     p.add_argument("--pg-url", default=None,
                    help="PostgreSQL connection URL (default: $DATABASE_URL)")
     p.add_argument("--log-level", default="INFO",
@@ -765,15 +851,20 @@ def main():
 
     date_str = args.date or date.today().strftime("%Y-%m-%d")
 
-    result = sync(date_str=date_str)
+    if args.intraday:
+        result = sync_intraday(date_str=date_str)
+    else:
+        result = sync(date_str=date_str)
 
     print()
     print("=" * 50)
-    print(f"  Sync Report — {result['date']}")
+    label = "Intraday Sync Report" if result.get("mode") == "intraday" else "Sync Report"
+    print(f"  {label} — {result['date']}")
     print("=" * 50)
-    print(f"  Hot stocks:       {result['hot_stocks_count']:>5d}")
-    print(f"  Themes:           {result['themes_count']:>5d}")
-    print(f"  Northbound flow:  {'ok' if result['northbound'] else 'no':>5s}")
+    if result.get("mode") != "intraday":
+        print(f"  Hot stocks:       {result['hot_stocks_count']:>5d}")
+        print(f"  Themes:           {result['themes_count']:>5d}")
+        print(f"  Northbound flow:  {'ok' if result['northbound'] else 'no':>5s}")
     print(f"  Industry sectors: {result['industry_count']:>5d}")
     print(f"  Concept sectors:  {result['concept_count']:>5d}")
     if result["errors"]:

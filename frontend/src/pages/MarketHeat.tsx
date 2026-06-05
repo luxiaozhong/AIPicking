@@ -203,13 +203,13 @@ const MarketHeat: React.FC = () => {
         <h2 style={{ margin: 0 }}>市场热度</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <DatePicker
-            value={store.tradeDate ? dayjs(store.tradeDate, 'YYYYMMDD') : null}
-            onChange={(d) => d && store.setTradeDate(d.format('YYYYMMDD'))}
+            value={store.tradeDate ? dayjs(store.tradeDate) : null}
+            onChange={(d) => d && store.setTradeDate(d.format('YYYY-MM-DD'))}
             allowClear={false}
             format="YYYY-MM-DD"
             disabledDate={(d) => {
               if (!store.availableDates.length) return false;
-              return !store.availableDates.includes(d.format('YYYYMMDD'));
+              return !store.availableDates.includes(d.format('YYYY-MM-DD'));
             }}
           />
           <Button icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>

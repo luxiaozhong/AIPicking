@@ -35,7 +35,7 @@ class Daily(BaseModel):
     )
 
     ts_code = Column(String(20), nullable=False, index=True)
-    trade_date = Column(String(8), nullable=False, index=True)
+    trade_date = Column(String(10), nullable=False, index=True)
     open = Column(Float)
     high = Column(Float)
     low = Column(Float)

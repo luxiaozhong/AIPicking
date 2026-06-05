@@ -165,8 +165,8 @@ def _fmt_date(d: str) -> str:
 
 
 def count_daily(trade_date: str) -> int:
-    """查询某日已有指数数据条数，trade_date 为 YYYYMMDD"""
-    trade_date = trade_date.replace("-", "")
+    """查询某日已有指数数据条数，trade_date 为 YYYYMMDD 或 YYYY-MM-DD"""
+    trade_date = _fmt_date(trade_date)  # 统一为 YYYY-MM-DD
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -235,7 +235,7 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str)
         if len(row) < 6:
             continue
         try:
-            trade_date = row[0].replace("-", "")
+            trade_date = row[0]  # 腾讯接口已返回 YYYY-MM-DD
             # 腾讯 K 线字段顺序: [日期, 开盘, 收盘, 最高, 最低, 成交量]
             open_p  = float(row[1])
             close_p = float(row[2])
@@ -255,7 +255,7 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str)
 
 async def fetch_realtime_quote_index(session, idx: dict, trade_date: str):
     """
-    拉取指数实时行情。trade_date 为 YYYYMMDD。
+    拉取指数实时行情。trade_date 为 YYYY-MM-DD。
     指数 qt 接口需要 s_ 前缀，且字段位置与个股不同。
     返回 record tuple 或 None。
     """
@@ -347,6 +347,7 @@ def bulk_upsert(records):
 
 async def run_intraday(trade_date: str):
     """用实时接口拉取 4 个指数的盘中报价"""
+    trade_date = _fmt_date(trade_date)  # 转为 YYYY-MM-DD 写入 DB
     print(f"🚀 实时接口模式：拉取 {trade_date} 指数报价...\n")
 
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:

@@ -130,6 +130,12 @@ def fetch_valuations_batch(symbols: list[str]) -> list[dict]:
     return results
 
 
+def _fmt_date(d: str) -> str:
+    """YYYYMMDD → YYYY-MM-DD；已是 YYYY-MM-DD 则原样返回"""
+    d = d.replace("-", "")
+    return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+
+
 def bulk_upsert(records: list[tuple], trade_date: str):
     conn = get_conn()
     cur = conn.cursor()
@@ -149,6 +155,7 @@ def bulk_upsert(records: list[tuple], trade_date: str):
 
 
 def sync_date(trade_date: str):
+    trade_date = _fmt_date(trade_date)  # 转为 YYYY-MM-DD 写入 DB
     stocks = load_stocks()
     print(f"📊 拉取 {trade_date} 估值数据，共 {len(stocks)} 只股票...")
 

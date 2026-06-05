@@ -152,8 +152,8 @@ def load_stocks():
 
 
 def count_daily(trade_date: str) -> int:
-    """查询某日已有数据条数，trade_date 为 YYYYMMDD"""
-    trade_date = trade_date.replace("-", "")
+    """查询某日已有数据条数，trade_date 为 YYYYMMDD 或 YYYY-MM-DD"""
+    trade_date = _fmt_date(trade_date)  # 统一为 YYYY-MM-DD
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM daily WHERE trade_date=%s", (trade_date,))
@@ -193,7 +193,7 @@ async def download_one(session, ts_code, symbol, start_date, end_date):
         if len(row) < 6:
             continue
         try:
-            trade_date = row[0].replace("-", "")
+            trade_date = row[0]  # 腾讯接口已返回 YYYY-MM-DD
             # 腾讯K线接口 qfqday 字段顺序: [日期, 开盘, 收盘, 最高, 最低, 成交量]
             open_p  = float(row[1])
             close_p = float(row[2])
@@ -212,7 +212,7 @@ async def download_one(session, ts_code, symbol, start_date, end_date):
 async def fetch_realtime_quote(session, symbol, trade_date):
     """
     拉取实时报价，返回 (record_tuple, market_cap, circ_market_cap)
-    trade_date 为 YYYYMMDD
+    trade_date 为 YYYY-MM-DD
     """
     url = f"{QUOTE_API}{symbol}"
     try:
@@ -315,6 +315,7 @@ def bulk_upsert(records):
 # ── 实时拉取任务（盘中模式） ──────────────────────────────────────────────
 async def run_intraday(stocks, trade_date: str):
     """用实时接口拉取 trade_date（YYYYMMDD）的数据"""
+    trade_date = _fmt_date(trade_date)  # 转为 YYYY-MM-DD 写入 DB
     print(f"🚀 实时接口模式：拉取 {trade_date} 报价，共 {len(stocks)} 只股票...\n")
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
         semaphore = asyncio.Semaphore(CONCURRENCY)
@@ -388,7 +389,7 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
             cur = conn.cursor()
             cur.execute(
                 "SELECT COUNT(*) FROM daily WHERE ts_code=%s AND trade_date=%s AND market_cap IS NULL",
-                (s["ts_code"], end_date.replace("-", "")))
+                (s["ts_code"], _fmt_date(end_date)))
             need = cur.fetchone()[0]
             conn.close()
             if not need:
@@ -399,7 +400,7 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
                 cur = conn.cursor()
                 cur.execute(
                     "UPDATE daily SET market_cap=%s, circ_market_cap=%s WHERE ts_code=%s AND trade_date=%s",
-                    (market_cap, circ_market_cap, s["ts_code"], end_date.replace("-", "")))
+                    (market_cap, circ_market_cap, s["ts_code"], _fmt_date(end_date)))
                 conn.commit()
                 conn.close()
                 updated_cap += 1
@@ -408,7 +409,7 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
 
         # ── qt 兜底：补齐日线接口缺失的股票 ──
         if do_fallback:
-            fallback_date = end_date.replace("-", "")
+            fallback_date = _fmt_date(end_date)
             conn = get_conn()
             cur = conn.cursor()
             cur.execute("""
