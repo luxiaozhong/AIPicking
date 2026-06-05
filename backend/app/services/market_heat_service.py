@@ -17,7 +17,7 @@ class MarketHeatService:
     @staticmethod
     async def _get_latest_date(db: AsyncSession) -> Optional[str]:
         """获取最新有数据的交易日"""
-        stmt = select(func.max(DailySectorFlow.trade_date))
+        stmt = select(func.max(DailySectorFlow.__table__.c.trade_date))
         result = await db.execute(stmt)
         return result.scalar()
 
@@ -244,9 +244,9 @@ class MarketHeatService:
     @staticmethod
     async def get_available_dates(db: AsyncSession, days: int = 20) -> list[str]:
         stmt = (
-            select(DailySectorFlow.trade_date)
+            select(DailySectorFlow.__table__.c.trade_date)
             .distinct()
-            .order_by(DailySectorFlow.trade_date.desc())
+            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
             .limit(days)
         )
         result = await db.execute(stmt)
