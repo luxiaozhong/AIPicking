@@ -36,11 +36,14 @@ class MarketHeatService:
             return {"trade_date": None, "temperature": None, "northbound": None,
                     "advance_decline": None, "leading_sector": None}
 
-        # 北向资金（用 northbound_flow 自己表的日期）
+        # 北向资金（用 northbound_flow 自己表的日期，或用户指定日期转格式）
         northbound = None
-        if nb_date:
+        nb_query_date = trade_date or nb_date
+        if nb_query_date:
+            nb_query_date = MarketHeatService._to_yyyy_mm_dd(nb_query_date) if trade_date else nb_date
+        if nb_query_date:
             nb_stmt = select(DailyNorthboundFlow.__table__).where(
-                DailyNorthboundFlow.trade_date == nb_date
+                DailyNorthboundFlow.trade_date == nb_query_date
             )
             nb_result = await db.execute(nb_stmt)
             nb_row = nb_result.mappings().first()
@@ -166,6 +169,7 @@ class MarketHeatService:
         date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyHotTheme.__table__.c)
         if not date:
             return []
+        date = MarketHeatService._to_yyyy_mm_dd(date)
         stmt = select(DailyHotTheme.__table__).where(
             DailyHotTheme.trade_date == date
         ).order_by(DailyHotTheme.stock_count.desc()).limit(limit)
@@ -180,6 +184,7 @@ class MarketHeatService:
         date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyHotStock.__table__.c)
         if not date:
             return []
+        date = MarketHeatService._to_yyyy_mm_dd(date)
         stmt = select(DailyHotStock.__table__).where(
             DailyHotStock.trade_date == date,
             DailyHotStock.reason.ilike(f"%{theme_name}%"),
@@ -196,6 +201,7 @@ class MarketHeatService:
         date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyHotStock.__table__.c)
         if not date:
             return {"items": [], "total": 0}
+        date = MarketHeatService._to_yyyy_mm_dd(date)
 
         # 总数
         count_stmt = select(func.count()).select_from(DailyHotStock.__table__).where(
@@ -219,6 +225,7 @@ class MarketHeatService:
         date = trade_date or await MarketHeatService._get_latest_date_for(db, DailyDragonTiger.__table__.c)
         if not date:
             return {"items": [], "total": 0}
+        date = MarketHeatService._to_yyyy_mm_dd(date)
 
         count_stmt = select(func.count()).select_from(DailyDragonTiger.__table__).where(
             DailyDragonTiger.trade_date == date
@@ -264,14 +271,27 @@ class MarketHeatService:
 
     @staticmethod
     async def get_available_dates(db: AsyncSession, days: int = 20) -> list[str]:
+        """有数据的交易日列表（从 daily 表取，覆盖最广）"""
         stmt = (
-            select(DailySectorFlow.__table__.c.trade_date)
+            select(Daily.__table__.c.trade_date)
             .distinct()
-            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
+            .order_by(Daily.__table__.c.trade_date.desc())
             .limit(days)
         )
         result = await db.execute(stmt)
         return [r[0] for r in result.all()]
+
+    @staticmethod
+    def _to_yyyymmdd(date_str: str) -> str:
+        """将 YYYY-MM-DD 转为 YYYYMMDD"""
+        return date_str.replace("-", "") if len(date_str) == 10 else date_str
+
+    @staticmethod
+    def _to_yyyy_mm_dd(date_str: str) -> str:
+        """将 YYYYMMDD 转为 YYYY-MM-DD"""
+        if len(date_str) == 8:
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        return date_str
 
     # ── 市场温度计算 ─────────────────────────────────────────
 
