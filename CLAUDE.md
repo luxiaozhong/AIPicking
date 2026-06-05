@@ -89,28 +89,4 @@ frontend/src/
 
 `backend/TmpScriptsBackTest/` 存放独立的批量回测脚本和生成的 HTML 报告，不走 FastAPI 应用流程。
 
-**现有文件：**
-
-| 文件 | 说明 |
-|------|------|
-| `batch_backtest_2022_2025.py` | 超跌反弹策略 2022-2025 批量回测脚本 |
-| `batch_backtest_2020_2023.py` | 超跌反弹策略 2020-2023 批量回测脚本 |
-| `analysis_oversold_bounce.py` | 超跌反弹分析 v1 |
-| `analysis_oversold_bounce_v2.py` | 超跌反弹分析 v2 |
-| `oversold-bounce-2022-2025-report.html` | 超跌反弹策略 2022-2025 HTML 报告（7日/15日持有期） |
-| `oversold-bounce-2022-2025-1d-3d-report.html` | 超跌反弹策略 2022-2025 HTML 报告（1日/3日持有期） |
-| `oversold-bounce-2020-2023-report.html` | 超跌反弹策略 2020-2023 HTML 报告 |
-| `oversold-bounce-performance-report.html` | 超跌反弹策略 2026 表现分析报告 |
-| `trend-upstart-flow-report.html` | Trend Upstart Flow 批量回测报告 |
-| `generate_trend_upstart_report.py` | 从 `batch_backtest_reports` 表读取数据生成 HTML 报告的模板脚本 |
-
-**数据库相关：**
-- 批量回测结果存储在 `batch_backtest_reports` 表（ORM: `BatchBacktestReport`）
-- `daily_results` 字段为 JSON 数组，每条含 `cutoff_date`、`recommendations`（每只股票含 `return_3d/7d/15d`）、`summary`
-- 查询需用异步 session：`from app.database import AsyncSessionLocal`
-
-**生成新报告时的要点：**
-- HTML 样式参考现有报告，保持一致
-- 列名用中文，百分比用 `pos`（红涨）/`neg`（绿跌）CSS class
-- 无远期数据的日期（如15日后超出回测截止日）显示 "N/A"
-- 脚本放在此目录下，`export PYTHONPATH` 包含 `backend/` 后运行
+文件清单、数据库说明、报告规范等全部内容详见 [`backend/TmpScriptsBackTest/README.md`](backend/TmpScriptsBackTest/README.md)。

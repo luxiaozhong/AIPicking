@@ -259,18 +259,28 @@ DATA_END   = "20260215"   # 15 天缓冲（保证前向价格可查）
 
 ---
 
-## 三、文件位置约定
+## 三、现有文件
 
-```
-backend/tmpScriptsBackTest/
-├── README.md                                 # 本手册
-├── batch_backtest_2022_2025.py               # 批量回测脚本
-├── analysis_oversold_bounce_v2.py            # 单日分析脚本（参考）
-├── oversold-bounce-2022-2025-report.html     # 批量回测 HTML 报表
-└── oversold-bounce-performance-report.html   # 单次分析 HTML 报表
-```
+| 文件 | 说明 |
+|------|------|
+| `README.md` | 本手册 |
+| `batch_backtest_2022_2025.py` | 超跌反弹策略 2022-2025 批量回测脚本 |
+| `batch_backtest_2020_2023.py` | 超跌反弹策略 2020-2023 批量回测脚本 |
+| `batch_backtest_2022_2025_1d_3d.py` | 超跌反弹策略 2022-2025 1日/3日持有期批量回测脚本 |
+| `analysis_oversold_bounce.py` | 超跌反弹分析 v1 |
+| `analysis_oversold_bounce_v2.py` | 超跌反弹分析 v2 |
+| `oversold_bounce.py` | 超跌反弹策略模块 |
+| `run_daily_backtests.py` | 每日批量回测运行脚本 |
+| `generate_trend_upstart_report.py` | 从 `batch_backtest_reports` 表读取数据生成 HTML 报告的模板脚本 |
+| `oversold-bounce-2022-2025-report.html` | 超跌反弹策略 2022-2025 HTML 报告（7日/15日持有期） |
+| `oversold-bounce-2022-2025-1d-3d-report.html` | 超跌反弹策略 2022-2025 HTML 报告（1日/3日持有期） |
+| `oversold-bounce-2020-2023-report.html` | 超跌反弹策略 2020-2023 HTML 报告 |
+| `oversold-bounce-performance-report.html` | 超跌反弹策略 2026 表现分析报告 |
+| `oversold-bounce-performance-report.md` | 超跌反弹策略 2026 表现分析 Markdown 报告 |
+| `trend-upstart-flow-report202601-05.html` | Trend Upstart Flow 批量回测报告 |
+| `trend-upstart-flow-report.html` | Trend Upstart Flow 批量回测报告（旧版） |
 
-策略文件位置：`backend/app/strategies/examples/oversold_bounce.py`
+**策略文件位置**：`backend/app/strategies/examples/oversold_bounce.py`
 
 ---
 
@@ -304,3 +314,20 @@ open backend/tmpScriptsBackTest/oversold-bounce-2022-2025-report.html
 - 直接 `importlib` 加载策略模块，绕过了沙箱的 `exec()` 限制
 - 注意恢复 `TOP_PICKS` 原值，避免影响后续正常回测
 - HTML 内嵌 CSS，可直接在浏览器打开，无需服务器
+
+---
+
+## 五、生成新报告
+
+### 数据库相关
+
+- 批量回测结果存储在 `batch_backtest_reports` 表（ORM: `BatchBacktestReport`）
+- `daily_results` 字段为 JSON 数组，每条含 `cutoff_date`、`recommendations`（每只股票含 `return_3d/7d/15d`）、`summary`
+- 查询需用异步 session：`from app.database import AsyncSessionLocal`
+
+### 报告规范
+
+- HTML 样式参考现有报告，保持一致
+- 列名用中文，百分比用 `pos`（红涨）/`neg`（绿跌）CSS class
+- 无远期数据的日期（如15日后超出回测截止日）显示 "N/A"
+- 脚本放在此目录下，`export PYTHONPATH` 包含 `backend/` 后运行
