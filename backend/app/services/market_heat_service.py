@@ -201,7 +201,95 @@ class MarketHeatService:
             DailyHotStock.reason.ilike(f"%{theme_name}%"),
         ).order_by(DailyHotStock.sort_order.asc())
         result = await db.execute(stmt)
-        return [dict(r) for r in result.mappings().all()]
+        items = [dict(r) for r in result.mappings().all()]
+        return await MarketHeatService._enrich_with_daily(db, items, date)
+
+    # ── 数据增强 ─────────────────────────────────────────────
+
+    @staticmethod
+    async def _enrich_with_daily(
+        db: AsyncSession, items: list[dict], yyyymmdd_date: str
+    ) -> list[dict]:
+        """从 daily 表和 stocks 表补齐收盘价、涨幅、换手率"""
+        if not items:
+            return items
+
+        daily_date = MarketHeatService._to_yyyymmdd(yyyymmdd_date)
+        codes = [it["stock_code"] for it in items]
+        from ..models.stock_tables import Stock
+
+        # 将纯数字 code 转为 ts_code: 6xxxxx→SH, 其他→SZ
+        def _to_ts(code: str) -> str:
+            if code.startswith(("6", "9")):
+                return f"{code}.SH"
+            return f"{code}.SZ"
+
+        code_to_ts = {c: _to_ts(c) for c in codes}
+        ts_codes = list(code_to_ts.values())
+
+        # 流通股本
+        stock_stmt = select(Stock.ts_code, Stock.float_shares).where(
+            Stock.ts_code.in_(ts_codes)
+        )
+        stock_result = await db.execute(stock_stmt)
+        ts_to_shares = {r.ts_code: (r.float_shares or 0) for r in stock_result.all()}
+
+        # 当日行情 + 前一日收盘价
+        if ts_codes:
+            daily_alias = Daily.__table__.alias()
+            prev_alias = Daily.__table__.alias()
+
+            stmt = (
+                select(
+                    daily_alias.c.ts_code,
+                    daily_alias.c.close,
+                    daily_alias.c.open,
+                    daily_alias.c.vol,
+                    func.coalesce(prev_alias.c.close, daily_alias.c.open).label("prev_close"),
+                )
+                .select_from(daily_alias)
+                .outerjoin(
+                    prev_alias,
+                    (daily_alias.c.ts_code == prev_alias.c.ts_code)
+                    & (prev_alias.c.trade_date == (
+                        select(func.max(Daily.__table__.c.trade_date))
+                        .where(
+                            (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                            & (Daily.__table__.c.trade_date < daily_date)
+                        )
+                        .scalar_subquery()
+                    )),
+                )
+                .where(
+                    daily_alias.c.trade_date == daily_date,
+                    daily_alias.c.ts_code.in_(ts_codes),
+                )
+            )
+            result = await db.execute(stmt)
+            daily_map = {}
+            for r in result.mappings().all():
+                d = dict(r)
+                code = d.pop("ts_code")
+                daily_map[code] = d
+        else:
+            daily_map = {}
+
+        for item in items:
+            code = item["stock_code"]
+            ts = code_to_ts.get(code)
+            d = daily_map.get(ts, {}) if ts else {}
+            item["close"] = d.get("close")
+            item["open"] = d.get("open")
+            if d.get("close") and d.get("prev_close") and d["prev_close"] != 0:
+                item["change_pct"] = round(
+                    (d["close"] - d["prev_close"]) / d["prev_close"] * 100, 2
+                )
+            vol = d.get("vol") or 0
+            shares = ts_to_shares.get(ts, 0) or 0 if ts else 0
+            if vol and shares:
+                item["turnover_pct"] = round(vol / shares * 100, 2)
+
+        return items
 
     # ── 热门股票 / 龙虎榜 / 北向 ──────────────────────────────
 
@@ -227,6 +315,7 @@ class MarketHeatService:
         ).limit(page_size)
         result = await db.execute(stmt)
         items = [dict(r) for r in result.mappings().all()]
+        items = await MarketHeatService._enrich_with_daily(db, items, date)
         return {"items": items, "total": total}
 
     @staticmethod
