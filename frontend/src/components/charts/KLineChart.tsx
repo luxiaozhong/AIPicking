@@ -18,6 +18,8 @@ interface KLineChartProps {
   maValues?: { ma20?: number | null; ma60?: number | null };
   pb?: number | null;
   pe?: number | null;
+  initialZoomStart?: number;
+  initialZoomEnd?: number;
 }
 
 function calcMA(data: number[], period: number): (number | null)[] {
@@ -40,7 +42,7 @@ const MA_LINES = [
   { period: 60, name: 'MA60', color: '#1e88e5' },
 ] as const;
 
-export default function KLineChart({ data, loading, height = 500, buyMarker, sellMarker, maValues, pb, pe }: KLineChartProps) {
+export default function KLineChart({ data, loading, height = 500, buyMarker, sellMarker, maValues, pb, pe, initialZoomStart, initialZoomEnd }: KLineChartProps) {
   const option: EChartsOption = useMemo(() => {
     if (!data.length) return {};
 
@@ -179,8 +181,8 @@ export default function KLineChart({ data, loading, height = 500, buyMarker, sel
         },
       ],
       dataZoom: [
-        { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-        { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100, height: 20, bottom: 0 },
+        { type: 'inside', xAxisIndex: [0, 1], start: initialZoomStart ?? 0, end: initialZoomEnd ?? 100 },
+        { type: 'slider', xAxisIndex: [0, 1], start: initialZoomStart ?? 0, end: initialZoomEnd ?? 100, height: 20, bottom: 0 },
       ],
       series: [
         {

@@ -22,7 +22,7 @@ export default function StockKLineModal({
   name,
   open,
   onClose,
-  days = 365,
+  days = 504,
   buyDate,
   buyPrice,
   sellDate,
@@ -39,7 +39,7 @@ export default function StockKLineModal({
     }
   }, [open, ts_code]);
 
-  const daysLabel = days >= 365 ? '近一年' : `近${days}天`;
+  const daysLabel = days >= 504 ? '近两年' : days >= 365 ? '近一年' : `近${days}天`;
   const title = name
     ? `${name}（${ts_code}）— ${daysLabel} K 线图`
     : `${ts_code} — ${daysLabel} K 线图`;
@@ -62,6 +62,8 @@ export default function StockKLineModal({
         sellMarker={sellDate && sellPrice != null ? { date: sellDate, price: sellPrice } : undefined}
         pb={valuation?.pb ?? null}
         pe={valuation?.pe_ttm ?? null}
+        initialZoomStart={75}
+        initialZoomEnd={100}
       />
     </Modal>
   );
