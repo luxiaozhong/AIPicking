@@ -227,9 +227,9 @@ const MarketHeat: React.FC = () => {
           loading={store.overviewLoading}
           onNorthboundClick={() => setKpiDetail({ type: 'northbound' })}
           onAdvanceDeclineClick={() => setKpiDetail({ type: 'advance_decline' })}
-          onLeadingSectorClick={() => store.overview?.leading_sectors?.[0] && setKpiDetail({
+          onLeadingSectorClick={(name) => setKpiDetail({
             type: 'leading_sector',
-            sectorName: store.overview.leading_sectors[0].sector_name,
+            sectorName: name,
           })}
         />
       </div>

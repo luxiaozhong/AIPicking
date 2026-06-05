@@ -7,7 +7,7 @@ interface Props {
   loading: boolean;
   onNorthboundClick?: () => void;
   onAdvanceDeclineClick?: () => void;
-  onLeadingSectorClick?: () => void;
+  onLeadingSectorClick?: (sectorName: string) => void;
 }
 
 const TEMP_COLORS: Record<string, [string, string]> = {
@@ -64,15 +64,14 @@ const TemperatureCard: React.FC<Props> = ({
       gradient: 'linear-gradient(135deg, #52c41a, #389e0d)',
       onClick: onAdvanceDeclineClick,
     },
-    {
-      label: '🏆 领涨板块',
-      value: overview.leading_sectors?.[0]?.sector_name || '--',
-      sub: overview.leading_sectors?.length
-        ? overview.leading_sectors.map((s, i) => `${i + 1}.${s.sector_name} ${s.change_pct > 0 ? '+' : ''}${s.change_pct.toFixed(1)}%`).join('  ')
-        : '--',
-      gradient: 'linear-gradient(135deg, #722ed1, #531dab)',
-      onClick: onLeadingSectorClick,
-    },
+    // 领涨板块 Top 3 — 三个独立卡片
+    ...(overview.leading_sectors || []).map((s, i) => ({
+      label: `🏆 领涨${['一','二','三'][i]}`,
+      value: s.sector_name,
+      sub: `${s.change_pct > 0 ? '+' : ''}${s.change_pct.toFixed(1)}% · 净流入 ${s.main_net_yi.toFixed(1)}亿`,
+      gradient: ['linear-gradient(135deg, #722ed1, #531dab)', 'linear-gradient(135deg, #9254de, #722ed1)', 'linear-gradient(135deg, #b37feb, #9254de)'][i],
+      onClick: () => onLeadingSectorClick?.(s.sector_name),
+    })),
   ];
 
   return (
