@@ -18,7 +18,7 @@ export const stockService = {
 
   async getValuation(tsCode: string): Promise<ValuationData | null> {
     const response = await api.get<{ code: number; data: ValuationData[] }>(
-      `/v1/valuation/${tsCode}`,
+      `/valuation/${tsCode}`,
       { params: { days: 1 } },
     );
     const data = response.data.data;
