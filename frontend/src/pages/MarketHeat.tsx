@@ -234,7 +234,7 @@ const MarketHeat: React.FC = () => {
         />
       </div>
 
-      {/* 第二层: 可视化 */}
+      {/* 第二层: 可视化 + 明细 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={16}>
           <SectorTreemap
@@ -251,13 +251,11 @@ const MarketHeat: React.FC = () => {
             loading={store.themesLoading}
             onThemeClick={(t: ThemeItem) => store.openDrawer('theme', t.theme_name, t.theme_name)}
           />
+          <Card style={{ marginTop: 16 }}>
+            <Tabs items={tabItems} />
+          </Card>
         </Col>
       </Row>
-
-      {/* 第三层: 明细列表 */}
-      <Card>
-        <Tabs items={tabItems} />
-      </Card>
 
       {/* 抽屉 */}
       <SectorDrawer
