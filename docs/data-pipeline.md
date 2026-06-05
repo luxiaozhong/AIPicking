@@ -8,7 +8,7 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Crontab (服务器) — 仅一条                          │
 │                                                                     │
-│  17:00 ── sync_all.py                                              │
+│  16:15 ── sync_all.py                                              │
 │            │                                                        │
 │            ├─ 1. update_daily.py        ──► daily (日线 + 市值)      │
 │            ├─ 2. update_index_daily.py  ──► daily (指数日线)         │
@@ -31,8 +31,8 @@
 所有同步任务由 `sync_all.py` 统一调度，cron 只需一条：
 
 ```cron
-# AIpicking 每日数据同步总调度（每个工作日 17:00）
-0 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
+# AIpicking 每日数据同步总调度（每个工作日 16:15）
+15 16 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
 ```
 
 `sync_all.py` 内部按依赖顺序串行执行 6 个脚本，任意一步失败不会阻断后续任务，最终打印成功/失败汇总。
