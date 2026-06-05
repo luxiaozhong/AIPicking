@@ -300,7 +300,7 @@ class MarketHeatService:
             vol = d.get("vol") or 0
             shares = ts_to_shares.get(ts, 0) or 0 if ts else 0
             if vol and shares:
-                item["turnover_pct"] = round(vol / shares * 100, 2)
+                item["turnover_pct"] = round(vol * 100 / shares * 100, 2)
 
         return items
 
