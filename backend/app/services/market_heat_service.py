@@ -63,11 +63,12 @@ class MarketHeatService:
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
 
-        # 领涨板块（用 sector_flow 自己表的日期）
+        # 领涨板块（用 sector_flow 自己表的日期，无数据时回退到最新）
         leading = None
-        if sector_date:
+        query_sector_date = sector_date  # sector_date 已经是该表最新日期
+        if query_sector_date:
             sector_stmt = select(DailySectorFlow.__table__).where(
-                DailySectorFlow.trade_date == sector_date,
+                DailySectorFlow.trade_date == query_sector_date,
                 DailySectorFlow.sector_type == "industry"
             ).order_by(DailySectorFlow.change_pct.desc()).limit(1)
             sector_result = await db.execute(sector_stmt)
@@ -103,12 +104,22 @@ class MarketHeatService:
         date = trade_date or await MarketHeatService._get_latest_date_for(db, DailySectorFlow.__table__.c)
         if not date:
             return []
-        stmt = select(DailySectorFlow.__table__).where(
-            DailySectorFlow.trade_date == date,
-            DailySectorFlow.sector_type == sector_type,
-        ).order_by(DailySectorFlow.rank.asc())
-        result = await db.execute(stmt)
-        return [dict(r) for r in result.mappings().all()]
+
+        async def _query(d: str) -> list[dict]:
+            stmt = select(DailySectorFlow.__table__).where(
+                DailySectorFlow.trade_date == d,
+                DailySectorFlow.sector_type == sector_type,
+            ).order_by(DailySectorFlow.rank.asc())
+            result = await db.execute(stmt)
+            return [dict(r) for r in result.mappings().all()]
+
+        items = await _query(date)
+        # 指定日期无数据时自动回退到最新
+        if not items and trade_date:
+            fallback = await MarketHeatService._get_latest_date_for(db, DailySectorFlow.__table__.c)
+            if fallback and fallback != date:
+                items = await _query(fallback)
+        return items
 
     @staticmethod
     async def get_sector_detail(
