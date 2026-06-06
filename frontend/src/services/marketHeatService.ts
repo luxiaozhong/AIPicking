@@ -23,6 +23,11 @@ export interface OverviewData {
     change_pct: number;
     main_net_yi: number;
   }[];
+  lagging_sectors: {
+    sector_name: string;
+    change_pct: number;
+    main_net_yi: number;
+  }[];
 }
 
 export interface SectorItem {

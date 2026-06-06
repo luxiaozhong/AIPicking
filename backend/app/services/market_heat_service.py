@@ -58,15 +58,24 @@ class MarketHeatService:
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
 
-        # 领涨板块 Top 3
+        # 领涨板块 Top 2
         leading = []
+        # 领跌板块 Bottom 2
+        lagging = []
         if sector_date:
             sector_stmt = select(DailySectorFlow.__table__).where(
                 DailySectorFlow.trade_date == sector_date,
                 DailySectorFlow.sector_type == "industry"
-            ).order_by(DailySectorFlow.change_pct.desc()).limit(3)
+            ).order_by(DailySectorFlow.change_pct.desc()).limit(2)
             sector_result = await db.execute(sector_stmt)
             leading = [dict(r) for r in sector_result.mappings().all()]
+
+            lagging_stmt = select(DailySectorFlow.__table__).where(
+                DailySectorFlow.trade_date == sector_date,
+                DailySectorFlow.sector_type == "industry"
+            ).order_by(DailySectorFlow.change_pct.asc()).limit(2)
+            lagging_result = await db.execute(lagging_stmt)
+            lagging = [dict(r) for r in lagging_result.mappings().all()]
 
         # 计算市场温度
         temperature = MarketHeatService._calc_temperature(
@@ -76,19 +85,20 @@ class MarketHeatService:
             db=db,
         )
 
+        def _fmt_sector(s):
+            return {
+                "sector_name": s["sector_name"],
+                "change_pct": s["change_pct"],
+                "main_net_yi": s["main_net_yi"],
+            }
+
         return {
             "trade_date": daily_date,
             "temperature": temperature,
             "northbound": northbound,
             "advance_decline": adv,
-            "leading_sectors": [
-                {
-                    "sector_name": s["sector_name"],
-                    "change_pct": s["change_pct"],
-                    "main_net_yi": s["main_net_yi"],
-                }
-                for s in leading
-            ],
+            "leading_sectors": [_fmt_sector(s) for s in leading],
+            "lagging_sectors": [_fmt_sector(s) for s in lagging],
         }
 
     # ── 板块资金流 ────────────────────────────────────────────
