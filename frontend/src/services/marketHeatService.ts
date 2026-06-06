@@ -61,7 +61,7 @@ export interface SectorItem {
 export interface SectorDetail {
   info: SectorItem | null;
   trend: SectorItem[];
-  stocks: { ts_code: string; name: string; close: number; open: number }[];
+  stocks: { ts_code: string; name: string; close: number; open: number; change_pct?: number | null }[];
 }
 
 export interface ThemeItem {

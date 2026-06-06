@@ -167,15 +167,32 @@ class MarketHeatService:
                 info, trend = await _fetch(fallback)
                 date = fallback
 
-        # 成分股 Top5（从 daily 表查当天该板块涨幅最大的 stock）
         # 成分股 Top5（daily 表已统一为 YYYY-MM-DD）
         top5 = []
         if info:
             import re
             base_name = re.sub(r'[Ⅰ-Ⅷ]+$', '', info["sector_name"]).strip()
             from ..models.stock_tables import Stock
+
+            # 使用 pre_close 计算日涨跌幅（优先使用同步存储的值，回退到自连接）
+            PrevDaily2 = aliased(Daily)
+            pre_close_subq2 = (
+                select(PrevDaily2.close)
+                .where(PrevDaily2.ts_code == Stock.ts_code, PrevDaily2.trade_date < date)
+                .order_by(PrevDaily2.trade_date.desc())
+                .limit(1)
+                .correlate(Stock)
+                .scalar_subquery()
+            )
+            effective_pre_close = func.coalesce(Daily.pre_close, pre_close_subq2)
+            change_expr_sector = (
+                (Daily.close - effective_pre_close)
+                / func.nullif(effective_pre_close, 0) * 100
+            )
+
             stock_stmt = (
-                select(Stock.ts_code, Stock.name, Daily.close, Daily.open)
+                select(Stock.ts_code, Stock.name, Daily.close, Daily.open,
+                       change_expr_sector.label("change_pct"))
                 .join(Daily, Stock.ts_code == Daily.ts_code)
                 .where(
                     Daily.trade_date == date,
@@ -186,13 +203,14 @@ class MarketHeatService:
                     Stock.concepts.ilike(f"%{base_name}%"),
                 )
                 .order_by(
-                    ((Daily.close - Daily.open) / func.nullif(Daily.open, 0)).desc()
+                    change_expr_sector.desc()
                 )
                 .limit(5)
             )
             stock_result = await db.execute(stock_stmt)
             top5 = [
-                {"ts_code": r.ts_code, "name": r.name, "close": r.close, "open": r.open}
+                {"ts_code": r.ts_code, "name": r.name, "close": r.close, "open": r.open,
+                 "change_pct": round(r.change_pct, 2) if r.change_pct else None}
                 for r in stock_result.all()
             ]
 
@@ -270,7 +288,7 @@ class MarketHeatService:
                     daily_alias.c.close,
                     daily_alias.c.open,
                     daily_alias.c.vol,
-                    func.coalesce(prev_alias.c.close, daily_alias.c.open).label("prev_close"),
+                    func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open).label("prev_close"),
                 )
                 .select_from(daily_alias)
                 .outerjoin(
@@ -460,12 +478,13 @@ class MarketHeatService:
         统计涨停(>=9.8%)和跌停(<=-9.8%)数量。
         """
         # 自连接获取 prev_close，与 _enrich_with_daily 中模式一致
+        # 优先使用同步时存储的 pre_close（同一复权因子），回退到自连接
         daily_alias = Daily.__table__.alias()
         prev_alias = Daily.__table__.alias()
 
         change_expr = (
-            (daily_alias.c.close - func.coalesce(prev_alias.c.close, daily_alias.c.open))
-            / func.nullif(func.coalesce(prev_alias.c.close, daily_alias.c.open), 0)
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
             * 100
         )
 
@@ -721,8 +740,8 @@ class MarketHeatService:
         prev_alias = Daily.__table__.alias()
 
         change_expr = (
-            (daily_alias.c.close - func.coalesce(prev_alias.c.close, daily_alias.c.open))
-            / func.nullif(func.coalesce(prev_alias.c.close, daily_alias.c.open), 0)
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
             * 100
         )
 
@@ -989,7 +1008,8 @@ class MarketHeatService:
         base_name = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', sector_name).strip()
 
         # 标准当日涨跌幅 = (close - pre_close) / pre_close * 100
-        # 用关联子查询取前一交易日收盘价
+        # 优先使用同步时存储的 pre_close（同一复权因子），保证计算正确
+        # 对于历史数据 pre_close 可能为 NULL，则回退到关联子查询
         PrevDaily = aliased(Daily)
         pre_close_subq = (
             select(PrevDaily.close)
@@ -999,9 +1019,10 @@ class MarketHeatService:
             .correlate(Stock)
             .scalar_subquery()
         )
+        effective_pre_close = func.coalesce(Daily.pre_close, pre_close_subq)
         change_expr = (
-            (Daily.close - pre_close_subq)
-            / func.nullif(pre_close_subq, 0) * 100
+            (Daily.close - effective_pre_close)
+            / func.nullif(effective_pre_close, 0) * 100
         )
         order_clause = change_expr.desc() if sort_order == "desc" else change_expr.asc()
 

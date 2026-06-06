@@ -40,6 +40,7 @@ class Daily(BaseModel):
     high = Column(Float)
     low = Column(Float)
     close = Column(Float)
+    pre_close = Column(Float, nullable=True)
     vol = Column(Float)
     amount = Column(Float)
     adj_close = Column(Float)

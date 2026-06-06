@@ -163,10 +163,20 @@ def count_daily(trade_date: str) -> int:
 
 
 # ── 历史/盘后日线接口 ──────────────────────────────────────────────────────
-async def download_one(session, ts_code, symbol, start_date, end_date):
-    """拉取单只股票指定范围日线（前复权），返回 records 列表或 None"""
+async def download_one(session, ts_code, symbol, start_date, end_date, fetch_extra_days=7):
+    """拉取单只股票指定范围日线（前复权），返回 records 列表或 None
+
+    fetch_extra_days: 在 start_date 之前多拉取的天数，用于获取 pre_close。
+    腾讯前复权数据在同一 API 响应中使用相同的复权因子，因此用前一天收盘价
+    作为 pre_close 可以保证涨跌幅计算正确。
+    """
+    from datetime import datetime as dt, timedelta as td
+    # 扩展起始日期以获取 pre_close（同一复权因子）
+    expanded_start = dt.strptime(_fmt_date(start_date), "%Y-%m-%d") - td(days=fetch_extra_days)
+    expanded_start_str = expanded_start.strftime("%Y-%m-%d")
+
     url = (f"{TENCENT_API}?param={symbol},day,"
-           f"{_fmt_date(start_date)},{_fmt_date(end_date)},20,qfq")
+           f"{expanded_start_str},{_fmt_date(end_date)},40,qfq")
     try:
         async with session.get(url, timeout=TIMEOUT) as resp:
             text = await resp.text()
@@ -189,6 +199,7 @@ async def download_one(session, ts_code, symbol, start_date, end_date):
         return None
 
     records = []
+    prev_close = None
     for row in qfq_data:
         if len(row) < 6:
             continue
@@ -202,7 +213,8 @@ async def download_one(session, ts_code, symbol, start_date, end_date):
             vol     = float(row[5])
             amount  = vol * close_p * 100
             records.append((ts_code, trade_date, open_p, high_p, low_p,
-                             close_p, vol, amount, close_p, None, None))
+                             close_p, prev_close, vol, amount, close_p, None, None))
+            prev_close = close_p
         except (ValueError, IndexError):
             continue
     return records
@@ -248,7 +260,7 @@ async def fetch_realtime_quote(session, symbol, trade_date):
 
         record = (None, trade_date,
                   open_p or prev_close, high_p or price,
-                  low_p or price, price,
+                  low_p or price, price, prev_close,
                   vol, amount, price,
                   market_cap, circ_market_cap)
         return record, market_cap, circ_market_cap
@@ -284,11 +296,12 @@ def upsert_daily(record):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO daily (ts_code, trade_date, open, high, low, close, vol, amount, adj_close, market_cap, circ_market_cap)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close, market_cap, circ_market_cap)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
             open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-            close = EXCLUDED.close, vol = EXCLUDED.vol, amount = EXCLUDED.amount,
+            close = EXCLUDED.close, pre_close = EXCLUDED.pre_close,
+            vol = EXCLUDED.vol, amount = EXCLUDED.amount,
             adj_close = EXCLUDED.adj_close,
             market_cap = EXCLUDED.market_cap, circ_market_cap = EXCLUDED.circ_market_cap
     """, record)
@@ -300,11 +313,12 @@ def bulk_upsert(records):
     conn = get_conn()
     cur = conn.cursor()
     psycopg2.extras.execute_batch(cur, """
-        INSERT INTO daily (ts_code, trade_date, open, high, low, close, vol, amount, adj_close, market_cap, circ_market_cap)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close, market_cap, circ_market_cap)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
             open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-            close = EXCLUDED.close, vol = EXCLUDED.vol, amount = EXCLUDED.amount,
+            close = EXCLUDED.close, pre_close = EXCLUDED.pre_close,
+            vol = EXCLUDED.vol, amount = EXCLUDED.amount,
             adj_close = EXCLUDED.adj_close,
             market_cap = EXCLUDED.market_cap, circ_market_cap = EXCLUDED.circ_market_cap
     """, records)
@@ -337,7 +351,7 @@ async def run_intraday(stocks, trade_date: str):
                 batch.append(full_record)
                 updated += 1
                 if updated <= 3 or updated % 500 == 0:
-                    print(f"  ✅ {ts_code}：现价 {record[5]:.2f}")
+                    print(f"  ✅ {ts_code}：现价 {record[5]:.2f} 昨收 {record[6]:.2f}")
                 # 批量写入
                 if len(batch) >= BATCH_SIZE:
                     bulk_upsert(batch)
