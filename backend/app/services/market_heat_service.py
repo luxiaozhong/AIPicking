@@ -1,6 +1,7 @@
 """市场热度服务 — Core 级别 SQL 查询"""
+import re
 from typing import Optional
-from sqlalchemy import select, func, case, and_
+from sqlalchemy import select, func, case, and_, or_
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +9,270 @@ from ..models.stock_tables import (
     Daily, DailySectorFlow, DailyHotStock, DailyHotTheme,
     DailyNorthboundFlow, DailyDragonTiger, DailyDragonTigerSeat
 )
+
+# ── 板块→个股模糊匹配：名称归一化 ──────────────────────────────
+
+# 常见后缀（东财板块名 vs stocks 行业名 差异来源）
+# 按长度降序排列，确保长后缀先匹配（如 "制造业" 优先于 "制造"）
+_NORMALIZE_STRIPS = sorted([
+    "制造业", "及其他", "和其他", "与服务", "及服务", "及设备",
+    "及元件", "零部件", "行业", "板块", "制品", "加工",
+    "销售", "生产", "经营", "器械", "设备", "开发",
+    "服务", "制造",
+], key=lambda x: -len(x))
+
+# ── 东财行业 → 申万行业 + 概念关键词 映射表 ─────────────────────
+# 当 stocks.industry_l1/l2 与东财分类体系不兼容时，通过此映射查找个股。
+# 格式：{东财板块名: {"industries": [申万l1], "keywords": [额外搜索词]}}
+_SECTOR_MAP: dict[str, dict] = {
+    # ── 制造业细分 ──
+    "玻璃玻纤":       {"industries": ["建筑材料", "基础化工"], "keywords": ["玻璃", "玻纤"]},
+    "玻璃纤维":       {"industries": ["建筑材料", "基础化工"], "keywords": ["玻璃", "玻纤"]},
+    "水泥":          {"industries": ["建筑材料"], "keywords": ["水泥"]},
+    "装修建材":       {"industries": ["建筑材料", "建筑装饰"], "keywords": ["建材", "装修"]},
+    "房屋建设Ⅱ":      {"industries": ["建筑装饰", "房地产"], "keywords": ["房屋建设", "施工"]},
+    "基础建设":       {"industries": ["建筑装饰"], "keywords": ["基建", "工程"]},
+    "专业工程":       {"industries": ["建筑装饰"], "keywords": ["工程"]},
+    "工程机械":       {"industries": ["机械设备"], "keywords": ["工程机械", "挖掘机", "起重机"]},
+    "通用设备":       {"industries": ["机械设备"], "keywords": ["通用设备"]},
+    "专用设备":       {"industries": ["机械设备"], "keywords": ["专用设备"]},
+    "自动化设备":     {"industries": ["机械设备", "电力设备"], "keywords": ["自动化", "机器人"]},
+    "轨交设备Ⅱ":      {"industries": ["机械设备", "交通运输"], "keywords": ["轨交", "铁路", "高铁"]},
+    "电机Ⅱ":         {"industries": ["电力设备", "机械设备"], "keywords": ["电机"]},
+    "电网设备":       {"industries": ["电力设备"], "keywords": ["电网", "输配电", "电力"]},
+    "风电设备":       {"industries": ["电力设备"], "keywords": ["风电", "风机"]},
+    "光伏设备":       {"industries": ["电力设备"], "keywords": ["光伏", "太阳能"]},
+    "电池":          {"industries": ["电力设备"], "keywords": ["电池", "锂电", "储能"]},
+    "其他电源设备Ⅱ":  {"industries": ["电力设备"], "keywords": ["电源", "充电"]},
+    "家用电器":       {"industries": ["家用电器"], "keywords": ["家电"]},
+    "白色家电":       {"industries": ["家用电器"], "keywords": ["白电", "空调", "冰箱", "洗衣机"]},
+    "黑色家电":       {"industries": ["家用电器", "电子"], "keywords": ["黑电", "电视"]},
+    "小家电":         {"industries": ["家用电器"], "keywords": ["小家电"]},
+    "厨卫电器":       {"industries": ["家用电器"], "keywords": ["厨卫", "油烟机"]},
+    "照明设备Ⅱ":      {"industries": ["家用电器", "电子"], "keywords": ["照明", "灯具"]},
+    "家电零部件Ⅱ":    {"industries": ["家用电器", "机械设备"], "keywords": ["家电配件"]},
+    "汽车":          {"industries": ["汽车"], "keywords": ["汽车"]},
+    "乘用车":        {"industries": ["汽车"], "keywords": ["乘用车", "整车"]},
+    "商用车":        {"industries": ["汽车"], "keywords": ["商用车", "客车", "货车"]},
+    "汽车零部件":     {"industries": ["汽车"], "keywords": ["汽车零部件", "汽配"]},
+    "汽车服务":       {"industries": ["汽车", "商贸零售"], "keywords": ["汽车服务", "4S"]},
+    "摩托车及其他":   {"industries": ["汽车", "交通运输"], "keywords": ["摩托车"]},
+    "化学制品":       {"industries": ["基础化工"], "keywords": ["化工", "化学"]},
+    "化学原料":       {"industries": ["基础化工"], "keywords": ["化学原料"]},
+    "化学纤维":       {"industries": ["基础化工"], "keywords": ["化纤"]},
+    "农化制品":       {"industries": ["基础化工", "农林牧渔"], "keywords": ["农化", "化肥", "农药"]},
+    "塑料":          {"industries": ["基础化工"], "keywords": ["塑料"]},
+    "橡胶":          {"industries": ["基础化工"], "keywords": ["橡胶", "轮胎"]},
+    "非金属材料Ⅱ":    {"industries": ["基础化工", "建筑材料"], "keywords": ["非金属材料", "碳纤维"]},
+    "电子化学品Ⅱ":    {"industries": ["电子", "基础化工"], "keywords": ["电子化学品", "光刻胶"]},
+    "能源金属":       {"industries": ["有色金属"], "keywords": ["锂", "钴", "镍", "能源金属"]},
+    "小金属":         {"industries": ["有色金属"], "keywords": ["小金属", "钨", "钼", "稀土"]},
+    "工业金属":       {"industries": ["有色金属"], "keywords": ["铜", "铝", "锌", "工业金属"]},
+    "贵金属":         {"industries": ["有色金属"], "keywords": ["黄金", "白银", "贵金属"]},
+    "金属新材料":     {"industries": ["有色金属", "基础化工"], "keywords": ["新材料", "合金"]},
+    "冶钢原料":       {"industries": ["钢铁", "有色金属"], "keywords": ["冶钢", "铁矿石"]},
+    "普钢":          {"industries": ["钢铁"], "keywords": ["钢铁"]},
+    "特钢Ⅱ":         {"industries": ["钢铁"], "keywords": ["特钢", "不锈钢"]},
+    "元件":          {"industries": ["电子"], "keywords": ["元件", "电容", "电阻", "电感"]},
+    "半导体":         {"industries": ["电子"], "keywords": ["半导体", "芯片", "晶圆"]},
+    "光学光电子":     {"industries": ["电子"], "keywords": ["光学", "光电", "LED"]},
+    "消费电子":       {"industries": ["电子"], "keywords": ["消费电子", "手机", "智能穿戴"]},
+    "其他电子Ⅱ":      {"industries": ["电子"], "keywords": ["电子"]},
+    "计算机设备":     {"industries": ["计算机"], "keywords": ["计算机", "服务器"]},
+    "软件开发":       {"industries": ["计算机"], "keywords": ["软件", "IT"]},
+    "IT服务Ⅱ":       {"industries": ["计算机"], "keywords": ["IT服务", "云计算", "大数据"]},
+    "通信设备":       {"industries": ["通信"], "keywords": ["通信设备", "5G", "光通信"]},
+    "通信服务":       {"industries": ["通信"], "keywords": ["通信服务", "运营商"]},
+    "军工电子Ⅱ":      {"industries": ["国防军工", "电子"], "keywords": ["军工电子", "雷达"]},
+    "航天装备Ⅱ":      {"industries": ["国防军工"], "keywords": ["航天", "火箭", "卫星"]},
+    "航空装备Ⅱ":      {"industries": ["国防军工"], "keywords": ["航空", "飞机", "发动机"]},
+    "航海装备Ⅱ":      {"industries": ["国防军工"], "keywords": ["航海", "船舶", "舰艇"]},
+    "地面兵装Ⅱ":      {"industries": ["国防军工"], "keywords": ["兵装", "武器", "弹药"]},
+    # ── 消费类 ──
+    "白酒Ⅱ":         {"industries": ["食品饮料"], "keywords": ["白酒"]},
+    "非白酒":         {"industries": ["食品饮料"], "keywords": ["啤酒", "红酒", "黄酒"]},
+    "饮料乳品":       {"industries": ["食品饮料"], "keywords": ["饮料", "乳品", "牛奶"]},
+    "休闲食品":       {"industries": ["食品饮料"], "keywords": ["零食", "食品"]},
+    "调味发酵品Ⅱ":    {"industries": ["食品饮料"], "keywords": ["调味", "酱油", "酵母"]},
+    "食品加工":       {"industries": ["食品饮料", "农林牧渔"], "keywords": ["食品加工", "肉制品"]},
+    "纺织制造":       {"industries": ["纺织服饰"], "keywords": ["纺织", "面料"]},
+    "服装家纺":       {"industries": ["纺织服饰"], "keywords": ["服装", "家纺"]},
+    "饰品":          {"industries": ["纺织服饰", "轻工制造"], "keywords": ["饰品", "珠宝"]},
+    "家居用品":       {"industries": ["轻工制造"], "keywords": ["家居", "家具"]},
+    "文娱用品":       {"industries": ["轻工制造"], "keywords": ["文娱", "文具", "玩具"]},
+    "造纸":          {"industries": ["轻工制造"], "keywords": ["造纸", "纸业"]},
+    "包装印刷":       {"industries": ["轻工制造"], "keywords": ["包装", "印刷"]},
+    "个护用品":       {"industries": ["美容护理"], "keywords": ["日化", "洗护", "卫生巾"]},
+    "化妆品":         {"industries": ["美容护理"], "keywords": ["化妆", "护肤"]},
+    "医疗美容":       {"industries": ["医药生物", "美容护理"], "keywords": ["医美"]},
+    # ── 医药细分 ──
+    "化学制药":       {"industries": ["医药生物"], "keywords": ["化学制药", "原料药"]},
+    "中药Ⅱ":         {"industries": ["医药生物"], "keywords": ["中药", "中成药"]},
+    "生物制品":       {"industries": ["医药生物"], "keywords": ["生物制品", "疫苗", "血液制品"]},
+    "医疗器械":       {"industries": ["医药生物"], "keywords": ["医疗器械", "医疗设备"]},
+    "医疗服务":       {"industries": ["医药生物"], "keywords": ["医疗服务", "医院", "检测"]},
+    "医药商业":       {"industries": ["医药生物"], "keywords": ["医药商业", "药店"]},
+    "动物保健Ⅱ":      {"industries": ["农林牧渔", "医药生物"], "keywords": ["动物保健", "兽药"]},
+    # ── 服务类 ──
+    "证券Ⅱ":         {"industries": ["非银金融"], "keywords": ["证券", "券商"]},
+    "保险Ⅱ":         {"industries": ["非银金融"], "keywords": ["保险"]},
+    "多元金融":       {"industries": ["非银金融"], "keywords": ["金融", "信托", "期货"]},
+    "银行Ⅱ":         {"industries": ["银行"], "keywords": ["银行"]},
+    "房地产开发":     {"industries": ["房地产"], "keywords": ["房地产", "开发商"]},
+    "房地产服务":     {"industries": ["房地产", "社会服务"], "keywords": ["物业", "中介"]},
+    "一般零售":       {"industries": ["商贸零售"], "keywords": ["零售", "百货", "超市"]},
+    "贸易Ⅱ":         {"industries": ["商贸零售"], "keywords": ["贸易"]},
+    "互联网电商":     {"industries": ["商贸零售", "传媒"], "keywords": ["电商", "互联网"]},
+    "旅游零售Ⅱ":      {"industries": ["商贸零售", "社会服务"], "keywords": ["免税", "旅游零售"]},
+    "专业连锁Ⅱ":      {"industries": ["商贸零售"], "keywords": ["连锁"]},
+    "旅游及景区":     {"industries": ["社会服务"], "keywords": ["旅游", "景区"]},
+    "酒店餐饮":       {"industries": ["社会服务"], "keywords": ["酒店", "餐饮"]},
+    "教育":          {"industries": ["社会服务"], "keywords": ["教育", "培训"]},
+    "体育Ⅱ":         {"industries": ["社会服务", "传媒"], "keywords": ["体育"]},
+    "专业服务":       {"industries": ["社会服务"], "keywords": ["检测", "咨询", "人力资源"]},
+    "物流":          {"industries": ["交通运输"], "keywords": ["物流", "快递"]},
+    "航运港口":       {"industries": ["交通运输"], "keywords": ["航运", "港口", "海运"]},
+    "铁路公路":       {"industries": ["交通运输"], "keywords": ["铁路", "公路", "高速"]},
+    "航空机场":       {"industries": ["交通运输"], "keywords": ["航空", "机场", "飞机"]},
+    "广告营销":       {"industries": ["传媒"], "keywords": ["广告", "营销"]},
+    "游戏Ⅱ":         {"industries": ["传媒", "计算机"], "keywords": ["游戏"]},
+    "数字媒体":       {"industries": ["传媒"], "keywords": ["数字媒体", "新媒体"]},
+    "影视院线":       {"industries": ["传媒"], "keywords": ["影视", "电影", "院线"]},
+    "出版":          {"industries": ["传媒"], "keywords": ["出版", "图书"]},
+    "电视广播Ⅱ":      {"industries": ["传媒"], "keywords": ["电视", "广播"]},
+    # ── 公用事业 / 能源 ──
+    "电力":          {"industries": ["公用事业"], "keywords": ["电力", "发电", "电网"]},
+    "燃气Ⅱ":         {"industries": ["公用事业"], "keywords": ["燃气", "天然气"]},
+    "环保设备Ⅱ":      {"industries": ["环保", "机械设备"], "keywords": ["环保设备", "污水处理"]},
+    "环境治理":       {"industries": ["环保"], "keywords": ["环境治理", "固废", "水务"]},
+    "煤炭开采":       {"industries": ["煤炭"], "keywords": ["煤炭", "煤矿"]},
+    "焦炭Ⅱ":         {"industries": ["煤炭", "钢铁"], "keywords": ["焦炭", "焦化"]},
+    "石油石化":       {"industries": ["石油石化"], "keywords": []},
+    "炼化及贸易":     {"industries": ["石油石化"], "keywords": ["炼化", "石化"]},
+    "油服工程":       {"industries": ["石油石化"], "keywords": ["油服", "油田"]},
+    "油气开采Ⅱ":      {"industries": ["石油石化"], "keywords": ["油气", "开采"]},
+    # ── 农林牧渔 ──
+    "种植业":         {"industries": ["农林牧渔"], "keywords": ["种植", "种子"]},
+    "养殖业":         {"industries": ["农林牧渔"], "keywords": ["养殖", "畜牧", "生猪"]},
+    "饲料":          {"industries": ["农林牧渔"], "keywords": ["饲料"]},
+    "渔业":          {"industries": ["农林牧渔"], "keywords": ["渔业", "水产"]},
+    "农产品加工":     {"industries": ["农林牧渔", "食品饮料"], "keywords": ["农产品加工"]},
+    "林业Ⅱ":         {"industries": ["农林牧渔"], "keywords": ["林业"]},
+    "农业综合Ⅱ":      {"industries": ["农林牧渔"], "keywords": ["农业"]},
+}
+
+
+def _normalize_sector_name(name: str) -> list[str]:
+    """归一化板块名称，返回多个候选形式用于模糊匹配。
+
+    递归剥离常见后缀，生成从完整到最简短的一系列候选。
+    例如 "房地产开发经营" → ["房地产开发经营", "房地产开发", "房地产"]
+    例如 "半导体及元件"   → ["半导体及元件", "半导体"]
+    例如 "汽车零部件"     → ["汽车零部件", "汽车"]
+    """
+    if not name:
+        return [""]
+    # 去除罗马数字后缀
+    base = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', name).strip()
+    candidates = [base]
+
+    # 递归剥离后缀，直到无法再剥离
+    current = base
+    while True:
+        stripped = False
+        for suffix in _NORMALIZE_STRIPS:
+            if current.endswith(suffix) and len(current) - len(suffix) >= 2:
+                current = current[:-len(suffix)].strip()
+                stripped = True
+                break
+        if not stripped:
+            break
+        if current not in candidates:
+            candidates.append(current)
+
+    # 尝试去掉常见前缀（如 "其他"）
+    for prefix in ["其他", "其它"]:
+        if base.startswith(prefix) and len(base) - len(prefix) >= 2:
+            short = base[len(prefix):].strip()
+            if short not in candidates:
+                candidates.append(short)
+
+    return candidates
+
+
+def _build_sector_stock_match(sector_name: str, Stock, max_variants: int = 6):
+    """构建板块名→个股行业/概念的 SQLAlchemy OR 条件。
+
+    多层匹配策略（按特异性从高到低）：
+      1. 东财→申万映射表精确匹配 industry_l1
+      2. 精确匹配 industry_l2 / industry_l1（含归一化候选）
+      3. 双向 ILIKE：个股行业字段包含板块名
+      4. concepts 字段 ILIKE 匹配
+      5. 公司名称 ILIKE 匹配（兜底：如"玻璃玻纤" → 公司名含"玻璃"）
+    """
+    # 去除罗马数字后缀得到干净的板块名
+    base_name = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', sector_name).strip()
+    candidates = _normalize_sector_name(sector_name)
+    conditions = []
+
+    # ── Layer 0: 映射表优先 ──
+    # 查找最匹配的映射（精确匹配 > 归一化匹配）
+    mapping = _SECTOR_MAP.get(sector_name) or _SECTOR_MAP.get(base_name)
+    if not mapping:
+        # 用短候选名再试
+        for c in candidates[1:]:
+            mapping = _SECTOR_MAP.get(c)
+            if mapping:
+                break
+
+    if mapping:
+        # 仅对窄行业（< 200 只）做精确匹配，避免大类匹配到过多无关股票
+        _BROAD_INDUSTRIES = {"机械设备", "电子", "医药生物", "基础化工", "电力设备", "计算机", "汽车"}
+        for ind in mapping.get("industries", []):
+            if ind not in _BROAD_INDUSTRIES:
+                conditions.append(Stock.industry_l1 == ind)
+
+        # 映射表关键词 → ILIKE 匹配所有相关字段（industry + concepts + name）
+        for kw in mapping.get("keywords", []):
+            if len(kw) >= 2:
+                conditions.append(Stock.industry_l1.ilike(f"%{kw}%"))
+                conditions.append(Stock.industry_l2.ilike(f"%{kw}%"))
+                conditions.append(Stock.concepts.ilike(f"%{kw}%"))
+                conditions.append(Stock.name.ilike(f"%{kw}%"))
+
+    # ── Layer 1+2: 精确 + 归一化精确匹配 ──
+    seen = set()
+    for c in candidates[:max_variants]:
+        if c in seen:
+            continue
+        seen.add(c)
+        conditions.append(Stock.industry_l2 == c)
+        conditions.append(Stock.industry_l1 == c)
+
+    # ── Layer 3: 双向 ILIKE（个股行业字段包含板块名）──
+    primary = candidates[0] if candidates else sector_name
+    conditions.append(Stock.industry_l2.ilike(f"%{primary}%"))
+    conditions.append(Stock.industry_l1.ilike(f"%{primary}%"))
+
+    # 短候选名也做 ILIKE
+    for c in candidates[1:4]:
+        if len(c) >= 2 and c not in seen:
+            seen.add(c)
+            conditions.append(Stock.industry_l2.ilike(f"%{c}%"))
+            conditions.append(Stock.industry_l1.ilike(f"%{c}%"))
+
+    # ── Layer 4: concepts 字段 ──
+    for c in candidates[:4]:
+        if len(c) >= 2:
+            conditions.append(Stock.concepts.ilike(f"%{c}%"))
+
+    # ── Layer 5: 公司名称兜底 ──
+    # 板块名中的关键词在公司名称中出现（如"玻璃玻纤"→"XX玻璃"）
+    for c in candidates[:4]:
+        if len(c) >= 2 and not c.endswith(("板块", "行业", "概念")):
+            conditions.append(Stock.name.ilike(f"%{c}%"))
+
+    return or_(*conditions)
 
 
 class MarketHeatService:
@@ -170,8 +435,6 @@ class MarketHeatService:
         # 成分股 Top5（daily 表已统一为 YYYY-MM-DD）
         top5 = []
         if info:
-            import re
-            base_name = re.sub(r'[Ⅰ-Ⅷ]+$', '', info["sector_name"]).strip()
             from ..models.stock_tables import Stock
 
             # 使用 pre_close 计算日涨跌幅（优先使用同步存储的值，回退到自连接）
@@ -190,17 +453,16 @@ class MarketHeatService:
                 / func.nullif(effective_pre_close, 0) * 100
             )
 
+            # 模糊匹配板块→个股行业/概念
+            match_cond = _build_sector_stock_match(info["sector_name"], Stock)
+
             stock_stmt = (
                 select(Stock.ts_code, Stock.name, Daily.close, Daily.open,
                        change_expr_sector.label("change_pct"))
                 .join(Daily, Stock.ts_code == Daily.ts_code)
                 .where(
                     Daily.trade_date == date,
-                    (Stock.industry_l2 == info["sector_name"]) |
-                    (Stock.industry_l1 == info["sector_name"]) |
-                    (Stock.industry_l2 == base_name) |
-                    (Stock.industry_l1 == base_name) |
-                    Stock.concepts.ilike(f"%{base_name}%"),
+                    match_cond,
                 )
                 .order_by(
                     change_expr_sector.desc()
@@ -1039,10 +1301,6 @@ class MarketHeatService:
 
         from ..models.stock_tables import Stock
 
-        # 去除 Ⅰ/Ⅱ/Ⅲ 等罗马数字后缀
-        import re
-        base_name = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', sector_name).strip()
-
         # 标准当日涨跌幅 = (close - pre_close) / pre_close * 100
         # 优先使用同步时存储的 pre_close（同一复权因子），保证计算正确
         # 对于历史数据 pre_close 可能为 NULL，则回退到关联子查询
@@ -1062,6 +1320,9 @@ class MarketHeatService:
         )
         order_clause = change_expr.desc() if sort_order == "desc" else change_expr.asc()
 
+        # 模糊匹配板块→个股行业/概念
+        match_cond = _build_sector_stock_match(sector_name, Stock)
+
         stmt = (
             select(
                 Stock.ts_code, Stock.name, Daily.close, Daily.open,
@@ -1070,11 +1331,7 @@ class MarketHeatService:
             .join(Daily, Stock.ts_code == Daily.ts_code)
             .where(
                 Daily.trade_date == date,
-                (Stock.industry_l2 == sector_name)
-                | (Stock.industry_l1 == sector_name)
-                | (Stock.industry_l2 == base_name)
-                | (Stock.industry_l1 == base_name)
-                | Stock.concepts.ilike(f"%{base_name}%"),
+                match_cond,
                 ~Stock.ts_code.like("%.IDX"),
             )
             .order_by(order_clause)

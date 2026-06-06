@@ -46,10 +46,57 @@ def _sf_build_index(raw_data):
 def _sf_stock_sectors(sf_index, stock):
     """查找个股匹配的所有 sector_flow 板块。
     匹配逻辑：
-      - sector_type='industry' → 匹配 stocks.industry_l2 / industry_l1
+      - sector_type='industry' → 模糊匹配 stocks.industry_l2 / industry_l1
       - sector_type='concept'  → 匹配 stocks.concepts（JSON 数组）
     """
-    import json
+    import json, re
+
+    # ── 名称归一化 ──
+    _NORM_STRIPS = sorted([
+        "制造业", "及其他", "和其他", "与服务", "及服务", "及设备",
+        "及元件", "零部件", "行业", "板块", "制品", "加工",
+        "销售", "生产", "经营", "器械", "设备", "开发",
+        "服务", "制造",
+    ], key=lambda x: -len(x))
+
+    def _normalize(name):
+        if not name:
+            return [""]
+        base = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', name).strip()
+        cand = [base]
+        cur = base
+        while True:
+            stripped = False
+            for sfx in _NORM_STRIPS:
+                if cur.endswith(sfx) and len(cur) - len(sfx) >= 2:
+                    cur = cur[:-len(sfx)].strip()
+                    stripped = True
+                    break
+            if not stripped:
+                break
+            if cur not in cand:
+                cand.append(cur)
+        return cand
+
+    def _sector_industry_match(sector_name, ind1, ind2):
+        """模糊匹配：板块名 → 个股行业字段"""
+        candidates = _normalize(sector_name)
+        # 精确匹配
+        for c in candidates:
+            if c == ind2 or c == ind1:
+                return True
+        # 双向包含：个股行业含板块名 或 板块名含个股行业
+        for c in candidates[:4]:
+            if len(c) >= 2:
+                if c in ind2 or c in ind1:
+                    return True
+                if ind2 and ind2 in c:
+                    return True
+                if ind1 and ind1 in c:
+                    return True
+        return False
+
+    # ── 主逻辑 ──
     matched = []
     ind1 = (stock.get("industry_l1") or "").strip()
     ind2 = (stock.get("industry_l2") or "").strip()
@@ -62,7 +109,7 @@ def _sf_stock_sectors(sf_index, stock):
             concepts = [c.strip() for c in concepts_str.split(",") if c.strip()]
     for (st, sn), rows in sf_index.items():
         if st == "industry":
-            if sn == ind2 or sn == ind1:
+            if _sector_industry_match(sn, ind1, ind2):
                 matched.append((st, sn, rows))
         elif st == "concept":
             for c in concepts:
