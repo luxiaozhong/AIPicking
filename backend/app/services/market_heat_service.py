@@ -1083,6 +1083,15 @@ class MarketHeatService:
         else:
             volume = 15
 
+        # 防护：有交易股票时量能不能为 0（数据不完整时 vol_ratio 可能极小）
+        if total > 0 and volume == 0:
+            import logging
+            logging.getLogger("market_heat").warning(
+                f"板块 {ts_pattern} trade_date={date} volume=0（total={total}, "
+                f"total_amount={total_amount}, avg_amount={avg_amount}），修正为 1"
+            )
+            volume = 1
+
         scores = {"breadth": breadth, "sentiment": max(0, min(30, sentiment)), "volume": max(0, min(30, volume))}
         total_score = sum(scores.values())
         level = MarketHeatService._score_to_level(total_score)
