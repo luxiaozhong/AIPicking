@@ -22,6 +22,7 @@ import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # 确保 backend 目录在 sys.path 中
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -30,7 +31,7 @@ from app.database import AsyncSessionLocal  # noqa: E402
 from app.services.market_heat_service import MarketHeatService  # noqa: E402
 
 
-async def main_async(trade_date: str | None = None):
+async def main_async(trade_date: Optional[str] = None):
     """计算并保存指定日期的市场温度"""
     async with AsyncSessionLocal() as db:
         # 确定交易日

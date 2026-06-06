@@ -19,6 +19,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PYTHON = str(Path(__file__).resolve().parent.parent / "venv" / "bin" / "python")
@@ -63,7 +64,7 @@ JOBS = [
 ]
 
 
-def run_job(script: str, date_arg: str | None) -> tuple[bool, float]:
+def run_job(script: str, date_arg: Optional[str]) -> Tuple[bool, float]:
     """运行单个同步脚本，返回 (成功, 耗时秒)"""
     cmd = [PYTHON, str(SCRIPT_DIR / script)]
     if date_arg:
