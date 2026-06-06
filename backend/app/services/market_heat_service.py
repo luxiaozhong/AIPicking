@@ -1397,16 +1397,28 @@ class MarketHeatService:
         db: AsyncSession, days: int = 90
     ) -> list[dict]:
         """板块资金流历史 — 近 N 日每日全行业资金净额合计（按日汇总）"""
+        # 先取最近 N 个交易日，再只对这些日期 GROUP BY
+        recent_dates = (
+            select(DailySectorFlow.__table__.c.trade_date)
+            .where(DailySectorFlow.__table__.c.sector_type == "industry")
+            .distinct()
+            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
+            .limit(days)
+            .subquery()
+        )
+
         stmt = (
             select(
                 DailySectorFlow.__table__.c.trade_date,
                 func.sum(DailySectorFlow.__table__.c.net_inflow).label("total_net_yi"),
                 func.count().label("sector_count"),
             )
-            .where(DailySectorFlow.__table__.c.sector_type == "industry")
+            .where(
+                DailySectorFlow.__table__.c.sector_type == "industry",
+                DailySectorFlow.__table__.c.trade_date.in_(select(recent_dates)),
+            )
             .group_by(DailySectorFlow.__table__.c.trade_date)
             .order_by(DailySectorFlow.__table__.c.trade_date.desc())
-            .limit(days)
         )
         result = await db.execute(stmt)
         rows = result.mappings().all()
