@@ -12,6 +12,12 @@ export interface BoardTemperatureItem {
   };
 }
 
+export interface BoardChangeItem {
+  board_code: string;
+  board_name: string;
+  change_pct: number | null;
+}
+
 export interface OverviewData {
   trade_date: string | null;
   temperature: {
@@ -41,6 +47,7 @@ export interface OverviewData {
     main_net_yi: number;
   }[];
   board_temperatures: BoardTemperatureItem[];
+  board_changes: BoardChangeItem[];
 }
 
 export interface SectorItem {

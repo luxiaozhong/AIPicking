@@ -1,6 +1,6 @@
 import React from 'react';
 import { Spin, theme, Tooltip } from 'antd';
-import type { OverviewData, StressOverview } from '@/services/marketHeatService';
+import type { BoardChangeItem, OverviewData, StressOverview } from '@/services/marketHeatService';
 
 /** 市场温度维度：标签、满分、计算公式 */
 const MARKET_DIM_META: Array<{
@@ -75,6 +75,14 @@ const STRESS_DIM_META: Array<{
   { key: 'breadth', label: '下跌广度', max: 15, formula: '下跌家数占比分档' },
   { key: 'northbound', label: '北向出逃', max: 10, formula: '北向资金净流出分档' },
 ];
+
+/** 板块简称映射 */
+const BOARD_SHORT_NAMES: Record<string, string> = {
+  sh_main: '上证',
+  sz_main: '深证',
+  sh_star: '科创',
+  sz_chi: '创业',
+};
 
 /** 压力等级颜色（方向与温度相反：越高越红） */
 const STRESS_COLORS: Record<string, [string, string]> = {
@@ -361,7 +369,10 @@ const TemperatureCard: React.FC<Props> = ({
 
       {/* 第二排：涨跌比 + 北向 + 领涨/领跌 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-        {cards.filter(c => c.label !== '🔥 市场温度').map((card) => (
+        {cards.filter(c => c.label !== '🔥 市场温度').map((card) => {
+          const isAdvanceDecline = card.label === '📊 涨跌比';
+          const boardChanges: BoardChangeItem[] = overview.board_changes || [];
+          return (
           <div
             key={card.label}
             onClick={card.onClick}
@@ -379,8 +390,34 @@ const TemperatureCard: React.FC<Props> = ({
             <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
             <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
             <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
+            {isAdvanceDecline && boardChanges.length > 0 && (
+              <div style={{
+                display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap',
+                borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 8,
+              }}>
+                {boardChanges.map((bc) => (
+                  <div key={bc.board_code} style={{
+                    fontSize: 11, lineHeight: '18px',
+                    background: 'rgba(255,255,255,0.13)', borderRadius: 4,
+                    padding: '2px 8px',
+                  }}>
+                    <span style={{ opacity: 0.75 }}>{BOARD_SHORT_NAMES[bc.board_code] || bc.board_name}</span>
+                    <span style={{
+                      marginLeft: 4, fontWeight: 600,
+                      color: bc.change_pct != null
+                        ? (bc.change_pct >= 0 ? '#b7eb8f' : '#ffa39e')
+                        : 'rgba(255,255,255,0.45)',
+                    }}>
+                      {bc.change_pct != null
+                        ? `${bc.change_pct > 0 ? '+' : ''}${bc.change_pct.toFixed(2)}%`
+                        : '--'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ))}
+        );})}
       {/* 领涨板块 — 组合卡片：两个子项并排 */}
       {leadingSectors.length > 0 && (
         <div

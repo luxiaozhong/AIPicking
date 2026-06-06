@@ -370,6 +370,43 @@ class MarketHeatService:
         # 板块温度（尝试从持久化表读取，失败则跳过）
         board_temps = await MarketHeatService.get_board_temperatures(db, daily_date)
 
+        # 四大板块涨跌幅（等权平均）
+        from sqlalchemy import text as sa_text
+        board_changes = []
+        daily_a = Daily.__table__.alias()
+        prev_a = Daily.__table__.alias()
+        change_expr = (
+            (daily_a.c.close - func.coalesce(daily_a.c.pre_close, prev_a.c.close, daily_a.c.open))
+            / func.nullif(func.coalesce(daily_a.c.pre_close, prev_a.c.close, daily_a.c.open), 0)
+            * 100
+        )
+        for board_code, board_name, ts_pattern in MarketHeatService.BOARD_DEFINITIONS:
+            bc_stmt = select(
+                func.avg(change_expr).label("avg_change_pct"),
+            ).select_from(daily_a).outerjoin(
+                prev_a,
+                (daily_a.c.ts_code == prev_a.c.ts_code)
+                & (prev_a.c.trade_date == (
+                    select(func.max(Daily.__table__.c.trade_date))
+                    .where(
+                        (Daily.__table__.c.ts_code == daily_a.c.ts_code)
+                        & (Daily.__table__.c.trade_date < daily_date)
+                    )
+                    .scalar_subquery()
+                )),
+            ).where(
+                daily_a.c.trade_date == daily_date,
+                ~daily_a.c.ts_code.like("%.IDX"),
+                sa_text(f"daily_1.ts_code ~ '{ts_pattern}'"),
+            )
+            bc_result = await db.execute(bc_stmt)
+            avg_change = bc_result.scalar()
+            board_changes.append({
+                "board_code": board_code,
+                "board_name": board_name,
+                "change_pct": round(avg_change, 2) if avg_change is not None else None,
+            })
+
         return {
             "trade_date": daily_date,
             "temperature": temperature,
@@ -378,6 +415,7 @@ class MarketHeatService:
             "leading_sectors": [_fmt_sector(s) for s in leading],
             "lagging_sectors": [_fmt_sector(s) for s in lagging],
             "board_temperatures": board_temps,
+            "board_changes": board_changes,
         }
 
     # ── 板块资金流 ────────────────────────────────────────────
