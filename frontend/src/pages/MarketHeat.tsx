@@ -11,7 +11,7 @@ import SectorDrawer from '@/components/market-heat/SectorDrawer';
 import ThemeDrawer from '@/components/market-heat/ThemeDrawer';
 import StockKLineModal from '@/components/shared/StockKLineModal';
 import KpiDetailModal from '@/components/market-heat/KpiDetailModal';
-import type { SectorItem, ThemeItem, HotStockItem, DragonTigerItem } from '@/services/marketHeatService';
+import type { SectorItem, ThemeItem, HotStockItem, DragonTigerItem, SectorFundHistoryItem } from '@/services/marketHeatService';
 
 /** 纯数字股票代码 → ts_code（6→SH，其他→SZ）；已有后缀则原样返回 */
 function toTsCode(code: string): string {
@@ -32,6 +32,7 @@ const MarketHeat: React.FC = () => {
     boardCode: string;
     boardName: string;
   } | null>(null);
+  const [sectorFundModalOpen, setSectorFundModalOpen] = useState(false);
 
   useEffect(() => {
     store.fetchAvailableDates();
@@ -46,6 +47,7 @@ const MarketHeat: React.FC = () => {
       store.fetchHotStocks(1);
       store.fetchDragonTiger(1);
       store.fetchNorthbound();
+      store.fetchSectorFundOverview();
     }
   }, [store.tradeDate]);
 
@@ -56,7 +58,46 @@ const MarketHeat: React.FC = () => {
     store.fetchHotStocks();
     store.fetchDragonTiger();
     store.fetchNorthbound();
+    store.fetchSectorFundOverview();
   };
+
+  const sectorFundHistoryChartOption = useMemo(() => {
+    const data = store.sectorFundHistory;
+    if (!data.length) return {};
+    const dates = data.map((d) => d.trade_date.slice(5));
+    const totals = data.map((d) => d.total_net_yi);
+    const positiveColor = '#cf1322';
+    const negativeColor = '#389e0d';
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          if (!p) return '';
+          const v = p.value;
+          return `<strong>${p.axisValue}</strong><br/>全行业资金净额: <b style="color:${v >= 0 ? positiveColor : negativeColor}">${v > 0 ? '+' : ''}${v.toFixed(1)}亿</b>`;
+        },
+      },
+      grid: { left: 60, right: 30, top: 20, bottom: 40 },
+      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+      yAxis: {
+        type: 'value',
+        name: '净额(亿)',
+        splitLine: { lineStyle: { type: 'dashed' } },
+        axisLabel: { formatter: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(0)}` },
+      },
+      series: [{
+        type: 'bar',
+        data: totals,
+        itemStyle: {
+          color: (params: any) => params.value >= 0 ? '#cf1322' : '#389e0d',
+        },
+        emphasis: {
+          itemStyle: { opacity: 0.8 },
+        },
+      }],
+    };
+  }, [store.sectorFundHistory]);
 
   const handleStockClick = (code: string, name: string) => {
     setKlineStock({ ts_code: toTsCode(code), name });
@@ -306,6 +347,8 @@ const MarketHeat: React.FC = () => {
         <TemperatureCard
           overview={store.overview}
           loading={store.overviewLoading}
+          sectorFundTotalYI={store.sectorFundOverview?.total_net_yi ?? null}
+          sectorFundLoading={store.sectorFundOverviewLoading}
           onTemperatureClick={() => setTemperatureModalOpen(true)}
           onNorthboundClick={() => setKpiDetail({ type: 'northbound' })}
           onAdvanceDeclineClick={() => setKpiDetail({ type: 'advance_decline' })}
@@ -320,6 +363,10 @@ const MarketHeat: React.FC = () => {
           onBoardTemperatureClick={(boardCode, boardName) => {
             setBoardTempModal({ boardCode, boardName });
             store.fetchBoardTemperatureHistory(boardCode);
+          }}
+          onSectorFundClick={() => {
+            setSectorFundModalOpen(true);
+            store.fetchSectorFundHistory();
           }}
         />
       </div>
@@ -413,6 +460,28 @@ const MarketHeat: React.FC = () => {
           <ReactECharts option={boardTemperatureChartOption} style={{ height: 400 }} />
         ) : (
           <Empty description={`暂无${boardTempModal?.boardName ?? ''}板块温度历史数据`} />
+        )}
+      </Modal>
+
+      <Modal
+        title="板块资金流 · 近 3 个月趋势"
+        open={sectorFundModalOpen}
+        onCancel={() => setSectorFundModalOpen(false)}
+        footer={null}
+        width={900}
+        destroyOnClose
+      >
+        {store.sectorFundHistoryLoading ? (
+          <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+        ) : store.sectorFundHistory.length > 0 ? (
+          <ReactECharts option={sectorFundHistoryChartOption} style={{ height: 420 }} />
+        ) : (
+          <Empty description="暂无板块资金流历史数据" />
+        )}
+        {store.sectorFundHistory.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 12, color: '#666', textAlign: 'center' }}>
+            近 90 个交易日全行业资金净额合计 · 红柱为净流入，绿柱为净流出
+          </div>
         )}
       </Modal>
     </div>

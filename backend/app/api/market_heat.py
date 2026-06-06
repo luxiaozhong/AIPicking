@@ -177,3 +177,25 @@ async def get_board_temperature_history(
     """板块温度历史趋势（近 N 日）"""
     data = await MarketHeatService.get_board_temperature_history(db, board_code, days)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/sector-fund-overview")
+async def get_sector_fund_overview(
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """板块资金流总览 — 当日全行业资金净额合计"""
+    data = await MarketHeatService.get_sector_fund_overview(db, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/sector-fund-history")
+async def get_sector_fund_history(
+    days: int = Query(90, ge=1, le=365, description="查询天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """板块资金流历史 — 近 N 日每日全行业资金净额合计（时间序列）"""
+    data = await MarketHeatService.get_sector_fund_history(db, days)
+    return {"code": 0, "message": "ok", "data": data}

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Card, Segmented, Spin, Empty } from 'antd';
+import { Card, Segmented, Spin, Empty, Statistic } from 'antd';
+import { ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { SectorItem } from '@/services/marketHeatService';
 
@@ -14,6 +15,22 @@ interface Props {
 const SectorTreemap: React.FC<Props> = ({
   sectors, sectorType, loading, onSectorTypeChange, onSectorClick,
 }) => {
+  // 汇总统计：总流入 / 总流出 / 净值
+  const summary = useMemo(() => {
+    if (!sectors.length) return { totalInflow: 0, totalOutflow: 0, net: 0 };
+    let inflow = 0, outflow = 0;
+    for (const s of sectors) {
+      const v = s.net_inflow || 0;
+      if (v > 0) inflow += v;
+      else outflow += v; // 负值累加
+    }
+    return {
+      totalInflow: inflow,
+      totalOutflow: Math.abs(outflow),
+      net: inflow + outflow,
+    };
+  }, [sectors]);
+
   // 按净流入绝对值降序排列（最大波动在最上）
   const sorted = useMemo(() => {
     if (!sectors.length) return [];
@@ -102,6 +119,42 @@ const SectorTreemap: React.FC<Props> = ({
         />
       }
     >
+      {/* 汇总统计 */}
+      {!loading && sectors.length > 0 && (
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: 48,
+          padding: '8px 0 16px', borderBottom: '1px solid #f0f0f0', marginBottom: 4,
+        }}>
+          <Statistic
+            title="总流入"
+            value={summary.totalInflow}
+            precision={2}
+            suffix="亿"
+            valueStyle={{ color: '#cf1322', fontSize: 18 }}
+            prefix={<ArrowUpOutlined />}
+          />
+          <Statistic
+            title="总流出"
+            value={summary.totalOutflow}
+            precision={2}
+            suffix="亿"
+            valueStyle={{ color: '#23954a', fontSize: 18 }}
+            prefix={<ArrowDownOutlined />}
+          />
+          <Statistic
+            title="净值"
+            value={summary.net}
+            precision={2}
+            suffix="亿"
+            valueStyle={{
+              color: summary.net >= 0 ? '#cf1322' : '#23954a',
+              fontSize: 18,
+            }}
+            prefix={summary.net >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+          />
+        </div>
+      )}
+
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin /></div>
       ) : sectors.length === 0 ? (
