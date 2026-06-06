@@ -8,6 +8,7 @@ interface Props {
   onNorthboundClick?: () => void;
   onAdvanceDeclineClick?: () => void;
   onLeadingSectorClick?: (sectorName: string) => void;
+  onLaggingSectorClick?: (sectorName: string) => void;
 }
 
 const TEMP_COLORS: Record<string, [string, string]> = {
@@ -30,7 +31,7 @@ const sectorSubItemStyle: React.CSSProperties = {
 };
 
 const TemperatureCard: React.FC<Props> = ({
-  overview, loading, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick,
+  overview, loading, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick, onLaggingSectorClick,
 }) => {
   const { token } = theme.useToken();
 
@@ -158,7 +159,7 @@ const TemperatureCard: React.FC<Props> = ({
             {laggingSectors.map((s) => (
               <div
                 key={s.sector_name}
-                onClick={() => onLeadingSectorClick?.(s.sector_name)}
+                onClick={() => onLaggingSectorClick?.(s.sector_name)}
                 style={sectorSubItemStyle}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = 'rgba(255,255,255,0.28)';

@@ -505,9 +505,10 @@ class MarketHeatService:
 
     @staticmethod
     async def get_leading_sector_stocks(
-        db: AsyncSession, sector_name: str, trade_date: Optional[str] = None
+        db: AsyncSession, sector_name: str, trade_date: Optional[str] = None,
+        sort_order: str = "desc",
     ) -> list[dict]:
-        """领涨板块内涨幅前 15 个股（行业名模糊匹配，去除罗马数字等后缀）"""
+        """板块内个股 Top 15：sort_order='desc' 领涨（涨幅靠前），'asc' 领跌（跌幅靠前）"""
         date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
         if not date:
             return []
@@ -518,10 +519,13 @@ class MarketHeatService:
         import re
         base_name = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', sector_name).strip()
 
+        change_expr = (Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100
+        order_clause = change_expr.desc() if sort_order == "desc" else change_expr.asc()
+
         stmt = (
             select(
                 Stock.ts_code, Stock.name, Daily.close, Daily.open,
-                ((Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100).label("change_pct"),
+                change_expr.label("change_pct"),
             )
             .join(Daily, Stock.ts_code == Daily.ts_code)
             .where(
@@ -533,7 +537,7 @@ class MarketHeatService:
                 | Stock.concepts.ilike(f"%{base_name}%"),
                 ~Stock.ts_code.like("%.IDX"),
             )
-            .order_by(((Daily.close - Daily.open) / func.nullif(Daily.open, 0)).desc())
+            .order_by(order_clause)
             .limit(15)
         )
         result = await db.execute(stmt)

@@ -23,7 +23,7 @@ const MarketHeat: React.FC = () => {
   const store = useMarketHeatStore();
   const [klineStock, setKlineStock] = useState<{ ts_code: string; name: string } | null>(null);
   const [kpiDetail, setKpiDetail] = useState<{
-    type: 'northbound' | 'advance_decline' | 'leading_sector';
+    type: 'northbound' | 'advance_decline' | 'leading_sector' | 'lagging_sector';
     sectorName?: string;
   } | null>(null);
 
@@ -229,6 +229,10 @@ const MarketHeat: React.FC = () => {
           onAdvanceDeclineClick={() => setKpiDetail({ type: 'advance_decline' })}
           onLeadingSectorClick={(name) => setKpiDetail({
             type: 'leading_sector',
+            sectorName: name,
+          })}
+          onLaggingSectorClick={(name) => setKpiDetail({
+            type: 'lagging_sector',
             sectorName: name,
           })}
         />

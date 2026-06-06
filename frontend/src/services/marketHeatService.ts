@@ -184,10 +184,10 @@ export const marketHeatService = {
     return response.data.data;
   },
 
-  async getLeadingSectorStocks(sectorName: string, tradeDate?: string) {
+  async getLeadingSectorStocks(sectorName: string, tradeDate?: string, sortOrder?: string) {
     const response = await api.get<{ code: number; data: LeadingStock[] }>(
       '/market-heat/leading-sector-stocks',
-      { params: { sector_name: sectorName, trade_date: tradeDate } },
+      { params: { sector_name: sectorName, trade_date: tradeDate, sort_order: sortOrder } },
     );
     return response.data.data;
   },

@@ -135,9 +135,10 @@ async def get_change_distribution(
 async def get_leading_sector_stocks(
     sector_name: str = Query(..., description="板块名称"),
     trade_date: Optional[str] = Query(None),
+    sort_order: str = Query("desc", description="排序：desc 涨幅靠前，asc 跌幅靠前"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """领涨板块内涨幅前 15 个股"""
-    data = await MarketHeatService.get_leading_sector_stocks(db, sector_name, trade_date)
+    """板块内个股 Top 15"""
+    data = await MarketHeatService.get_leading_sector_stocks(db, sector_name, trade_date, sort_order)
     return {"code": 0, "message": "ok", "data": data}

@@ -7,7 +7,7 @@ import marketHeatService, {
 
 interface Props {
   open: boolean;
-  type: 'northbound' | 'advance_decline' | 'leading_sector' | null;
+  type: 'northbound' | 'advance_decline' | 'leading_sector' | 'lagging_sector' | null;
   tradeDate?: string;
   sectorName?: string;
   onClose: () => void;
@@ -27,8 +27,9 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
       marketHeatService.getNorthbound(10).then(setNorthbound).finally(() => setLoading(false));
     } else if (type === 'advance_decline') {
       marketHeatService.getChangeDistribution(tradeDate).then(setDistribution).finally(() => setLoading(false));
-    } else if (type === 'leading_sector' && sectorName) {
-      marketHeatService.getLeadingSectorStocks(sectorName, tradeDate).then(setStocks).finally(() => setLoading(false));
+    } else if ((type === 'leading_sector' || type === 'lagging_sector') && sectorName) {
+      const sortOrder = type === 'lagging_sector' ? 'asc' : 'desc';
+      marketHeatService.getLeadingSectorStocks(sectorName, tradeDate, sortOrder).then(setStocks).finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
@@ -36,7 +37,8 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
 
   const title = type === 'northbound' ? '北向资金(深股通)近 10 日' :
     type === 'advance_decline' ? '涨跌幅度分布' :
-    type === 'leading_sector' ? `${sectorName} — 涨幅前 15` : '';
+    type === 'leading_sector' ? `${sectorName} — 涨幅前 15` :
+    type === 'lagging_sector' ? `${sectorName} — 跌幅前 15` : '';
 
   const northboundOption = React.useMemo(() => {
     if (!northbound.length) return {};
@@ -115,7 +117,7 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
           {type === 'advance_decline' && (
             distribution.length ? <ReactECharts option={distributionOption} style={{ height: 300 }} /> : <Empty description="暂无数据" />
           )}
-          {type === 'leading_sector' && (
+          {(type === 'leading_sector' || type === 'lagging_sector') && (
             stocks.length ? (
               <Table dataSource={stocks} columns={stockColumns} rowKey="ts_code" size="small" pagination={false} />
             ) : <Empty description="暂无数据" />
