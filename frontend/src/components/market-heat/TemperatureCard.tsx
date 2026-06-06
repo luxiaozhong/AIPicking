@@ -372,6 +372,9 @@ const TemperatureCard: React.FC<Props> = ({
         {cards.filter(c => c.label !== '🔥 市场温度').map((card) => {
           const isAdvanceDecline = card.label === '📊 涨跌比';
           const boardChanges: BoardChangeItem[] = overview.board_changes || [];
+          const sortedChanges = isAdvanceDecline
+            ? [...boardChanges].sort((a, b) => (b.change_pct ?? -Infinity) - (a.change_pct ?? -Infinity))
+            : [];
           return (
           <div
             key={card.label}
@@ -383,27 +386,29 @@ const TemperatureCard: React.FC<Props> = ({
               color: '#fff',
               cursor: card.onClick ? 'pointer' : 'default',
               transition: 'transform 0.15s',
+              ...(isAdvanceDecline && sortedChanges.length > 0
+                ? { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }
+                : {}),
             }}
             onMouseEnter={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
             onMouseLeave={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1)'; }}
           >
-            <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
-            {isAdvanceDecline && boardChanges.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
+            </div>
+            {isAdvanceDecline && sortedChanges.length > 0 && (
               <div style={{
-                display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap',
-                borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 8,
+                display: 'flex', flexDirection: 'column', gap: 3,
+                borderLeft: '1px solid rgba(255,255,255,0.2)', paddingLeft: 12,
+                flexShrink: 0,
               }}>
-                {boardChanges.map((bc) => (
-                  <div key={bc.board_code} style={{
-                    fontSize: 11, lineHeight: '18px',
-                    background: 'rgba(255,255,255,0.13)', borderRadius: 4,
-                    padding: '2px 8px',
-                  }}>
-                    <span style={{ opacity: 0.75 }}>{BOARD_SHORT_NAMES[bc.board_code] || bc.board_name}</span>
+                {sortedChanges.map((bc) => (
+                  <div key={bc.board_code} style={{ fontSize: 11, lineHeight: '18px', whiteSpace: 'nowrap' }}>
+                    <span style={{ opacity: 0.7 }}>{BOARD_SHORT_NAMES[bc.board_code] || bc.board_name}</span>
                     <span style={{
-                      marginLeft: 4, fontWeight: 600,
+                      marginLeft: 6, fontWeight: 600,
                       color: bc.change_pct != null
                         ? (bc.change_pct >= 0 ? '#b7eb8f' : '#ffa39e')
                         : 'rgba(255,255,255,0.45)',

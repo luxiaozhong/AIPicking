@@ -370,7 +370,7 @@ class MarketHeatService:
         # 板块温度（尝试从持久化表读取，失败则跳过）
         board_temps = await MarketHeatService.get_board_temperatures(db, daily_date)
 
-        # 四大板块涨跌幅（等权平均）
+        # 四大板块涨跌幅（中位数）
         from sqlalchemy import text as sa_text
         board_changes = []
         daily_a = Daily.__table__.alias()
@@ -382,7 +382,7 @@ class MarketHeatService:
         )
         for board_code, board_name, ts_pattern in MarketHeatService.BOARD_DEFINITIONS:
             bc_stmt = select(
-                func.avg(change_expr).label("avg_change_pct"),
+                func.percentile_cont(0.5).within_group(change_expr).label("median_change_pct"),
             ).select_from(daily_a).outerjoin(
                 prev_a,
                 (daily_a.c.ts_code == prev_a.c.ts_code)
@@ -400,11 +400,11 @@ class MarketHeatService:
                 sa_text(f"daily_1.ts_code ~ '{ts_pattern}'"),
             )
             bc_result = await db.execute(bc_stmt)
-            avg_change = bc_result.scalar()
+            median_change = bc_result.scalar()
             board_changes.append({
                 "board_code": board_code,
                 "board_name": board_name,
-                "change_pct": round(avg_change, 2) if avg_change is not None else None,
+                "change_pct": round(median_change, 2) if median_change is not None else None,
             })
 
         return {
