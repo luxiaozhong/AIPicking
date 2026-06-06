@@ -199,3 +199,25 @@ async def get_sector_fund_history(
     """板块资金流历史 — 近 N 日每日全行业资金净额合计（时间序列）"""
     data = await MarketHeatService.get_sector_fund_history(db, days)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/stress-overview")
+async def get_stress_overview(
+    trade_date: Optional[str] = Query(None, description="交易日 YYYYMMDD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """市场压力指数概览 — 5 维度评分体系，衡量市场恐慌程度"""
+    data = await MarketHeatService.get_stress_overview(db, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/stress-history")
+async def get_stress_history(
+    days: int = Query(60, ge=1, le=365, description="查询天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """市场压力指数历史趋势（近 N 日）"""
+    data = await MarketHeatService.get_stress_history(db, days)
+    return {"code": 0, "message": "ok", "data": data}

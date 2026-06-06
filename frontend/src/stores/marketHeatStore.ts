@@ -10,6 +10,8 @@ import marketHeatService, {
   type BoardTemperatureHistoryItem,
   type SectorFundOverview,
   type SectorFundHistoryItem,
+  type StressOverview,
+  type StressHistoryItem,
 } from '@/services/marketHeatService';
 
 interface MarketHeatState {
@@ -40,6 +42,10 @@ interface MarketHeatState {
   sectorFundOverviewLoading: boolean;
   sectorFundHistory: SectorFundHistoryItem[];
   sectorFundHistoryLoading: boolean;
+  stressOverview: StressOverview | null;
+  stressOverviewLoading: boolean;
+  stressHistory: StressHistoryItem[];
+  stressHistoryLoading: boolean;
   drawer: {
     open: boolean;
     type: 'sector' | 'theme' | null;
@@ -61,6 +67,8 @@ interface MarketHeatState {
   fetchBoardTemperatureHistory: (boardCode: string) => Promise<void>;
   fetchSectorFundOverview: () => Promise<void>;
   fetchSectorFundHistory: () => Promise<void>;
+  fetchStressOverview: () => Promise<void>;
+  fetchStressHistory: () => Promise<void>;
   openDrawer: (type: 'sector' | 'theme', code: string, name: string) => void;
   closeDrawer: () => void;
   clearError: () => void;
@@ -94,6 +102,10 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
   sectorFundOverviewLoading: false,
   sectorFundHistory: [],
   sectorFundHistoryLoading: false,
+  stressOverview: null,
+  stressOverviewLoading: false,
+  stressHistory: [],
+  stressHistoryLoading: false,
   drawer: { open: false, type: null, code: null, name: null },
   error: null,
 
@@ -219,6 +231,26 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
       set({ sectorFundHistory: data, sectorFundHistoryLoading: false });
     } catch (err: any) {
       set({ error: err.response?.data?.message || '获取板块资金流历史失败', sectorFundHistoryLoading: false });
+    }
+  },
+
+  fetchStressOverview: async () => {
+    set({ stressOverviewLoading: true, error: null });
+    try {
+      const data = await marketHeatService.getStressOverview(get().tradeDate);
+      set({ stressOverview: data, stressOverviewLoading: false });
+    } catch (err: any) {
+      set({ error: err.response?.data?.message || '获取压力指数失败', stressOverviewLoading: false });
+    }
+  },
+
+  fetchStressHistory: async () => {
+    set({ stressHistoryLoading: true, error: null });
+    try {
+      const data = await marketHeatService.getStressHistory(60);
+      set({ stressHistory: data, stressHistoryLoading: false });
+    } catch (err: any) {
+      set({ error: err.response?.data?.message || '获取压力历史失败', stressHistoryLoading: false });
     }
   },
 

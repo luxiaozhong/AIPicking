@@ -33,10 +33,12 @@ const MarketHeat: React.FC = () => {
     boardName: string;
   } | null>(null);
   const [sectorFundModalOpen, setSectorFundModalOpen] = useState(false);
+  const [stressModalOpen, setStressModalOpen] = useState(false);
 
   useEffect(() => {
     store.fetchAvailableDates();
     store.fetchTemperatureHistory();
+    store.fetchStressOverview();
   }, []);
 
   useEffect(() => {
@@ -48,6 +50,7 @@ const MarketHeat: React.FC = () => {
       store.fetchDragonTiger(1);
       store.fetchNorthbound();
       store.fetchSectorFundOverview();
+      store.fetchStressOverview();
     }
   }, [store.tradeDate]);
 
@@ -59,6 +62,7 @@ const MarketHeat: React.FC = () => {
     store.fetchDragonTiger();
     store.fetchNorthbound();
     store.fetchSectorFundOverview();
+    store.fetchStressOverview();
   };
 
   const sectorFundHistoryChartOption = useMemo(() => {
@@ -176,6 +180,43 @@ const MarketHeat: React.FC = () => {
       }],
     };
   }, [store.boardTemperatureHistory]);
+
+  const stressHistoryChartOption = useMemo(() => {
+    const data = store.stressHistory;
+    if (!data.length) return {};
+    const dates = data.map((d) => d.trade_date.slice(5));
+    const scores = data.map((d) => d.score);
+    const levels = data.map((d) => d.level);
+    const markAreas: any[] = [
+      [{ yAxis: 0, itemStyle: { color: 'rgba(82,196,26,0.08)' } }, { yAxis: 25, label: { show: true, position: 'insideLeft', formatter: '平稳', fontSize: 10 } }],
+      [{ yAxis: 25 }, { yAxis: 40, itemStyle: { color: 'rgba(160,217,17,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '关注', fontSize: 10 } }],
+      [{ yAxis: 40 }, { yAxis: 60, itemStyle: { color: 'rgba(250,173,20,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '压力', fontSize: 10 } }],
+      [{ yAxis: 60 }, { yAxis: 80, itemStyle: { color: 'rgba(255,122,69,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '恐慌', fontSize: 10 } }],
+      [{ yAxis: 80 }, { yAxis: 100, itemStyle: { color: 'rgba(255,77,79,0.08)' }, label: { show: true, position: 'insideLeft', formatter: '危机', fontSize: 10 } }],
+    ];
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          if (!p) return '';
+          const idx = p.dataIndex;
+          const dims = data[idx]?.dimensions;
+          if (!dims) return `${p.axisValue}<br/>压力指数: ${p.value}`;
+          return `<strong>${p.axisValue}</strong><br/>压力指数: <b>${p.value}</b> (${levels[idx]})<br/><span style="font-size:11px">指数跌幅:${dims.decline}/25 | 波动率:${dims.volatility}/25<br/>跌停潮:${dims.limitdown}/25 | 下跌广度:${dims.breadth}/15 | 北向:${dims.northbound}/10</span>`;
+        },
+      },
+      grid: { left: 60, right: 30, top: 20, bottom: 40 },
+      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+      yAxis: { type: 'value', min: 0, max: 100, name: '压力', splitLine: { lineStyle: { type: 'dashed' } } },
+      series: [{
+        type: 'line', data: scores, smooth: true, symbol: 'circle', symbolSize: 6,
+        lineStyle: { width: 2.5, color: '#fa541c' }, itemStyle: { color: '#fa541c' },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(250,84,28,0.25)' }, { offset: 1, color: 'rgba(250,84,28,0.02)' }] } },
+        markArea: { silent: true, data: markAreas },
+      }],
+    };
+  }, [store.stressHistory]);
 
   /** 可点击的股票名链接 */
   const stockNameLink = (code: string, name: string) => (
@@ -349,6 +390,8 @@ const MarketHeat: React.FC = () => {
           loading={store.overviewLoading}
           sectorFundTotalYI={store.sectorFundOverview?.total_net_yi ?? null}
           sectorFundLoading={store.sectorFundOverviewLoading}
+          stressOverview={store.stressOverview}
+          stressLoading={store.stressOverviewLoading}
           onTemperatureClick={() => setTemperatureModalOpen(true)}
           onNorthboundClick={() => setKpiDetail({ type: 'northbound' })}
           onAdvanceDeclineClick={() => setKpiDetail({ type: 'advance_decline' })}
@@ -367,6 +410,10 @@ const MarketHeat: React.FC = () => {
           onSectorFundClick={() => {
             setSectorFundModalOpen(true);
             store.fetchSectorFundHistory();
+          }}
+          onStressClick={() => {
+            setStressModalOpen(true);
+            store.fetchStressHistory();
           }}
         />
       </div>
@@ -481,6 +528,28 @@ const MarketHeat: React.FC = () => {
         {store.sectorFundHistory.length > 0 && (
           <div style={{ marginTop: 12, fontSize: 12, color: '#666', textAlign: 'center' }}>
             近 90 个交易日全行业资金净额合计 · 红柱为净流入，绿柱为净流出
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title="市场压力指数 · 近 60 日趋势"
+        open={stressModalOpen}
+        onCancel={() => setStressModalOpen(false)}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        {store.stressHistoryLoading ? (
+          <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+        ) : store.stressHistory.length > 0 ? (
+          <ReactECharts option={stressHistoryChartOption} style={{ height: 400 }} />
+        ) : (
+          <Empty description="暂无压力指数历史数据" />
+        )}
+        {store.stressHistory.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 12, color: '#666', textAlign: 'center' }}>
+            5 维度评分体系：指数跌幅 + 波动率 + 跌停潮 + 下跌广度 + 北向出逃 · 越高越恐慌
           </div>
         )}
       </Modal>

@@ -246,6 +246,22 @@ export const marketHeatService = {
     );
     return response.data.data;
   },
+
+  async getStressOverview(tradeDate?: string) {
+    const response = await api.get<{ code: number; data: StressOverview | null }>(
+      '/market-heat/stress-overview',
+      { params: { trade_date: tradeDate } },
+    );
+    return response.data.data;
+  },
+
+  async getStressHistory(days: number = 60) {
+    const response = await api.get<{ code: number; data: StressHistoryItem[] }>(
+      '/market-heat/stress-history',
+      { params: { days } },
+    );
+    return response.data.data;
+  },
 };
 
 export interface ChangeBucket {
@@ -299,6 +315,32 @@ export interface SectorFundHistoryItem {
   trade_date: string;
   total_net_yi: number;
   sector_count: number;
+}
+
+export interface StressOverview {
+  trade_date: string | null;
+  score: number;
+  level: string;
+  dimensions: {
+    decline: number;
+    volatility: number;
+    limitdown: number;
+    breadth: number;
+    northbound: number;
+  };
+}
+
+export interface StressHistoryItem {
+  trade_date: string;
+  score: number;
+  level: string;
+  dimensions: {
+    decline: number;
+    volatility: number;
+    limitdown: number;
+    breadth: number;
+    northbound: number;
+  };
 }
 
 export default marketHeatService;

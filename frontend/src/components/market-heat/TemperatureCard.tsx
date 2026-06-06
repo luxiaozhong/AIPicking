@@ -1,12 +1,114 @@
 import React from 'react';
-import { Spin, theme } from 'antd';
-import type { OverviewData } from '@/services/marketHeatService';
+import { Spin, theme, Tooltip } from 'antd';
+import type { OverviewData, StressOverview } from '@/services/marketHeatService';
+
+/** 市场温度维度：标签、满分、计算公式 */
+const MARKET_DIM_META: Array<{
+  key: string;
+  label: string;
+  max: number;
+  formula: string;
+}> = [
+  { key: 'capital', label: '资金面', max: 20, formula: '北向资金净流入金额分档' },
+  { key: 'breadth', label: '涨跌结构', max: 20, formula: '上涨家数占比 × 25' },
+  { key: 'sentiment', label: '情绪面', max: 20, formula: '涨停/跌停比 × 活跃度加权' },
+  { key: 'concentration', label: '集中度', max: 20, formula: '头部3行业资金流入占比（倒U型）' },
+  { key: 'continuity', label: '热度延续', max: 20, formula: '热门主题 Jaccard 相似度 × 20' },
+];
+
+/** 板块温度维度：标签、满分、计算公式 */
+const BOARD_DIM_META: Array<{
+  key: string;
+  label: string;
+  max: number;
+  formula: string;
+}> = [
+  { key: 'breadth', label: '涨跌结构', max: 40, formula: '上涨家数占比 × 50' },
+  { key: 'sentiment', label: '情绪面', max: 30, formula: '涨停/跌停比 × 活跃度加权' },
+  { key: 'volume', label: '量能', max: 30, formula: '当日成交额 / 近20日均成交额 × 15' },
+];
+
+/** 市场温度 Tooltip：维度分数 + 计算公式 */
+function renderMarketDimTooltip(dimensions: Record<string, number> | undefined) {
+  if (!dimensions) return null;
+  return (
+    <div style={{ fontSize: 12, lineHeight: '20px', minWidth: 200 }}>
+      {MARKET_DIM_META.map(({ key, label, max, formula }) => (
+        <div key={key} style={{ marginBottom: 4 }}>
+          <div>
+            {label}: <b>{dimensions[key] ?? '--'}</b>/{max}
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>{formula}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 板块温度 Tooltip：维度分数 + 计算公式 */
+function renderBoardDimTooltip(dimensions: Record<string, number> | undefined) {
+  if (!dimensions) return null;
+  return (
+    <div style={{ fontSize: 12, lineHeight: '20px', minWidth: 220 }}>
+      {BOARD_DIM_META.map(({ key, label, max, formula }) => (
+        <div key={key} style={{ marginBottom: 4 }}>
+          <div>
+            {label}: <b>{dimensions[key] ?? '--'}</b>/{max}
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>{formula}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 压力指数维度：标签、满分、计算公式（越高越恐慌） */
+const STRESS_DIM_META: Array<{
+  key: string;
+  label: string;
+  max: number;
+  formula: string;
+}> = [
+  { key: 'decline', label: '指数跌幅', max: 25, formula: '全A等权涨跌幅分档' },
+  { key: 'volatility', label: '波动率', max: 25, formula: '20日年化波动率（VIX核心法）' },
+  { key: 'limitdown', label: '跌停潮', max: 25, formula: '跌停占比（A股特有恐慌信号）' },
+  { key: 'breadth', label: '下跌广度', max: 15, formula: '下跌家数占比分档' },
+  { key: 'northbound', label: '北向出逃', max: 10, formula: '北向资金净流出分档' },
+];
+
+/** 压力等级颜色（方向与温度相反：越高越红） */
+const STRESS_COLORS: Record<string, [string, string]> = {
+  '平稳': ['#52c41a', '#389e0d'],
+  '关注': ['#a0d911', '#7cb305'],
+  '压力': ['#faad14', '#d48806'],
+  '恐慌': ['#ff7a45', '#fa541c'],
+  '危机': ['#ff4d4f', '#cf1322'],
+};
+
+/** 压力指数 Tooltip：维度分数 + 计算公式 */
+function renderStressDimTooltip(dimensions: Record<string, number> | undefined) {
+  if (!dimensions) return null;
+  return (
+    <div style={{ fontSize: 12, lineHeight: '20px', minWidth: 220 }}>
+      {STRESS_DIM_META.map(({ key, label, max, formula }) => (
+        <div key={key} style={{ marginBottom: 4 }}>
+          <div>
+            {label}: <b>{dimensions[key] ?? '--'}</b>/{max}
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>{formula}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface Props {
   overview: OverviewData | null;
   loading: boolean;
   sectorFundTotalYI?: number | null;
   sectorFundLoading?: boolean;
+  stressOverview?: StressOverview | null;
+  stressLoading?: boolean;
   onTemperatureClick?: () => void;
   onNorthboundClick?: () => void;
   onAdvanceDeclineClick?: () => void;
@@ -14,6 +116,7 @@ interface Props {
   onLaggingSectorClick?: (sectorName: string) => void;
   onBoardTemperatureClick?: (boardCode: string, boardName: string) => void;
   onSectorFundClick?: () => void;
+  onStressClick?: () => void;
 }
 
 const TEMP_COLORS: Record<string, [string, string]> = {
@@ -37,9 +140,10 @@ const sectorSubItemStyle: React.CSSProperties = {
 
 const TemperatureCard: React.FC<Props> = ({
   overview, loading, sectorFundTotalYI, sectorFundLoading,
+  stressOverview, stressLoading,
   onTemperatureClick, onNorthboundClick, onAdvanceDeclineClick,
   onLeadingSectorClick, onLaggingSectorClick, onBoardTemperatureClick,
-  onSectorFundClick,
+  onSectorFundClick, onStressClick,
 }) => {
   const { token } = theme.useToken();
 
@@ -91,56 +195,119 @@ const TemperatureCard: React.FC<Props> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* 第一排：市场温度 + 四大指数板块温度 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+      {/* 第一排：市场温度 + 压力指数 + 四大指数板块温度 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
         {/* 市场温度 */}
         {cards.filter(c => c.label === '🔥 市场温度').map((card) => (
-          <div
+          <Tooltip
             key={card.label}
-            onClick={card.onClick}
-            style={{
-              background: card.gradient,
-              borderRadius: token.borderRadius,
-              padding: '16px 20px',
-              color: '#fff',
-              cursor: card.onClick ? 'pointer' : 'default',
-              transition: 'transform 0.15s',
-            }}
-            onMouseEnter={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
-            onMouseLeave={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1)'; }}
+            title={renderMarketDimTooltip(t.dimensions)}
+            placement="bottom"
           >
-            <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
-          </div>
+            <div
+              onClick={card.onClick}
+              style={{
+                background: card.gradient,
+                borderRadius: token.borderRadius,
+                padding: '16px 20px',
+                color: '#fff',
+                cursor: card.onClick ? 'pointer' : 'default',
+                transition: 'transform 0.15s',
+              }}
+              onMouseEnter={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
+              onMouseLeave={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1)'; }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
+            </div>
+          </Tooltip>
         ))}
+        {/* 压力指数 */}
+        {(() => {
+          if (stressLoading) {
+            return (
+              <div style={{
+                background: 'linear-gradient(135deg, #8c8c8c, #595959)',
+                borderRadius: token.borderRadius, padding: '12px 16px', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Spin size="small" />
+              </div>
+            );
+          }
+          const s = stressOverview;
+          if (!s) {
+            return (
+              <div style={{
+                background: 'linear-gradient(135deg, #8c8c8c, #595959)',
+                borderRadius: token.borderRadius, padding: '12px 16px', color: '#fff',
+              }}>
+                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>⚠️ 压力指数</div>
+                <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>--</div>
+                <div style={{ fontSize: 11, opacity: 0.75 }}>暂无数据</div>
+              </div>
+            );
+          }
+          const [sStart, sEnd] = STRESS_COLORS[s.level] || STRESS_COLORS['平稳'];
+          return (
+            <Tooltip
+              key="stress"
+              title={renderStressDimTooltip(s.dimensions)}
+              placement="bottom"
+            >
+              <div
+                onClick={onStressClick}
+                style={{
+                  background: `linear-gradient(135deg, ${sStart}, ${sEnd})`,
+                  borderRadius: token.borderRadius,
+                  padding: '12px 16px',
+                  color: '#fff',
+                  cursor: onStressClick ? 'pointer' : 'default',
+                  transition: 'transform 0.15s',
+                }}
+                onMouseEnter={(e) => { if (onStressClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
+                onMouseLeave={(e) => { if (onStressClick) e.currentTarget.style.transform = 'scale(1)'; }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>⚠️ 压力指数</div>
+                <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>{s.score}</div>
+                <div style={{ fontSize: 11, opacity: 0.75 }}>{s.level}</div>
+              </div>
+            </Tooltip>
+          );
+        })()}
         {/* 四大指数板块温度 */}
         {overview.board_temperatures && overview.board_temperatures.length > 0 && (
           overview.board_temperatures.map((bt) => {
             const [btStart, btEnd] = TEMP_COLORS[bt.level] || TEMP_COLORS['中性'];
             return (
-              <div
+              <Tooltip
                 key={bt.board_code}
-                onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
-                style={{
-                  background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
-                  borderRadius: token.borderRadius,
-                  padding: '12px 16px',
-                  color: '#fff',
-                  cursor: onBoardTemperatureClick ? 'pointer' : 'default',
-                  transition: 'transform 0.15s',
-                }}
-                onMouseEnter={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
-                onMouseLeave={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1)'; }}
+                title={renderBoardDimTooltip(bt.dimensions)}
+                placement="bottom"
               >
-                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
-                  {bt.board_name}
+                <div
+                  onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
+                  style={{
+                    background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
+                    borderRadius: token.borderRadius,
+                    padding: '12px 16px',
+                    color: '#fff',
+                    cursor: onBoardTemperatureClick ? 'pointer' : 'default',
+                    transition: 'transform 0.15s',
+                  }}
+                  onMouseEnter={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
+                  onMouseLeave={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1)'; }}
+                >
+                  <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
+                    {bt.board_name}
+                  </div>
+                  <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>
+                    {bt.score}°
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>
-                  {bt.score}°
-                </div>
-                <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
-              </div>
+              </Tooltip>
             );
           })
         )}

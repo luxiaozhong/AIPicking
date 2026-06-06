@@ -1,6 +1,6 @@
 # 市场热度页面 — 设计与实现
 
-**日期**: 2026-06-05（设计）/ 2026-06-06（更新）  
+**日期**: 2026-06-05（设计）/ 2026-06-06（更新：压力指数、温度 Tooltip）  
 **状态**: 已实现  
 **关联**: 
 - 数据管线文档 `docs/data-pipeline.md`
@@ -21,6 +21,7 @@
 | `daily_dragon_tiger` | 龙虎榜（席位买卖） | 东财 |
 | `daily_market_temperature` | 市场温度（持久化，幂等 upsert） | 由 market_heat_service 计算写入 |
 | `daily_board_temperature` | 四大指数板块温度（持久化，幂等 upsert） | 由 market_heat_service 计算写入 |
+| `daily_market_stress` | 市场压力指数（持久化，幂等 upsert） | 由 market_heat_service 计算写入 |
 
 ### 1.2 目标
 
@@ -40,12 +41,12 @@
 ### 2.1 实际布局
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ 第一行: KPI 卡片 (5 列固定网格)                           │
-│ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐           │
-│ │ 市场  │ │上证主板│ │科创板 │ │深证主板│ │创业板 │           │
-│ │ 温度  │ │ 温度  │ │ 温度  │ │ 温度  │ │ 温度  │           │
-│ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘           │
+┌───────────────────────────────────────────────────────────────────┐
+│ 第一行: KPI 卡片 (6 列固定网格)                                     │
+│ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐           │
+│ │ 市场  │ │ 压力  │ │上证主板│ │科创板 │ │深证主板│ │创业板 │           │
+│ │ 温度  │ │ 指数  │ │ 温度  │ │ 温度  │ │ 温度  │ │ 温度  │           │
+│ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘           │
 ├─────────────────────────────────────────────────────────┤
 │ 第二行: KPI + 领涨/领跌 (响应式 auto-fit, min 200px)       │
 │ ┌──────┐ ┌──────┐ ┌────────────┐ ┌────────────┐        │
@@ -67,7 +68,7 @@
 
 - **日期选择器**: 页面右上角，默认最新交易日，仅可选有数据的日期
 - **刷新按钮**: 日期选择器旁
-- **响应式**: KPI 第一行固定 5 列；第二行 `auto-fit, minmax(200px, 1fr)`
+- **响应式**: KPI 第一行固定 6 列；第二行 `auto-fit, minmax(200px, 1fr)`
 
 ---
 
@@ -78,6 +79,7 @@
 | 触发源 | 目标 | 展示内容 |
 |--------|------|----------|
 | 点击「市场温度」卡片 | Modal 弹窗 | 近 60 日市场温度趋势图（5 维度 tooltip） |
+| 点击「压力指数」卡片 | Modal 弹窗 | 近 60 日压力指数趋势图（5 维度 tooltip） |
 | 点击「北向资金」卡片 | KpiDetailModal | 近 10 日买入/卖出/净额柱状图 |
 | 点击「涨跌比」卡片 | KpiDetailModal | 涨跌幅度分布柱状图 + 板块筛选 Segmented（全部/上证/深圳/科创/创业） |
 | 点击「领涨/领跌板块」子项 | KpiDetailModal | 板块内个股 Top 15 表格（涨幅/收盘价） |
@@ -85,6 +87,16 @@
 | 点击热力图板块 | SectorDrawer（右侧滑出） | 近 10 日资金流趋势 + 成分股 Top5 |
 | 点击词云主题词 | ThemeDrawer（右侧滑出） | 关联股票列表（涨幅/换手率/DDE） |
 | 点击龙虎榜/热门股票行 | StockKLineModal | 个股 K 线图（弹窗） |
+
+### 3.2 卡片 Tooltip
+
+所有温度/压力卡片支持鼠标悬浮显示维度明细：
+
+| 卡片 | Tooltip 内容 |
+|------|-------------|
+| 🔥 市场温度 | 5 维度分数/满分 + 计算公式 |
+| ⚠️ 压力指数 | 5 维度分数/满分 + 计算公式 |
+| 四大板块温度 | 3 维度分数/满分 + 计算公式 |
 
 ### 3.2 KPI 详情弹窗（KpiDetailModal）
 
@@ -151,6 +163,8 @@ app.include_router(market_heat.router, prefix="/api/v1/market-heat", tags=["mark
 | GET | `/temperature-history` | days=60 | daily_market_temperature | 全市场温度历史趋势 |
 | GET | `/board-temperatures` | trade_date (可选) | daily_board_temperature | 四大指数板块温度（最新/指定日） |
 | GET | `/board-temperature-history/{board_code}` | board_code, days=60 | daily_board_temperature | 指定板块温度历史趋势 |
+| GET | `/stress-overview` | trade_date (可选) | daily_market_stress | 市场压力指数概览（5 维度） |
+| GET | `/stress-history` | days=60 | daily_market_stress | 市场压力指数历史趋势 |
 
 ### 4.3 全市场温度算法
 
@@ -187,7 +201,33 @@ app.include_router(market_heat.router, prefix="/api/v1/market-heat", tags=["mark
 
 温度区间同全市场（0-30 冰点 · 30-50 偏冷 · ... · 85-100 过热）。
 
-### 4.5 涨跌分布算法
+### 4.6 市场压力指数算法
+
+**目标**: 补全温度体系盲区 — 直接衡量指数跌幅、波动率、跌停潮，方向与 VIX 一致（越高越恐慌）。
+
+5 维度评分，满分 100：
+
+| 维度 (权重) | 计算方式 | 原因 |
+|-------------|----------|------|
+| 指数跌幅 (25) | 全 A 等权涨跌幅分档：>+2%→0, +1~2%→3, 0~1%→8, -1~0%→12, -2~-1%→16, -3~-2%→20, -4~-3%→23, <-4%→25 | 直接衡量市场实际表现 |
+| 波动率 (25) | 近 20 日全 A 等权日收益率 std × √252 年化：<15%→0, 15-20%→5, 20-25%→10, 25-30%→15, 30-40%→20, >40%→25 | VIX 核心方法 |
+| 跌停潮 (25) | 跌停占比（≤-9.8%）：<0.5%→0, 0.5-1%→5, 1-2%→10, 2-5%→15, 5-10%→20, >10%→25 | A 股特有恐慌信号 |
+| 下跌广度 (15) | 下跌家数占比（复用 adv）：<40%→0, 40-50%→3, 50-60%→6, 60-70%→9, 70-80%→12, >80%→15 | 普跌程度 |
+| 北向出逃 (10) | 北向净额（亿）：>0→0, -0~-20→2, -20~-50→4, -50~-100→7, <-100→10 | 外资信心 |
+
+等级划分（与温度体系不同，不用度数符号）：
+
+| 分数范围 | 等级 | 含义 | 颜色 |
+|---------|------|------|------|
+| 0-25 | 平稳 | 市场无忧 | 绿 |
+| 25-40 | 关注 | 略紧张 | 黄绿 |
+| 40-60 | 压力 | 明显承压 | 橙 |
+| 60-80 | 恐慌 | 市场恐慌 | 红 |
+| 80-100 | 危机 | 极端行情 | 深红 |
+
+**设计原则**: 压力指数与市场温度互为补充。大跌日：温度可能"中性"（涨跌家数均衡），但压力指数升高（跌幅大+跌停多）。大涨日：温度偏高，压力指数低。两者交叉验证，提供更完整的市场画像。
+
+### 4.7 涨跌分布算法
 
 使用**日内涨跌** `(close - open) / open * 100`（与涨跌比 KPI 的 `close > open` 判断一致），分 8 个区间统计个股数量。当 `board` 参数不为空时，追加 `ts_code ~ 'pattern'` 条件过滤对应板块。
 
@@ -201,11 +241,11 @@ app.include_router(market_heat.router, prefix="/api/v1/market-heat", tags=["mark
 
 ```
 frontend/src/
-├── services/marketHeatService.ts     # API 调用 + 类型定义（ChangeBucket, LeadingStock, BoardTemperatureItem 等）
-├── stores/marketHeatStore.ts         # Zustand 状态管理（日期、概览、板块、主题、热门股、龙虎榜、温度历史、抽屉）
-├── pages/MarketHeat.tsx              # 主页面（组装子组件 + Modal 管理 + K 线弹窗）
+├── services/marketHeatService.ts     # API 调用 + 类型定义（ChangeBucket, LeadingStock, BoardTemperatureItem, StressOverview 等）
+├── stores/marketHeatStore.ts         # Zustand 状态管理（日期、概览、板块、主题、热门股、龙虎榜、温度历史、压力指数、抽屉）
+├── pages/MarketHeat.tsx              # 主页面（组装子组件 + Modal 管理 + K 线弹窗 + 压力趋势图）
 └── components/market-heat/
-    ├── TemperatureCard.tsx           # KPI 卡片行（5 列市场+板块温度 + 响应式第二行）
+    ├── TemperatureCard.tsx           # KPI 卡片行（6 列：市场温度+压力指数+4板块 + 响应式第二行，含 Tooltip）
     ├── KpiDetailModal.tsx            # KPI 下钻弹窗（北向图表/涨跌分布/板块个股表格）
     ├── SectorTreemap.tsx             # ECharts Treemap（板块资金流热力图）
     ├── ThemeWordCloud.tsx            # ECharts WordCloud（热门主题词云）
@@ -266,7 +306,8 @@ backend/app/
 └── services/market_heat_service.py # 业务层
     ├── 概览 KPI: get_overview, _calc_temperature, save_temperature
     ├── 板块温度: _calc_board_temp, save_board_temperatures, get_board_temperatures, get_board_temperature_history
-    ├── 板块资金流: get_sectors, get_sector_detail
+    ├── 板块资金流: get_sectors, get_sector_detail, get_sector_fund_overview, get_sector_fund_history
+    ├── 压力指数: _calc_stress_index, save_stress_index, get_stress_overview, get_stress_history
     ├── 涨跌分布: get_change_distribution (含 board 筛选)
     ├── 板块个股: get_leading_sector_stocks (含 sort_order)
     ├── 主题: get_themes, get_theme_detail
@@ -302,6 +343,8 @@ backend/app/
 
 以下不在本次范围，但设计预留了扩展空间：
 
+- 压力指数接入 50ETF 期权隐含波动率（真正的 A 股 VIX）
+- 温度 vs 压力双指标交叉矩阵看板（象限图）
 - 新增「概念轮动」时间轴，展示热门概念的兴起/衰减
 - 大盘指数 K 线叠加市场温度曲线
 - 板块资金流异动预警

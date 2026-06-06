@@ -239,4 +239,26 @@ class DailyBoardTemperature(BaseModel):
     volume_score = Column(Integer, nullable=False)     # 量能活跃度 0-30
 
 
+class DailyMarketStress(BaseModel):
+    """每日市场压力指数表 — 由 sync_market_temperature.py 写入
+
+    衡量市场恐慌/紧张程度，方向与 VIX 一致（越高越糟）。
+    包含 5 个维度：指数跌幅、波动率、跌停潮、下跌广度、北向出逃。
+    """
+    __tablename__ = "daily_market_stress"
+    __table_args__ = (
+        UniqueConstraint("trade_date", name="uq_market_stress_date"),
+        Index("idx_stress_date", "trade_date"),
+    )
+
+    trade_date = Column(String(10), unique=True, nullable=False, index=True)
+    score = Column(Integer, nullable=False)
+    level = Column(String(10), nullable=False)
+    decline_score = Column(Float, nullable=False)     # 指数跌幅 0-25
+    volatility_score = Column(Float, nullable=False)  # 波动率 0-25
+    limitdown_score = Column(Float, nullable=False)   # 跌停潮 0-25
+    breadth_score = Column(Float, nullable=False)     # 下跌广度 0-15
+    northbound_score = Column(Float, nullable=False)  # 北向出逃 0-10
+
+
 # daily_industry_flow → 已合并到 daily_sector_flow (sector_type='industry')

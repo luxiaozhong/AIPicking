@@ -66,6 +66,16 @@ async def main_async(trade_date: Optional[str] = None):
                   f"结构:{dims['breadth']}/40 情绪:{dims['sentiment']}/30 量能:{dims['volume']}/30")
         print("  ✓ 已保存到 daily_board_temperature")
 
+        print(f"\n[压力指数] 计算 {date} 市场压力指数...")
+        stress = await MarketHeatService.save_stress_index(db, date)
+
+        print(f"  得分: {stress['score']} ({stress['level']})")
+        dims = stress["dimensions"]
+        print(f"  指数跌幅: {dims['decline']}/25  波动率: {dims['volatility']}/25  "
+              f"跌停潮: {dims['limitdown']}/25  下跌广度: {dims['breadth']}/15  "
+              f"北向出逃: {dims['northbound']}/10")
+        print("  ✓ 已保存到 daily_market_stress")
+
 
 def main():
     parser = argparse.ArgumentParser(description="每日市场温度计算")

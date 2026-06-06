@@ -13,6 +13,7 @@ from .stock_tables import (
     Stock, Daily, DailySectorFlow, StockTheme,
     DailyHotStock, DailyHotTheme, DailyNorthboundFlow,
     DailyDragonTiger, DailyDragonTigerSeat,
+    DailyMarketTemperature, DailyBoardTemperature, DailyMarketStress,
 )
 from .financial import FinancialReport, DailyValuation
 from .trade_sim import TradeSimReport, BatchTradeSimReport
