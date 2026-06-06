@@ -7,6 +7,7 @@ import marketHeatService, {
   type DragonTigerItem,
   type NorthboundItem,
   type TemperatureHistoryItem,
+  type BoardTemperatureHistoryItem,
 } from '@/services/marketHeatService';
 
 interface MarketHeatState {
@@ -31,6 +32,8 @@ interface MarketHeatState {
   northboundLoading: boolean;
   temperatureHistory: TemperatureHistoryItem[];
   temperatureHistoryLoading: boolean;
+  boardTemperatureHistory: BoardTemperatureHistoryItem[];
+  boardTemperatureHistoryLoading: boolean;
   drawer: {
     open: boolean;
     type: 'sector' | 'theme' | null;
@@ -49,6 +52,7 @@ interface MarketHeatState {
   fetchDragonTiger: (page?: number) => Promise<void>;
   fetchNorthbound: () => Promise<void>;
   fetchTemperatureHistory: () => Promise<void>;
+  fetchBoardTemperatureHistory: (boardCode: string) => Promise<void>;
   openDrawer: (type: 'sector' | 'theme', code: string, name: string) => void;
   closeDrawer: () => void;
   clearError: () => void;
@@ -76,6 +80,8 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
   northboundLoading: false,
   temperatureHistory: [],
   temperatureHistoryLoading: false,
+  boardTemperatureHistory: [],
+  boardTemperatureHistoryLoading: false,
   drawer: { open: false, type: null, code: null, name: null },
   error: null,
 
@@ -171,6 +177,16 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
       set({ temperatureHistory: data, temperatureHistoryLoading: false });
     } catch (err: any) {
       set({ error: err.response?.data?.message || '获取温度历史失败', temperatureHistoryLoading: false });
+    }
+  },
+
+  fetchBoardTemperatureHistory: async (boardCode: string) => {
+    set({ boardTemperatureHistoryLoading: true, error: null });
+    try {
+      const data = await marketHeatService.getBoardTemperatureHistory(boardCode, 60);
+      set({ boardTemperatureHistory: data, boardTemperatureHistoryLoading: false });
+    } catch (err: any) {
+      set({ error: err.response?.data?.message || '获取板块温度历史失败', boardTemperatureHistoryLoading: false });
     }
   },
 

@@ -10,6 +10,7 @@ interface Props {
   onAdvanceDeclineClick?: () => void;
   onLeadingSectorClick?: (sectorName: string) => void;
   onLaggingSectorClick?: (sectorName: string) => void;
+  onBoardTemperatureClick?: (boardCode: string, boardName: string) => void;
 }
 
 const TEMP_COLORS: Record<string, [string, string]> = {
@@ -32,7 +33,7 @@ const sectorSubItemStyle: React.CSSProperties = {
 };
 
 const TemperatureCard: React.FC<Props> = ({
-  overview, loading, onTemperatureClick, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick, onLaggingSectorClick,
+  overview, loading, onTemperatureClick, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick, onLaggingSectorClick, onBoardTemperatureClick,
 }) => {
   const { token } = theme.useToken();
 
@@ -113,12 +114,17 @@ const TemperatureCard: React.FC<Props> = ({
           return (
             <div
               key={bt.board_code}
+              onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
               style={{
                 background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
                 borderRadius: token.borderRadius,
                 padding: '12px 16px',
                 color: '#fff',
+                cursor: onBoardTemperatureClick ? 'pointer' : 'default',
+                transition: 'transform 0.15s',
               }}
+              onMouseEnter={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
+              onMouseLeave={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1)'; }}
             >
               <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
                 {bt.board_name}

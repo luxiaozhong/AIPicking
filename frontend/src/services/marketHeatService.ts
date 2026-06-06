@@ -220,6 +220,14 @@ export const marketHeatService = {
     );
     return response.data.data;
   },
+
+  async getBoardTemperatureHistory(boardCode: string, days: number = 60) {
+    const response = await api.get<{ code: number; data: BoardTemperatureHistoryItem[] }>(
+      `/market-heat/board-temperature-history/${boardCode}`,
+      { params: { days } },
+    );
+    return response.data.data;
+  },
 };
 
 export interface ChangeBucket {
@@ -247,6 +255,19 @@ export interface TemperatureHistoryItem {
     sentiment: number;
     concentration: number;
     continuity: number;
+  };
+}
+
+export interface BoardTemperatureHistoryItem {
+  trade_date: string;
+  board_code: string;
+  board_name: string;
+  score: number;
+  level: string;
+  dimensions: {
+    breadth: number;
+    sentiment: number;
+    volume: number;
   };
 }
 

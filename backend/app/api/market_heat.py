@@ -164,3 +164,15 @@ async def get_board_temperatures(
     """四大指数板块温度"""
     data = await MarketHeatService.get_board_temperatures(db, trade_date)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/board-temperature-history/{board_code}")
+async def get_board_temperature_history(
+    board_code: str,
+    days: int = Query(60, ge=1, le=365, description="查询天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """板块温度历史趋势（近 N 日）"""
+    data = await MarketHeatService.get_board_temperature_history(db, board_code, days)
+    return {"code": 0, "message": "ok", "data": data}

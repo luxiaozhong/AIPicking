@@ -28,6 +28,10 @@ const MarketHeat: React.FC = () => {
     sectorName?: string;
   } | null>(null);
   const [temperatureModalOpen, setTemperatureModalOpen] = useState(false);
+  const [boardTempModal, setBoardTempModal] = useState<{
+    boardCode: string;
+    boardName: string;
+  } | null>(null);
 
   useEffect(() => {
     store.fetchAvailableDates();
@@ -94,6 +98,43 @@ const MarketHeat: React.FC = () => {
       }],
     };
   }, [store.temperatureHistory]);
+
+  const boardTemperatureChartOption = useMemo(() => {
+    const data = store.boardTemperatureHistory;
+    if (!data.length) return {};
+    const dates = data.map((d) => d.trade_date.slice(5));
+    const scores = data.map((d) => d.score);
+    const levels = data.map((d) => d.level);
+    const markAreas: any[] = [
+      [{ yAxis: 0, itemStyle: { color: 'rgba(24,144,255,0.08)' } }, { yAxis: 30, label: { show: true, position: 'insideLeft', formatter: '冰点', fontSize: 10 } }],
+      [{ yAxis: 30 }, { yAxis: 50, itemStyle: { color: 'rgba(82,196,26,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '偏冷', fontSize: 10 } }],
+      [{ yAxis: 50 }, { yAxis: 70, itemStyle: { color: 'rgba(250,173,20,0.06)' } }],
+      [{ yAxis: 70 }, { yAxis: 85, itemStyle: { color: 'rgba(255,122,69,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '偏热', fontSize: 10 } }],
+      [{ yAxis: 85 }, { yAxis: 100, itemStyle: { color: 'rgba(255,77,79,0.08)' }, label: { show: true, position: 'insideLeft', formatter: '过热', fontSize: 10 } }],
+    ];
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          if (!p) return '';
+          const idx = p.dataIndex;
+          const dims = data[idx]?.dimensions;
+          if (!dims) return `${p.axisValue}<br/>温度: ${p.value}°`;
+          return `<strong>${p.axisValue}</strong><br/>温度: <b>${p.value}°</b> (${levels[idx]})<br/><span style="font-size:11px">涨跌结构:${dims.breadth}/40 | 情绪面:${dims.sentiment}/30 | 量能:${dims.volume}/30</span>`;
+        },
+      },
+      grid: { left: 60, right: 30, top: 20, bottom: 40 },
+      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+      yAxis: { type: 'value', min: 0, max: 100, name: '温度', splitLine: { lineStyle: { type: 'dashed' } } },
+      series: [{
+        type: 'line', data: scores, smooth: true, symbol: 'circle', symbolSize: 6,
+        lineStyle: { width: 2.5, color: '#1677ff' }, itemStyle: { color: '#1677ff' },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(22,119,255,0.25)' }, { offset: 1, color: 'rgba(22,119,255,0.02)' }] } },
+        markArea: { silent: true, data: markAreas },
+      }],
+    };
+  }, [store.boardTemperatureHistory]);
 
   /** 可点击的股票名链接 */
   const stockNameLink = (code: string, name: string) => (
@@ -276,6 +317,10 @@ const MarketHeat: React.FC = () => {
             type: 'lagging_sector',
             sectorName: name,
           })}
+          onBoardTemperatureClick={(boardCode, boardName) => {
+            setBoardTempModal({ boardCode, boardName });
+            store.fetchBoardTemperatureHistory(boardCode);
+          }}
         />
       </div>
 
@@ -351,6 +396,23 @@ const MarketHeat: React.FC = () => {
           <ReactECharts option={temperatureChartOption} style={{ height: 400 }} />
         ) : (
           <Empty description="暂无历史温度数据" />
+        )}
+      </Modal>
+
+      <Modal
+        title={`${boardTempModal?.boardName ?? ''} 板块温度 · 近 60 日趋势`}
+        open={!!boardTempModal}
+        onCancel={() => setBoardTempModal(null)}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        {store.boardTemperatureHistoryLoading ? (
+          <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+        ) : store.boardTemperatureHistory.length > 0 ? (
+          <ReactECharts option={boardTemperatureChartOption} style={{ height: 400 }} />
+        ) : (
+          <Empty description={`暂无${boardTempModal?.boardName ?? ''}板块温度历史数据`} />
         )}
       </Modal>
     </div>

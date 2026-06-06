@@ -878,6 +878,39 @@ class MarketHeatService:
             for r in rows
         ]
 
+    @staticmethod
+    async def get_board_temperature_history(
+        db: AsyncSession, board_code: str, days: int = 60
+    ) -> list[dict]:
+        """近 N 日板块温度历史"""
+        from ..models.stock_tables import DailyBoardTemperature
+
+        stmt = (
+            select(DailyBoardTemperature.__table__)
+            .where(DailyBoardTemperature.__table__.c.board_code == board_code)
+            .order_by(DailyBoardTemperature.__table__.c.trade_date.desc())
+            .limit(days)
+        )
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        history = []
+        for row in reversed(list(rows)):
+            r = dict(row)
+            history.append({
+                "trade_date": r["trade_date"],
+                "board_code": r["board_code"],
+                "board_name": r["board_name"],
+                "score": r["score"],
+                "level": r["level"],
+                "dimensions": {
+                    "breadth": r["breadth_score"],
+                    "sentiment": r["sentiment_score"],
+                    "volume": r["volume_score"],
+                },
+            })
+        return history
+
     # ── 涨跌分布 ─────────────────────────────────────────────
 
     @staticmethod
