@@ -8,6 +8,8 @@ import marketHeatService, {
   type NorthboundItem,
   type TemperatureHistoryItem,
   type BoardTemperatureHistoryItem,
+  type SectorFundOverview,
+  type SectorFundHistoryItem,
 } from '@/services/marketHeatService';
 
 interface MarketHeatState {
@@ -34,6 +36,10 @@ interface MarketHeatState {
   temperatureHistoryLoading: boolean;
   boardTemperatureHistory: BoardTemperatureHistoryItem[];
   boardTemperatureHistoryLoading: boolean;
+  sectorFundOverview: SectorFundOverview | null;
+  sectorFundOverviewLoading: boolean;
+  sectorFundHistory: SectorFundHistoryItem[];
+  sectorFundHistoryLoading: boolean;
   drawer: {
     open: boolean;
     type: 'sector' | 'theme' | null;
@@ -53,6 +59,8 @@ interface MarketHeatState {
   fetchNorthbound: () => Promise<void>;
   fetchTemperatureHistory: () => Promise<void>;
   fetchBoardTemperatureHistory: (boardCode: string) => Promise<void>;
+  fetchSectorFundOverview: () => Promise<void>;
+  fetchSectorFundHistory: () => Promise<void>;
   openDrawer: (type: 'sector' | 'theme', code: string, name: string) => void;
   closeDrawer: () => void;
   clearError: () => void;
@@ -82,6 +90,10 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
   temperatureHistoryLoading: false,
   boardTemperatureHistory: [],
   boardTemperatureHistoryLoading: false,
+  sectorFundOverview: null,
+  sectorFundOverviewLoading: false,
+  sectorFundHistory: [],
+  sectorFundHistoryLoading: false,
   drawer: { open: false, type: null, code: null, name: null },
   error: null,
 
@@ -187,6 +199,26 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
       set({ boardTemperatureHistory: data, boardTemperatureHistoryLoading: false });
     } catch (err: any) {
       set({ error: err.response?.data?.message || '获取板块温度历史失败', boardTemperatureHistoryLoading: false });
+    }
+  },
+
+  fetchSectorFundOverview: async () => {
+    set({ sectorFundOverviewLoading: true, error: null });
+    try {
+      const data = await marketHeatService.getSectorFundOverview(get().tradeDate);
+      set({ sectorFundOverview: data, sectorFundOverviewLoading: false });
+    } catch (err: any) {
+      set({ error: err.response?.data?.message || '获取板块资金流失败', sectorFundOverviewLoading: false });
+    }
+  },
+
+  fetchSectorFundHistory: async () => {
+    set({ sectorFundHistoryLoading: true, error: null });
+    try {
+      const data = await marketHeatService.getSectorFundHistory(90);
+      set({ sectorFundHistory: data, sectorFundHistoryLoading: false });
+    } catch (err: any) {
+      set({ error: err.response?.data?.message || '获取板块资金流历史失败', sectorFundHistoryLoading: false });
     }
   },
 

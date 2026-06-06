@@ -230,6 +230,22 @@ export const marketHeatService = {
     );
     return response.data.data;
   },
+
+  async getSectorFundOverview(tradeDate?: string) {
+    const response = await api.get<{ code: number; data: SectorFundOverview }>(
+      '/market-heat/sector-fund-overview',
+      { params: { trade_date: tradeDate } },
+    );
+    return response.data.data;
+  },
+
+  async getSectorFundHistory(days: number = 90) {
+    const response = await api.get<{ code: number; data: SectorFundHistoryItem[] }>(
+      '/market-heat/sector-fund-history',
+      { params: { days } },
+    );
+    return response.data.data;
+  },
 };
 
 export interface ChangeBucket {
@@ -271,6 +287,18 @@ export interface BoardTemperatureHistoryItem {
     sentiment: number;
     volume: number;
   };
+}
+
+export interface SectorFundOverview {
+  trade_date: string | null;
+  total_net_yi: number;
+  sector_count: number;
+}
+
+export interface SectorFundHistoryItem {
+  trade_date: string;
+  total_net_yi: number;
+  sector_count: number;
 }
 
 export default marketHeatService;

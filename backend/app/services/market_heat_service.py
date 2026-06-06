@@ -1352,3 +1352,82 @@ class MarketHeatService:
              "change_pct": round(r.change_pct, 2) if r.change_pct else None}
             for r in result.all()
         ]
+
+    # ── 板块资金流综合 ────────────────────────────────────────
+
+    @staticmethod
+    async def get_sector_fund_overview(
+        db: AsyncSession, trade_date: Optional[str] = None
+    ) -> dict:
+        """板块资金流总览 — 当日全行业板块资金净额合计"""
+        date = trade_date or await MarketHeatService._get_latest_date_for(
+            db, DailySectorFlow.__table__.c
+        )
+        if not date:
+            return {"trade_date": None, "total_net_yi": 0, "sector_count": 0}
+
+        async def _query(d: str) -> dict:
+            stmt = select(
+                func.sum(DailySectorFlow.__table__.c.net_inflow).label("total_net"),
+                func.count().label("cnt"),
+            ).where(
+                DailySectorFlow.__table__.c.trade_date == d,
+                DailySectorFlow.__table__.c.sector_type == "industry",
+            )
+            result = await db.execute(stmt)
+            row = result.mappings().first()
+            return {
+                "trade_date": d,
+                "total_net_yi": round(row["total_net"] or 0, 2),
+                "sector_count": row["cnt"] or 0,
+            }
+
+        data = await _query(date)
+        # 指定日期无数据时自动回退到最新
+        if not data.get("sector_count") and trade_date:
+            fallback = await MarketHeatService._get_latest_date_for(
+                db, DailySectorFlow.__table__.c
+            )
+            if fallback and fallback != date:
+                data = await _query(fallback)
+        return data
+
+    @staticmethod
+    async def get_sector_fund_history(
+        db: AsyncSession, days: int = 90
+    ) -> list[dict]:
+        """板块资金流历史 — 近 N 日每日全行业资金净额合计（按日汇总）"""
+        # 先取最近 N 个有数据的交易日，再按日汇总
+        subq = (
+            select(
+                DailySectorFlow.__table__.c.trade_date,
+                DailySectorFlow.__table__.c.net_inflow,
+            )
+            .where(DailySectorFlow.__table__.c.sector_type == "industry")
+            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
+            .limit(10000)  # 足够覆盖 N 天所有行业
+            .subquery()
+        )
+
+        # 按日汇总
+        stmt = (
+            select(
+                subq.c.trade_date,
+                func.sum(subq.c.net_inflow).label("total_net_yi"),
+                func.count().label("sector_count"),
+            )
+            .group_by(subq.c.trade_date)
+            .order_by(subq.c.trade_date.desc())
+            .limit(days)
+        )
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        history = []
+        for row in reversed(list(rows)):
+            history.append({
+                "trade_date": row["trade_date"],
+                "total_net_yi": round(row["total_net_yi"] or 0, 2),
+                "sector_count": row["sector_count"] or 0,
+            })
+        return history

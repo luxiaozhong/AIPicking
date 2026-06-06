@@ -5,12 +5,15 @@ import type { OverviewData } from '@/services/marketHeatService';
 interface Props {
   overview: OverviewData | null;
   loading: boolean;
+  sectorFundTotalYI?: number | null;
+  sectorFundLoading?: boolean;
   onTemperatureClick?: () => void;
   onNorthboundClick?: () => void;
   onAdvanceDeclineClick?: () => void;
   onLeadingSectorClick?: (sectorName: string) => void;
   onLaggingSectorClick?: (sectorName: string) => void;
   onBoardTemperatureClick?: (boardCode: string, boardName: string) => void;
+  onSectorFundClick?: () => void;
 }
 
 const TEMP_COLORS: Record<string, [string, string]> = {
@@ -33,7 +36,10 @@ const sectorSubItemStyle: React.CSSProperties = {
 };
 
 const TemperatureCard: React.FC<Props> = ({
-  overview, loading, onTemperatureClick, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick, onLaggingSectorClick, onBoardTemperatureClick,
+  overview, loading, sectorFundTotalYI, sectorFundLoading,
+  onTemperatureClick, onNorthboundClick, onAdvanceDeclineClick,
+  onLeadingSectorClick, onLaggingSectorClick, onBoardTemperatureClick,
+  onSectorFundClick,
 }) => {
   const { token } = theme.useToken();
 
@@ -239,6 +245,38 @@ const TemperatureCard: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* 板块资金流 */}
+      <div
+        onClick={onSectorFundClick}
+        style={{
+          background: sectorFundTotalYI != null && sectorFundTotalYI >= 0
+            ? 'linear-gradient(135deg, #eb2f96, #c41d7f)'
+            : 'linear-gradient(135deg, #13c2c2, #08979c)',
+          borderRadius: token.borderRadius,
+          padding: '16px 20px',
+          color: '#fff',
+          cursor: onSectorFundClick ? 'pointer' : 'default',
+          transition: 'transform 0.15s',
+          opacity: sectorFundLoading ? 0.7 : 1,
+        }}
+        onMouseEnter={(e) => { if (onSectorFundClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
+        onMouseLeave={(e) => { if (onSectorFundClick) e.currentTarget.style.transform = 'scale(1)'; }}
+      >
+        <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>📈 板块资金流</div>
+        <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>
+          {sectorFundLoading ? '...' : (
+            sectorFundTotalYI != null
+              ? `${sectorFundTotalYI > 0 ? '+' : ''}${sectorFundTotalYI.toFixed(1)}亿`
+              : '--'
+          )}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.75 }}>
+          {sectorFundTotalYI != null
+            ? (sectorFundTotalYI >= 0 ? '行业资金净流入' : '行业资金净流出')
+            : '全行业资金流向'}
+        </div>
+      </div>
       </div>
     </div>
   );
