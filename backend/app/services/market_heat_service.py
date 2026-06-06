@@ -162,6 +162,14 @@ _SECTOR_MAP: dict[str, dict] = {
 }
 
 
+def _normalize_trade_date(d: str) -> str:
+    """'20260604' → '2026-06-04'，已是标准格式则原样返回"""
+    if not d:
+        return d
+    if len(d) == 8 and '-' not in d:
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    return d
+
 def _normalize_sector_name(name: str) -> list[str]:
     """归一化板块名称，返回多个候选形式用于模糊匹配。
 
@@ -1360,35 +1368,37 @@ class MarketHeatService:
         db: AsyncSession, trade_date: Optional[str] = None
     ) -> dict:
         """板块资金流总览 — 当日全行业板块资金净额合计"""
-        date = trade_date or await MarketHeatService._get_latest_date_for(
+        from datetime import date as _date
+
+        d = trade_date or await MarketHeatService._get_latest_date_for(
             db, DailySectorFlow.__table__.c
         )
-        if not date:
+        if not d:
             return {"trade_date": None, "total_net_yi": 0, "sector_count": 0}
 
-        async def _query(d: str) -> dict:
+        async def _query(td: str) -> dict:
             stmt = select(
                 func.sum(DailySectorFlow.__table__.c.net_inflow).label("total_net"),
                 func.count().label("cnt"),
             ).where(
-                DailySectorFlow.__table__.c.trade_date == d,
+                DailySectorFlow.__table__.c.trade_date == td,
                 DailySectorFlow.__table__.c.sector_type == "industry",
             )
             result = await db.execute(stmt)
             row = result.mappings().first()
+            normalized = _normalize_trade_date(td)
             return {
-                "trade_date": d,
+                "trade_date": normalized,
                 "total_net_yi": round(row["total_net"] or 0, 2),
                 "sector_count": row["cnt"] or 0,
             }
 
-        data = await _query(date)
-        # 指定日期无数据时自动回退到最新
+        data = await _query(d)
         if not data.get("sector_count") and trade_date:
             fallback = await MarketHeatService._get_latest_date_for(
                 db, DailySectorFlow.__table__.c
             )
-            if fallback and fallback != date:
+            if fallback and fallback != d:
                 data = await _query(fallback)
         return data
 
@@ -1396,16 +1406,9 @@ class MarketHeatService:
     async def get_sector_fund_history(
         db: AsyncSession, days: int = 90
     ) -> list[dict]:
-        """板块资金流历史 — 近 N 日每日全行业资金净额合计（按日汇总）"""
-        # 先取最近 N 个交易日，再只对这些日期 GROUP BY
-        recent_dates = (
-            select(DailySectorFlow.__table__.c.trade_date)
-            .where(DailySectorFlow.__table__.c.sector_type == "industry")
-            .distinct()
-            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
-            .limit(days)
-            .subquery()
-        )
+        """板块资金流历史 — 近 N 日每日全行业资金净额合计"""
+        from datetime import date as _date, timedelta
+        cutoff = (_date.today() - timedelta(days=days)).strftime('%Y%m%d')
 
         stmt = (
             select(
@@ -1415,18 +1418,18 @@ class MarketHeatService:
             )
             .where(
                 DailySectorFlow.__table__.c.sector_type == "industry",
-                DailySectorFlow.__table__.c.trade_date.in_(recent_dates),
+                DailySectorFlow.__table__.c.trade_date >= cutoff,
             )
             .group_by(DailySectorFlow.__table__.c.trade_date)
-            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
+            .order_by(DailySectorFlow.__table__.c.trade_date.asc())
         )
         result = await db.execute(stmt)
         rows = result.mappings().all()
 
         history = []
-        for row in reversed(list(rows)):
+        for row in rows:
             history.append({
-                "trade_date": row["trade_date"],
+                "trade_date": _normalize_trade_date(row["trade_date"]),
                 "total_net_yi": round(row["total_net_yi"] or 0, 2),
                 "sector_count": row["sector_count"] or 0,
             })
