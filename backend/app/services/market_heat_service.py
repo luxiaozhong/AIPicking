@@ -1415,7 +1415,7 @@ class MarketHeatService:
             )
             .where(
                 DailySectorFlow.__table__.c.sector_type == "industry",
-                DailySectorFlow.__table__.c.trade_date.in_(select(recent_dates)),
+                DailySectorFlow.__table__.c.trade_date.in_(recent_dates),
             )
             .group_by(DailySectorFlow.__table__.c.trade_date)
             .order_by(DailySectorFlow.__table__.c.trade_date.desc())
