@@ -123,11 +123,12 @@ async def get_available_dates(
 @router.get("/change-distribution")
 async def get_change_distribution(
     trade_date: Optional[str] = Query(None),
+    board: Optional[str] = Query(None, description="板块代码: sh_main/sh_star/sz_main/sz_chi，不传则全市场"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """涨跌幅度分段统计（柱状图数据源）"""
-    data = await MarketHeatService.get_change_distribution(db, trade_date)
+    data = await MarketHeatService.get_change_distribution(db, trade_date, board)
     return {"code": 0, "message": "ok", "data": data}
 
 

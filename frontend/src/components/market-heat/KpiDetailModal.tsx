@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Spin, Empty, Table } from 'antd';
+import { Modal, Spin, Empty, Table, Segmented } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import marketHeatService, {
   type NorthboundItem, type ChangeBucket, type LeadingStock,
@@ -19,6 +19,16 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
   const [distribution, setDistribution] = useState<ChangeBucket[]>([]);
   const [stocks, setStocks] = useState<LeadingStock[]>([]);
   const [loading, setLoading] = useState(false);
+  const [board, setBoard] = useState<string>('全部');
+
+  const BOARD_OPTIONS = ['全部', '上证', '深圳', '科创', '创业'];
+  const BOARD_MAP: Record<string, string | undefined> = {
+    全部: undefined,
+    上证: 'sh_main',
+    深圳: 'sz_main',
+    科创: 'sh_star',
+    创业: 'sz_chi',
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -26,14 +36,14 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
     if (type === 'northbound') {
       marketHeatService.getNorthbound(10).then(setNorthbound).finally(() => setLoading(false));
     } else if (type === 'advance_decline') {
-      marketHeatService.getChangeDistribution(tradeDate).then(setDistribution).finally(() => setLoading(false));
+      marketHeatService.getChangeDistribution(tradeDate, BOARD_MAP[board]).then(setDistribution).finally(() => setLoading(false));
     } else if ((type === 'leading_sector' || type === 'lagging_sector') && sectorName) {
       const sortOrder = type === 'lagging_sector' ? 'asc' : 'desc';
       marketHeatService.getLeadingSectorStocks(sectorName, tradeDate, sortOrder).then(setStocks).finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
-  }, [open, type, tradeDate, sectorName]);
+  }, [open, type, tradeDate, sectorName, board]);
 
   const title = type === 'northbound' ? '北向资金(深股通)近 10 日 — 买入·卖出·净额' :
     type === 'advance_decline' ? '涨跌幅度分布' :
@@ -130,6 +140,15 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
     };
   }, [distribution]);
 
+  const advDeclineSummary = React.useMemo(() => {
+    if (!distribution.length) return null;
+    const upCount = distribution.filter(d => d.lo >= 0).reduce((s, d) => s + d.count, 0);
+    const downCount = distribution.filter(d => d.hi <= 0).reduce((s, d) => s + d.count, 0);
+    const total = upCount + downCount;
+    if (total === 0) return null;
+    return { upCount, downCount, total, ratio: (upCount / total * 100).toFixed(0) };
+  }, [distribution]);
+
   const stockColumns = [
     {
       title: '股票', dataIndex: 'name', key: 'name',
@@ -158,7 +177,25 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
             northbound.length ? <ReactECharts option={northboundOption} style={{ height: 300 }} /> : <Empty description="暂无数据" />
           )}
           {type === 'advance_decline' && (
-            distribution.length ? <ReactECharts option={distributionOption} style={{ height: 300 }} /> : <Empty description="暂无数据" />
+            <>
+              {advDeclineSummary && (
+                <div style={{ marginBottom: 16, textAlign: 'center', fontSize: 18, fontWeight: 600 }}>
+                  <span style={{ color: '#cf1322' }}>涨 {advDeclineSummary.upCount} 家</span>
+                  <span style={{ margin: '0 12px', color: '#8c8c8c' }}>|</span>
+                  <span style={{ color: '#389e0d' }}>跌 {advDeclineSummary.downCount} 家</span>
+                  <span style={{ margin: '0 12px', color: '#8c8c8c' }}>|</span>
+                  <span>涨跌比 {advDeclineSummary.ratio}%</span>
+                </div>
+              )}
+              <div style={{ marginBottom: 16, textAlign: 'center' }}>
+                <Segmented
+                  options={BOARD_OPTIONS}
+                  value={board}
+                  onChange={(val) => setBoard(val as string)}
+                />
+              </div>
+              {distribution.length ? <ReactECharts option={distributionOption} style={{ height: 300 }} /> : <Empty description="暂无数据" />}
+            </>
           )}
           {(type === 'leading_sector' || type === 'lagging_sector') && (
             stocks.length ? (

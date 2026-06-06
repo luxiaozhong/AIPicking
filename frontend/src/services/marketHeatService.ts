@@ -191,10 +191,10 @@ export const marketHeatService = {
     return response.data.data;
   },
 
-  async getChangeDistribution(tradeDate?: string) {
+  async getChangeDistribution(tradeDate?: string, board?: string) {
     const response = await api.get<{ code: number; data: ChangeBucket[] }>(
       '/market-heat/change-distribution',
-      { params: { trade_date: tradeDate } },
+      { params: { trade_date: tradeDate, board } },
     );
     return response.data.data;
   },

@@ -84,60 +84,84 @@ const TemperatureCard: React.FC<Props> = ({
   ];
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-      {/* 前三张简单卡片 */}
-      {cards.map((card) => (
-        <div
-          key={card.label}
-          onClick={card.onClick}
-          style={{
-            background: card.gradient,
-            borderRadius: token.borderRadius,
-            padding: '16px 20px',
-            color: '#fff',
-            cursor: card.onClick ? 'pointer' : 'default',
-            transition: 'transform 0.15s',
-          }}
-          onMouseEnter={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
-          onMouseLeave={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1)'; }}
-        >
-          <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
-          <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
-          <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
-        </div>
-      ))}
-
-      {/* 四大指数板块温度 */}
-      {overview.board_temperatures && overview.board_temperatures.length > 0 && (
-        overview.board_temperatures.map((bt) => {
-          const [btStart, btEnd] = TEMP_COLORS[bt.level] || TEMP_COLORS['中性'];
-          return (
-            <div
-              key={bt.board_code}
-              onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
-              style={{
-                background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
-                borderRadius: token.borderRadius,
-                padding: '12px 16px',
-                color: '#fff',
-                cursor: onBoardTemperatureClick ? 'pointer' : 'default',
-                transition: 'transform 0.15s',
-              }}
-              onMouseEnter={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
-              onMouseLeave={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1)'; }}
-            >
-              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
-                {bt.board_name}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 第一排：市场温度 + 四大指数板块温度 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+        {/* 市场温度 */}
+        {cards.filter(c => c.label === '🔥 市场温度').map((card) => (
+          <div
+            key={card.label}
+            onClick={card.onClick}
+            style={{
+              background: card.gradient,
+              borderRadius: token.borderRadius,
+              padding: '16px 20px',
+              color: '#fff',
+              cursor: card.onClick ? 'pointer' : 'default',
+              transition: 'transform 0.15s',
+            }}
+            onMouseEnter={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
+            onMouseLeave={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1)'; }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
+          </div>
+        ))}
+        {/* 四大指数板块温度 */}
+        {overview.board_temperatures && overview.board_temperatures.length > 0 && (
+          overview.board_temperatures.map((bt) => {
+            const [btStart, btEnd] = TEMP_COLORS[bt.level] || TEMP_COLORS['中性'];
+            return (
+              <div
+                key={bt.board_code}
+                onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
+                style={{
+                  background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
+                  borderRadius: token.borderRadius,
+                  padding: '12px 16px',
+                  color: '#fff',
+                  cursor: onBoardTemperatureClick ? 'pointer' : 'default',
+                  transition: 'transform 0.15s',
+                }}
+                onMouseEnter={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
+                onMouseLeave={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1)'; }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
+                  {bt.board_name}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>
+                  {bt.score}°
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>
-                {bt.score}°
-              </div>
-              <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
-            </div>
-          );
-        })
-      )}
+            );
+          })
+        )}
+      </div>
 
+      {/* 第二排：涨跌比 + 北向 + 领涨/领跌 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+        {cards.filter(c => c.label !== '🔥 市场温度').map((card) => (
+          <div
+            key={card.label}
+            onClick={card.onClick}
+            style={{
+              background: card.gradient,
+              borderRadius: token.borderRadius,
+              padding: '16px 20px',
+              color: '#fff',
+              cursor: card.onClick ? 'pointer' : 'default',
+              transition: 'transform 0.15s',
+            }}
+            onMouseEnter={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1.02)'; }}
+            onMouseLeave={(e) => { if (card.onClick) e.currentTarget.style.transform = 'scale(1)'; }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>{card.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{card.value}</div>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
+          </div>
+        ))}
       {/* 领涨板块 — 组合卡片：两个子项并排 */}
       {leadingSectors.length > 0 && (
         <div
@@ -215,6 +239,7 @@ const TemperatureCard: React.FC<Props> = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

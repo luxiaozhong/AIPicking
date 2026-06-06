@@ -920,12 +920,22 @@ class MarketHeatService:
 
     @staticmethod
     async def get_change_distribution(
-        db: AsyncSession, trade_date: Optional[str] = None
+        db: AsyncSession, trade_date: Optional[str] = None, board: Optional[str] = None
     ) -> list[dict]:
         """涨跌幅度分段统计（用于柱状图）"""
         date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
         if not date:
             return []
+
+        # 板块过滤：从 BOARD_DEFINITIONS 取正则
+        ts_pattern: Optional[str] = None
+        if board:
+            for code, _name, pattern in MarketHeatService.BOARD_DEFINITIONS:
+                if code == board:
+                    ts_pattern = pattern
+                    break
+            if ts_pattern is None:
+                return []  # 无效 board 参数
 
         # 用当日 (close-open)/open 计算日内涨跌
         change_expr = (Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100
@@ -943,12 +953,18 @@ class MarketHeatService:
 
         result = []
         for lo, hi, label in buckets:
-            stmt = select(func.count()).select_from(Daily.__table__).where(
+            conditions = [
                 Daily.trade_date == date,
                 ~Daily.ts_code.like("%.IDX"),
                 change_expr >= lo,
                 change_expr < hi,
-            )
+            ]
+            # 板块过滤
+            if ts_pattern:
+                from sqlalchemy import text as sa_text
+                conditions.append(sa_text(f"daily.ts_code ~ '{ts_pattern}'"))
+
+            stmt = select(func.count()).select_from(Daily.__table__).where(*conditions)
             cnt = (await db.execute(stmt)).scalar() or 0
             result.append({"label": label, "lo": lo, "hi": hi, "count": cnt})
 
