@@ -5,6 +5,7 @@ import type { OverviewData } from '@/services/marketHeatService';
 interface Props {
   overview: OverviewData | null;
   loading: boolean;
+  onTemperatureClick?: () => void;
   onNorthboundClick?: () => void;
   onAdvanceDeclineClick?: () => void;
   onLeadingSectorClick?: (sectorName: string) => void;
@@ -31,7 +32,7 @@ const sectorSubItemStyle: React.CSSProperties = {
 };
 
 const TemperatureCard: React.FC<Props> = ({
-  overview, loading, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick, onLaggingSectorClick,
+  overview, loading, onTemperatureClick, onNorthboundClick, onAdvanceDeclineClick, onLeadingSectorClick, onLaggingSectorClick,
 }) => {
   const { token } = theme.useToken();
 
@@ -55,7 +56,7 @@ const TemperatureCard: React.FC<Props> = ({
       value: `${t.score}°`,
       sub: t.level,
       gradient: `linear-gradient(135deg, ${startColor}, ${endColor})`,
-      onClick: undefined,
+      onClick: onTemperatureClick,
     },
     {
       label: '💰 北向(深股通)',
@@ -104,6 +105,32 @@ const TemperatureCard: React.FC<Props> = ({
           <div style={{ fontSize: 11, opacity: 0.75 }}>{card.sub}</div>
         </div>
       ))}
+
+      {/* 四大指数板块温度 */}
+      {overview.board_temperatures && overview.board_temperatures.length > 0 && (
+        overview.board_temperatures.map((bt) => {
+          const [btStart, btEnd] = TEMP_COLORS[bt.level] || TEMP_COLORS['中性'];
+          return (
+            <div
+              key={bt.board_code}
+              style={{
+                background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
+                borderRadius: token.borderRadius,
+                padding: '12px 16px',
+                color: '#fff',
+              }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
+                {bt.board_name}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>
+                {bt.score}°
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
+            </div>
+          );
+        })
+      )}
 
       {/* 领涨板块 — 组合卡片：两个子项并排 */}
       {leadingSectors.length > 0 && (

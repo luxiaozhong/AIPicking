@@ -142,3 +142,25 @@ async def get_leading_sector_stocks(
     """板块内个股 Top 15"""
     data = await MarketHeatService.get_leading_sector_stocks(db, sector_name, trade_date, sort_order)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/temperature-history")
+async def get_temperature_history(
+    days: int = Query(60, ge=1, le=365, description="查询天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """市场温度历史趋势（近 N 日）"""
+    data = await MarketHeatService.get_temperature_history(db, days)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/board-temperatures")
+async def get_board_temperatures(
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """四大指数板块温度"""
+    data = await MarketHeatService.get_board_temperatures(db, trade_date)
+    return {"code": 0, "message": "ok", "data": data}

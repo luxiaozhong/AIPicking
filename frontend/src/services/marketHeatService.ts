@@ -1,5 +1,17 @@
 import api from './api';
 
+export interface BoardTemperatureItem {
+  board_code: string;
+  board_name: string;
+  score: number;
+  level: string;
+  dimensions: {
+    breadth: number;
+    sentiment: number;
+    volume: number;
+  };
+}
+
 export interface OverviewData {
   trade_date: string | null;
   temperature: {
@@ -28,6 +40,7 @@ export interface OverviewData {
     change_pct: number;
     main_net_yi: number;
   }[];
+  board_temperatures: BoardTemperatureItem[];
 }
 
 export interface SectorItem {
@@ -191,6 +204,22 @@ export const marketHeatService = {
     );
     return response.data.data;
   },
+
+  async getTemperatureHistory(days: number = 60) {
+    const response = await api.get<{ code: number; data: TemperatureHistoryItem[] }>(
+      '/market-heat/temperature-history',
+      { params: { days } },
+    );
+    return response.data.data;
+  },
+
+  async getBoardTemperatures(tradeDate?: string) {
+    const response = await api.get<{ code: number; data: BoardTemperatureItem[] }>(
+      '/market-heat/board-temperatures',
+      { params: { trade_date: tradeDate } },
+    );
+    return response.data.data;
+  },
 };
 
 export interface ChangeBucket {
@@ -206,6 +235,19 @@ export interface LeadingStock {
   close: number;
   open: number;
   change_pct: number | null;
+}
+
+export interface TemperatureHistoryItem {
+  trade_date: string;
+  score: number;
+  level: string;
+  dimensions: {
+    capital: number;
+    breadth: number;
+    sentiment: number;
+    concentration: number;
+    continuity: number;
+  };
 }
 
 export default marketHeatService;

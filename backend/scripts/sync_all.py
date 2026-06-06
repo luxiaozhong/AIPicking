@@ -51,6 +51,11 @@ JOBS = [
         "log_key": "market_data",
     },
     {
+        "script": "sync_market_temperature.py",
+        "desc": "市场温度计算",
+        "log_key": "market_temperature",
+    },
+    {
         "script": "sync_report.py",
         "desc": "数据同步日报",
         "log_key": "report",

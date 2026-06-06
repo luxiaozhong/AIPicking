@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Row, Col, Card, Tabs, Table, Tag, DatePicker, Alert, Button } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Row, Col, Card, Tabs, Table, Tag, DatePicker, Alert, Button, Modal, Empty, Spin } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
+import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import { useMarketHeatStore } from '@/stores/marketHeatStore';
 import TemperatureCard from '@/components/market-heat/TemperatureCard';
@@ -26,9 +27,11 @@ const MarketHeat: React.FC = () => {
     type: 'northbound' | 'advance_decline' | 'leading_sector' | 'lagging_sector';
     sectorName?: string;
   } | null>(null);
+  const [temperatureModalOpen, setTemperatureModalOpen] = useState(false);
 
   useEffect(() => {
     store.fetchAvailableDates();
+    store.fetchTemperatureHistory();
   }, []);
 
   useEffect(() => {
@@ -54,6 +57,43 @@ const MarketHeat: React.FC = () => {
   const handleStockClick = (code: string, name: string) => {
     setKlineStock({ ts_code: toTsCode(code), name });
   };
+
+  const temperatureChartOption = useMemo(() => {
+    const data = store.temperatureHistory;
+    if (!data.length) return {};
+    const dates = data.map((d) => d.trade_date.slice(5));
+    const scores = data.map((d) => d.score);
+    const levels = data.map((d) => d.level);
+    const markAreas: any[] = [
+      [{ yAxis: 0, itemStyle: { color: 'rgba(24,144,255,0.08)' } }, { yAxis: 30, label: { show: true, position: 'insideLeft', formatter: '冰点', fontSize: 10 } }],
+      [{ yAxis: 30 }, { yAxis: 50, itemStyle: { color: 'rgba(82,196,26,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '偏冷', fontSize: 10 } }],
+      [{ yAxis: 50 }, { yAxis: 70, itemStyle: { color: 'rgba(250,173,20,0.06)' } }],
+      [{ yAxis: 70 }, { yAxis: 85, itemStyle: { color: 'rgba(255,122,69,0.06)' }, label: { show: true, position: 'insideLeft', formatter: '偏热', fontSize: 10 } }],
+      [{ yAxis: 85 }, { yAxis: 100, itemStyle: { color: 'rgba(255,77,79,0.08)' }, label: { show: true, position: 'insideLeft', formatter: '过热', fontSize: 10 } }],
+    ];
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          if (!p) return '';
+          const idx = p.dataIndex;
+          const dims = data[idx]?.dimensions;
+          if (!dims) return `${p.axisValue}<br/>温度: ${p.value}°`;
+          return `<strong>${p.axisValue}</strong><br/>温度: <b>${p.value}°</b> (${levels[idx]})<br/><span style="font-size:11px">资金面:${dims.capital}/20 | 涨跌结构:${dims.breadth}/20<br/>情绪面:${dims.sentiment}/20 | 集中度:${dims.concentration}/20 | 延续:${dims.continuity}/20</span>`;
+        },
+      },
+      grid: { left: 60, right: 30, top: 20, bottom: 40 },
+      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+      yAxis: { type: 'value', min: 0, max: 100, name: '温度', splitLine: { lineStyle: { type: 'dashed' } } },
+      series: [{
+        type: 'line', data: scores, smooth: true, symbol: 'circle', symbolSize: 6,
+        lineStyle: { width: 2.5, color: '#1677ff' }, itemStyle: { color: '#1677ff' },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(22,119,255,0.25)' }, { offset: 1, color: 'rgba(22,119,255,0.02)' }] } },
+        markArea: { silent: true, data: markAreas },
+      }],
+    };
+  }, [store.temperatureHistory]);
 
   /** 可点击的股票名链接 */
   const stockNameLink = (code: string, name: string) => (
@@ -225,6 +265,7 @@ const MarketHeat: React.FC = () => {
         <TemperatureCard
           overview={store.overview}
           loading={store.overviewLoading}
+          onTemperatureClick={() => setTemperatureModalOpen(true)}
           onNorthboundClick={() => setKpiDetail({ type: 'northbound' })}
           onAdvanceDeclineClick={() => setKpiDetail({ type: 'advance_decline' })}
           onLeadingSectorClick={(name) => setKpiDetail({
@@ -295,6 +336,23 @@ const MarketHeat: React.FC = () => {
         onClose={() => setKpiDetail(null)}
         onStockClick={handleStockClick}
       />
+
+      <Modal
+        title="市场温度 · 近 60 日趋势"
+        open={temperatureModalOpen}
+        onCancel={() => setTemperatureModalOpen(false)}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        {store.temperatureHistoryLoading ? (
+          <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+        ) : store.temperatureHistory.length > 0 ? (
+          <ReactECharts option={temperatureChartOption} style={{ height: 400 }} />
+        ) : (
+          <Empty description="暂无历史温度数据" />
+        )}
+      </Modal>
     </div>
   );
 };

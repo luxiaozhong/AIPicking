@@ -6,6 +6,7 @@ import marketHeatService, {
   type HotStockItem,
   type DragonTigerItem,
   type NorthboundItem,
+  type TemperatureHistoryItem,
 } from '@/services/marketHeatService';
 
 interface MarketHeatState {
@@ -28,6 +29,8 @@ interface MarketHeatState {
   dragonTigerLoading: boolean;
   northbound: NorthboundItem[];
   northboundLoading: boolean;
+  temperatureHistory: TemperatureHistoryItem[];
+  temperatureHistoryLoading: boolean;
   drawer: {
     open: boolean;
     type: 'sector' | 'theme' | null;
@@ -45,6 +48,7 @@ interface MarketHeatState {
   fetchHotStocks: (page?: number) => Promise<void>;
   fetchDragonTiger: (page?: number) => Promise<void>;
   fetchNorthbound: () => Promise<void>;
+  fetchTemperatureHistory: () => Promise<void>;
   openDrawer: (type: 'sector' | 'theme', code: string, name: string) => void;
   closeDrawer: () => void;
   clearError: () => void;
@@ -70,6 +74,8 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
   dragonTigerLoading: false,
   northbound: [],
   northboundLoading: false,
+  temperatureHistory: [],
+  temperatureHistoryLoading: false,
   drawer: { open: false, type: null, code: null, name: null },
   error: null,
 
@@ -155,6 +161,16 @@ export const useMarketHeatStore = create<MarketHeatState>((set, get) => ({
       set({ northbound: data, northboundLoading: false });
     } catch (err: any) {
       set({ error: err.response?.data?.message || '获取北向资金失败', northboundLoading: false });
+    }
+  },
+
+  fetchTemperatureHistory: async () => {
+    set({ temperatureHistoryLoading: true, error: null });
+    try {
+      const data = await marketHeatService.getTemperatureHistory(60);
+      set({ temperatureHistory: data, temperatureHistoryLoading: false });
+    } catch (err: any) {
+      set({ error: err.response?.data?.message || '获取温度历史失败', temperatureHistoryLoading: false });
     }
   },
 

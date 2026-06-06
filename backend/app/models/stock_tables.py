@@ -197,4 +197,43 @@ class DailyDragonTigerSeat(BaseModel):
     is_institution = Column(Boolean, default=False)
 
 
+class DailyMarketTemperature(BaseModel):
+    """每日市场温度评分表 — 由 sync_market_temperature.py 写入"""
+    __tablename__ = "daily_market_temperature"
+    __table_args__ = (
+        UniqueConstraint("trade_date", name="uq_market_temp_date"),
+        Index("idx_mkt_temp_date", "trade_date"),
+    )
+
+    trade_date = Column(String(10), unique=True, nullable=False, index=True)
+    score = Column(Integer, nullable=False)
+    level = Column(String(10), nullable=False)
+    capital_score = Column(Integer, nullable=False)
+    breadth_score = Column(Integer, nullable=False)
+    sentiment_score = Column(Integer, nullable=False)
+    concentration_score = Column(Integer, nullable=False)
+    continuity_score = Column(Integer, nullable=False)
+
+
+class DailyBoardTemperature(BaseModel):
+    """四大指数板块温度表 — 由 sync_market_temperature.py 写入
+
+    board_code: sh_main(上证主板) / sh_star(科创板) / sz_main(深证主板) / sz_chi(创业板)
+    """
+    __tablename__ = "daily_board_temperature"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "board_code", name="uq_board_temp"),
+        Index("idx_board_temp_date", "trade_date"),
+    )
+
+    trade_date = Column(String(10), nullable=False, index=True)
+    board_code = Column(String(20), nullable=False)
+    board_name = Column(String(20), nullable=False)
+    score = Column(Integer, nullable=False)
+    level = Column(String(10), nullable=False)
+    breadth_score = Column(Integer, nullable=False)    # 涨跌结构 0-40
+    sentiment_score = Column(Integer, nullable=False)  # 情绪面 0-30
+    volume_score = Column(Integer, nullable=False)     # 量能活跃度 0-30
+
+
 # daily_industry_flow → 已合并到 daily_sector_flow (sector_type='industry')
