@@ -408,6 +408,8 @@ def fetch_northbound_flow(date_str: str) -> Optional[dict]:
         "trade_date": date_str,
         "hgt_net_yi": None,          # 沪股通自 2024-08 起不再披露
         "sgt_net_yi": sgt_yi,        # 深股通净买入(亿)
+        "sgt_buy_yi": buy_yi,        # 深股通买入额(亿)
+        "sgt_sell_yi": sell_yi,      # 深股通卖出额(亿)
         "total_net_yi": sgt_yi,      # 合计 = 深股通(亿)
         "data_points": 0,            # 不再适用（原 hexin 分钟点数）
     }
@@ -586,11 +588,13 @@ _THEME_UPSERT = """
 
 _NORTHBOUND_UPSERT = """
     INSERT INTO daily_northbound_flow
-        (trade_date, hgt_net_yi, sgt_net_yi, total_net_yi, data_points)
-    VALUES (%s, %s, %s, %s, %s)
+        (trade_date, hgt_net_yi, sgt_net_yi, sgt_buy_yi, sgt_sell_yi, total_net_yi, data_points)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (trade_date) DO UPDATE SET
         hgt_net_yi   = EXCLUDED.hgt_net_yi,
         sgt_net_yi   = EXCLUDED.sgt_net_yi,
+        sgt_buy_yi   = EXCLUDED.sgt_buy_yi,
+        sgt_sell_yi  = EXCLUDED.sgt_sell_yi,
         total_net_yi = EXCLUDED.total_net_yi,
         data_points  = EXCLUDED.data_points
 """
@@ -666,6 +670,8 @@ def _save_northbound(date_str: str, data: dict) -> bool:
                 date_str,
                 data["hgt_net_yi"],
                 data["sgt_net_yi"],
+                data["sgt_buy_yi"],
+                data["sgt_sell_yi"],
                 data["total_net_yi"],
                 data["data_points"],
             ))
@@ -674,8 +680,11 @@ def _save_northbound(date_str: str, data: dict) -> bool:
         conn.close()
     hgt_str = f"沪{data['hgt_net_yi']:+.2f}" if data.get("hgt_net_yi") is not None else "沪(N/A)"
     direction = "流入" if (data["total_net_yi"] or 0) >= 0 else "流出"
+    buy = data.get("sgt_buy_yi", 0) or 0
+    sell = data.get("sgt_sell_yi", 0) or 0
     logging.info(f"Saved northbound: {hgt_str} "
-                 f"深{data['sgt_net_yi']:+.2f} 合计{direction}{abs(data['total_net_yi'] or 0):.2f}亿")
+                 f"深买入{buy:.2f}亿 卖出{sell:.2f}亿 "
+                 f"净{direction}{abs(data['total_net_yi'] or 0):.2f}亿")
     return True
 
 

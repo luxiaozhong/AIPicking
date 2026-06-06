@@ -150,6 +150,8 @@ class DailyNorthboundFlow(BaseModel):
     trade_date = Column(String(10), nullable=False)
     hgt_net_yi = Column(Float, nullable=True)   # 沪股通净买入(亿) — 2024-08 后不可用
     sgt_net_yi = Column(Float)                   # 深股通净买入(亿)
+    sgt_buy_yi = Column(Float)                   # 深股通买入额(亿)
+    sgt_sell_yi = Column(Float)                  # 深股通卖出额(亿)
     total_net_yi = Column(Float)                 # 合计净买入(亿) = sgt_net_yi
     data_points = Column(Integer)                # 已弃用（原 hexin 分钟点数）
 

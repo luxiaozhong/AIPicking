@@ -35,7 +35,7 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
     }
   }, [open, type, tradeDate, sectorName]);
 
-  const title = type === 'northbound' ? '北向资金(深股通)近 10 日' :
+  const title = type === 'northbound' ? '北向资金(深股通)近 10 日 — 买入·卖出·净额' :
     type === 'advance_decline' ? '涨跌幅度分布' :
     type === 'leading_sector' ? `${sectorName} — 涨幅前 15` :
     type === 'lagging_sector' ? `${sectorName} — 跌幅前 15` : '';
@@ -43,19 +43,62 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
   const northboundOption = React.useMemo(() => {
     if (!northbound.length) return {};
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const d = params[0]?.data;
+          const buy = d?.buy?.toFixed(2);
+          const sell = d?.sell?.toFixed(2);
+          const net = d?.net?.toFixed(2);
+          const dir = (d?.net ?? 0) >= 0 ? '净流入' : '净流出';
+          return `${d?.date}<br/>💰 买入 ${buy}亿<br/>💸 卖出 ${sell}亿<br/>📊 ${dir} ${net}亿`;
+        },
+      },
+      legend: { data: ['买入', '卖出', '净额'], bottom: 0 },
+      grid: { bottom: 40 },
       xAxis: {
         type: 'category',
-        data: northbound.map((n) => n.trade_date.slice(0, 10)),
+        data: northbound.map((n) => n.trade_date.slice(5, 10)),
       },
       yAxis: { type: 'value', name: '亿' },
-      series: [{
-        type: 'bar',
-        data: northbound.map((n) => ({
-          value: n.total_net_yi,
-          itemStyle: { color: n.total_net_yi >= 0 ? '#cf1322' : '#389e0d' },
-        })),
-      }],
+      series: [
+        {
+          name: '买入',
+          type: 'bar',
+          data: northbound.map((n) => ({
+            value: n.sgt_buy_yi,
+            date: n.trade_date.slice(0, 10),
+            buy: n.sgt_buy_yi,
+            sell: n.sgt_sell_yi,
+            net: n.total_net_yi,
+            itemStyle: { color: '#1677ff' },
+          })),
+        },
+        {
+          name: '卖出',
+          type: 'bar',
+          data: northbound.map((n) => ({
+            value: n.sgt_sell_yi,
+            date: n.trade_date.slice(0, 10),
+            buy: n.sgt_buy_yi,
+            sell: n.sgt_sell_yi,
+            net: n.total_net_yi,
+            itemStyle: { color: '#fa8c16' },
+          })),
+        },
+        {
+          name: '净额',
+          type: 'bar',
+          data: northbound.map((n) => ({
+            value: n.total_net_yi,
+            date: n.trade_date.slice(0, 10),
+            buy: n.sgt_buy_yi,
+            sell: n.sgt_sell_yi,
+            net: n.total_net_yi,
+            itemStyle: { color: n.total_net_yi >= 0 ? '#cf1322' : '#389e0d' },
+          })),
+        },
+      ],
     };
   }, [northbound]);
 

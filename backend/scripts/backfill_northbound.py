@@ -108,10 +108,14 @@ def fetch_northbound_for_date(date_str: str) -> Optional[dict]:
         return None
 
     sgt_yi = round(float(net_deal) / 100, 2)
+    buy_yi = round(float(row.get("BUY_AMT") or 0) / 100, 2)
+    sell_yi = round(float(row.get("SELL_AMT") or 0) / 100, 2)
     return {
         "trade_date": date_str,
         "hgt_net_yi": None,
         "sgt_net_yi": sgt_yi,
+        "sgt_buy_yi": buy_yi,
+        "sgt_sell_yi": sell_yi,
         "total_net_yi": sgt_yi,
         "data_points": 0,
     }
@@ -123,11 +127,13 @@ def fetch_northbound_for_date(date_str: str) -> Optional[dict]:
 
 UPSERT_SQL = """
     INSERT INTO daily_northbound_flow
-        (trade_date, hgt_net_yi, sgt_net_yi, total_net_yi, data_points)
-    VALUES (%s, %s, %s, %s, %s)
+        (trade_date, hgt_net_yi, sgt_net_yi, sgt_buy_yi, sgt_sell_yi, total_net_yi, data_points)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (trade_date) DO UPDATE SET
         hgt_net_yi   = EXCLUDED.hgt_net_yi,
         sgt_net_yi   = EXCLUDED.sgt_net_yi,
+        sgt_buy_yi   = EXCLUDED.sgt_buy_yi,
+        sgt_sell_yi  = EXCLUDED.sgt_sell_yi,
         total_net_yi = EXCLUDED.total_net_yi,
         data_points  = EXCLUDED.data_points
 """
@@ -176,6 +182,8 @@ def save_record(record: dict):
                     record["trade_date"],
                     record["hgt_net_yi"],
                     record["sgt_net_yi"],
+                    record["sgt_buy_yi"],
+                    record["sgt_sell_yi"],
                     record["total_net_yi"],
                     record["data_points"],
                 ),
@@ -259,7 +267,8 @@ def main():
             if record:
                 direction = "流入" if record["sgt_net_yi"] >= 0 else "流出"
                 logging.info(
-                    f"  {d}: 深股通 净{direction}{abs(record['sgt_net_yi']):.2f}亿"
+                    f"  {d}: 买入{record['sgt_buy_yi']:.2f}亿 卖出{record['sgt_sell_yi']:.2f}亿"
+                    f" → 净{direction}{abs(record['sgt_net_yi']):.2f}亿"
                 )
             else:
                 logging.info(f"  {d}: no data (non-trading day)")
@@ -302,14 +311,14 @@ def main():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT trade_date, sgt_net_yi, total_net_yi "
+                "SELECT trade_date, sgt_buy_yi, sgt_sell_yi, sgt_net_yi "
                 "FROM daily_northbound_flow "
                 "ORDER BY trade_date DESC LIMIT 5"
             )
             logging.info("Recent records:")
             for row in cur.fetchall():
-                direction = "流入" if (row[1] or 0) >= 0 else "流出"
-                logging.info(f"  {row[0]}: 深股通 净{direction}{abs(row[1] or 0):.2f}亿")
+                direction = "流入" if (row[3] or 0) >= 0 else "流出"
+                logging.info(f"  {row[0]}: 买入{row[1] or 0:.2f}亿 卖出{row[2] or 0:.2f}亿 → 净{direction}{abs(row[3] or 0):.2f}亿")
     finally:
         conn.close()
 

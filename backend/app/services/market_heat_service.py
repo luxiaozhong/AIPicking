@@ -388,9 +388,14 @@ class MarketHeatService:
 
     @staticmethod
     async def get_northbound(db: AsyncSession, days: int = 30) -> list[dict]:
-        stmt = select(DailyNorthboundFlow.__table__).order_by(
-            DailyNorthboundFlow.__table__.c.trade_date.asc()
-        ).limit(days)
+        # 子查询取最新 N 天，外层升序（图表从左到右时间递增）
+        subq = (
+            select(DailyNorthboundFlow.__table__)
+            .order_by(DailyNorthboundFlow.__table__.c.trade_date.desc())
+            .limit(days)
+            .subquery()
+        )
+        stmt = select(subq).order_by(subq.c.trade_date.asc())
         result = await db.execute(stmt)
         return [dict(r) for r in result.mappings().all()]
 

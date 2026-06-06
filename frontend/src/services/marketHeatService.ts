@@ -106,8 +106,10 @@ export interface DragonTigerItem {
 
 export interface NorthboundItem {
   trade_date: string;
-  hgt_net_yi: number;
+  hgt_net_yi: number | null;
   sgt_net_yi: number;
+  sgt_buy_yi: number;
+  sgt_sell_yi: number;
   total_net_yi: number;
 }
 
