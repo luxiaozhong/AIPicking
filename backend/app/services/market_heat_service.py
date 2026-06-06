@@ -1,6 +1,6 @@
 """市场热度服务 — Core 级别 SQL 查询"""
 from typing import Optional
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, and_
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -941,7 +941,11 @@ class MarketHeatService:
     async def get_change_distribution(
         db: AsyncSession, trade_date: Optional[str] = None, board: Optional[str] = None
     ) -> list[dict]:
-        """涨跌幅度分段统计（用于柱状图）"""
+        """涨跌幅度分段统计（用于柱状图）
+
+        使用标准当日涨跌幅公式：(close - pre_close) / pre_close * 100。
+        优先使用同步时存储的 pre_close（同一复权因子），NULL 时回退到自连接的前一交易日 close。
+        """
         date = trade_date or await MarketHeatService._get_latest_date_for(db, Daily.__table__.c)
         if not date:
             return []
@@ -956,8 +960,17 @@ class MarketHeatService:
             if ts_pattern is None:
                 return []  # 无效 board 参数
 
-        # 用当日 (close-open)/open 计算日内涨跌
-        change_expr = (Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100
+        from sqlalchemy import text as sa_text
+
+        # 自连接：优先使用 pre_close，回退到前一交易日 close
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
+            * 100
+        )
 
         buckets = [
             (-100, -10, "-10%以下"),
@@ -970,22 +983,45 @@ class MarketHeatService:
             (10, 100, "10%以上"),
         ]
 
+        # 单个聚合查询一次性统计所有分段，比 8 次 COUNT 更高效
+        where_conds = [
+            daily_alias.c.trade_date == date,
+            ~daily_alias.c.ts_code.like("%.IDX"),
+        ]
+        if ts_pattern:
+            where_conds.append(sa_text(f"daily_1.ts_code ~ '{ts_pattern}'"))
+
+        agg_cols = [
+            func.sum(
+                case((and_(change_expr >= lo, change_expr < hi), 1), else_=0)
+            ).label(label)
+            for lo, hi, label in buckets
+        ]
+
+        stmt = (
+            select(*agg_cols)
+            .select_from(daily_alias)
+            .outerjoin(
+                prev_alias,
+                (daily_alias.c.ts_code == prev_alias.c.ts_code)
+                & (prev_alias.c.trade_date == (
+                    select(func.max(Daily.__table__.c.trade_date))
+                    .where(
+                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                        & (Daily.__table__.c.trade_date < date)
+                    )
+                    .scalar_subquery()
+                )),
+            )
+            .where(and_(*where_conds))
+        )
+
+        result_row = (await db.execute(stmt)).mappings().first()
+
         result = []
         for lo, hi, label in buckets:
-            conditions = [
-                Daily.trade_date == date,
-                ~Daily.ts_code.like("%.IDX"),
-                change_expr >= lo,
-                change_expr < hi,
-            ]
-            # 板块过滤
-            if ts_pattern:
-                from sqlalchemy import text as sa_text
-                conditions.append(sa_text(f"daily.ts_code ~ '{ts_pattern}'"))
-
-            stmt = select(func.count()).select_from(Daily.__table__).where(*conditions)
-            cnt = (await db.execute(stmt)).scalar() or 0
-            result.append({"label": label, "lo": lo, "hi": hi, "count": cnt})
+            cnt = result_row[label] if result_row else 0
+            result.append({"label": label, "lo": lo, "hi": hi, "count": cnt or 0})
 
         return result
 

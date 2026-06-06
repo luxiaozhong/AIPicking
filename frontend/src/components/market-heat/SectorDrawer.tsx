@@ -71,11 +71,8 @@ const SectorDrawer: React.FC<Props> = ({ open, sectorCode, sectorName, tradeDate
       dataIndex: 'change_pct',
       key: 'change_pct',
       render: (_: any, record: any) => {
-        if (!record.close || !record.open) return '-';
-        // 使用后端返回的 change_pct（若有），否则回退到 (close-open)/open
-        const pct = record.change_pct != null
-          ? record.change_pct
-          : ((record.close - record.open) / record.open * 100);
+        if (record.change_pct == null) return '-';
+        const pct = record.change_pct;
         return <span style={{ color: pct >= 0 ? '#cf1322' : '#389e0d' }}>{pct.toFixed(2)}%</span>;
       },
     },
