@@ -195,8 +195,8 @@ const TemperatureCard: React.FC<Props> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* 第一排：市场温度 + 压力指数 + 四大指数板块温度 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
+      {/* 第一排：市场温度 + 压力指数 + 主板温度 + 双创温度 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         {/* 市场温度 */}
         {cards.filter(c => c.label === '🔥 市场温度').map((card) => (
           <Tooltip
@@ -276,41 +276,87 @@ const TemperatureCard: React.FC<Props> = ({
             </Tooltip>
           );
         })()}
-        {/* 四大指数板块温度 */}
-        {overview.board_temperatures && overview.board_temperatures.length > 0 && (
-          overview.board_temperatures.map((bt) => {
-            const [btStart, btEnd] = TEMP_COLORS[bt.level] || TEMP_COLORS['中性'];
-            return (
-              <Tooltip
-                key={bt.board_code}
-                title={renderBoardDimTooltip(bt.dimensions)}
-                placement="bottom"
-              >
-                <div
-                  onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
-                  style={{
-                    background: `linear-gradient(135deg, ${btStart}, ${btEnd})`,
-                    borderRadius: token.borderRadius,
-                    padding: '12px 16px',
-                    color: '#fff',
-                    cursor: onBoardTemperatureClick ? 'pointer' : 'default',
-                    transition: 'transform 0.15s',
-                  }}
-                  onMouseEnter={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1.03)'; }}
-                  onMouseLeave={(e) => { if (onBoardTemperatureClick) e.currentTarget.style.transform = 'scale(1)'; }}
-                >
-                  <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>
-                    {bt.board_name}
-                  </div>
-                  <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 2 }}>
-                    {bt.score}°
-                  </div>
-                  <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
-                </div>
-              </Tooltip>
-            );
-          })
-        )}
+        {/* 主板温度 — 上证主板 + 深证主板 */}
+        {(() => {
+          const mainBoards = overview.board_temperatures?.filter(
+            bt => bt.board_code === 'sh_main' || bt.board_code === 'sz_main'
+          ) || [];
+          if (mainBoards.length === 0) return null;
+          const avgScore = mainBoards.reduce((s, bt) => s + bt.score, 0) / mainBoards.length;
+          const avgLevel = avgScore <= 30 ? '冰点' : avgScore <= 50 ? '偏冷' : avgScore <= 70 ? '中性' : avgScore <= 85 ? '偏热' : '过热';
+          const [pStart, pEnd] = TEMP_COLORS[avgLevel] || TEMP_COLORS['中性'];
+          return (
+            <div style={{
+              background: `linear-gradient(135deg, ${pStart}, ${pEnd})`,
+              borderRadius: token.borderRadius,
+              padding: '12px 16px',
+              color: '#fff',
+            }}>
+              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 10 }}>📊 主板温度</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {mainBoards.map(bt => (
+                  <Tooltip key={bt.board_code} title={renderBoardDimTooltip(bt.dimensions)} placement="bottom">
+                    <div
+                      onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
+                      style={sectorSubItemStyle}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.28)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)'; }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {bt.board_name}
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>
+                        {bt.score}°
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
+                    </div>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 双创温度 — 科创板 + 创业板 */}
+        {(() => {
+          const starBoards = overview.board_temperatures?.filter(
+            bt => bt.board_code === 'sh_star' || bt.board_code === 'sz_chi'
+          ) || [];
+          if (starBoards.length === 0) return null;
+          const avgScore = starBoards.reduce((s, bt) => s + bt.score, 0) / starBoards.length;
+          const avgLevel = avgScore <= 30 ? '冰点' : avgScore <= 50 ? '偏冷' : avgScore <= 70 ? '中性' : avgScore <= 85 ? '偏热' : '过热';
+          const [pStart, pEnd] = TEMP_COLORS[avgLevel] || TEMP_COLORS['中性'];
+          return (
+            <div style={{
+              background: `linear-gradient(135deg, ${pStart}, ${pEnd})`,
+              borderRadius: token.borderRadius,
+              padding: '12px 16px',
+              color: '#fff',
+            }}>
+              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 10 }}>🚀 双创温度</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {starBoards.map(bt => (
+                  <Tooltip key={bt.board_code} title={renderBoardDimTooltip(bt.dimensions)} placement="bottom">
+                    <div
+                      onClick={onBoardTemperatureClick ? () => onBoardTemperatureClick(bt.board_code, bt.board_name) : undefined}
+                      style={sectorSubItemStyle}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.28)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)'; }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {bt.board_name}
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>
+                        {bt.score}°
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.75 }}>{bt.level}</div>
+                    </div>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 第二排：涨跌比 + 北向 + 领涨/领跌 */}
