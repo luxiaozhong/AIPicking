@@ -1,6 +1,7 @@
 """市场热度服务 — Core 级别 SQL 查询"""
 from typing import Optional
 from sqlalchemy import select, func, case
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.stock_tables import (
@@ -78,7 +79,7 @@ class MarketHeatService:
             lagging = [dict(r) for r in lagging_result.mappings().all()]
 
         # 计算市场温度
-        temperature = MarketHeatService._calc_temperature(
+        temperature = await MarketHeatService._calc_temperature(
             northbound=northbound,
             adv=adv,
             date=daily_date,
@@ -92,6 +93,9 @@ class MarketHeatService:
                 "main_net_yi": s["main_net_yi"],
             }
 
+        # 板块温度（尝试从持久化表读取，失败则跳过）
+        board_temps = await MarketHeatService.get_board_temperatures(db, daily_date)
+
         return {
             "trade_date": daily_date,
             "temperature": temperature,
@@ -99,6 +103,7 @@ class MarketHeatService:
             "advance_decline": adv,
             "leading_sectors": [_fmt_sector(s) for s in leading],
             "lagging_sectors": [_fmt_sector(s) for s in lagging],
+            "board_temperatures": board_temps,
         }
 
     # ── 板块资金流 ────────────────────────────────────────────
@@ -404,64 +409,474 @@ class MarketHeatService:
     # ── 市场温度计算 ─────────────────────────────────────────
 
     @staticmethod
-    def _calc_temperature(
+    def _score_to_level(total_score: int) -> str:
+        if total_score <= 30:
+            return "冰点"
+        elif total_score <= 50:
+            return "偏冷"
+        elif total_score <= 70:
+            return "中性"
+        elif total_score <= 85:
+            return "偏热"
+        return "过热"
+
+    @staticmethod
+    async def _calc_capital_score(northbound: Optional[dict]) -> int:
+        """1. 资金面 (20): 北向净流入方向+规模"""
+        if northbound and northbound.get("total_net_yi") is not None:
+            net = northbound["total_net_yi"]
+            if net > 50:
+                return 20
+            elif net > 20:
+                return 17
+            elif net > 0:
+                return 14
+            elif net > -20:
+                return 7
+            elif net > -50:
+                return 3
+            else:
+                return 0
+        return 10  # 无数据 → 中性
+
+    @staticmethod
+    def _calc_breadth_score(adv: dict) -> int:
+        """2. 涨跌结构 (20): 上涨占比"""
+        total = adv.get("total", 0) or 0
+        up = adv.get("up_count", 0) or 0
+        ratio = up / total if total > 0 else 0.5
+        return min(20, round(ratio * 25))  # 80%+ = 满分
+
+    @staticmethod
+    async def _calc_sentiment_score(db: AsyncSession, date: str) -> int:
+        """3. 情绪面 (20): 涨停/跌停比 + 活跃度
+
+        通过 daily 表自连接计算真实日涨跌幅 (close - prev_close) / prev_close，
+        统计涨停(>=9.8%)和跌停(<=-9.8%)数量。
+        """
+        # 自连接获取 prev_close，与 _enrich_with_daily 中模式一致
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(prev_alias.c.close, daily_alias.c.open), 0)
+            * 100
+        )
+
+        stmt = select(
+            func.count().label("total"),
+            func.sum(case((change_expr >= 9.8, 1), else_=0)).label("limit_up"),
+            func.sum(case((change_expr <= -9.8, 1), else_=0)).label("limit_down"),
+        ).select_from(daily_alias).outerjoin(
+            prev_alias,
+            (daily_alias.c.ts_code == prev_alias.c.ts_code)
+            & (prev_alias.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                    & (Daily.__table__.c.trade_date < date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            daily_alias.c.trade_date == date,
+            ~daily_alias.c.ts_code.like("%.IDX"),
+        )
+
+        result = await db.execute(stmt)
+        row = result.mappings().first()
+        if not row:
+            return 10
+
+        limit_up = row.get("limit_up", 0) or 0
+        limit_down = row.get("limit_down", 0) or 0
+        total_limits = limit_up + limit_down
+
+        if total_limits == 0:
+            return 10  # 无涨跌停 → 中性
+
+        # 涨跌停方向比
+        limit_ratio = limit_up / total_limits
+
+        # 活跃度因子：触及涨跌停的股票越多，市场越活跃
+        activity_factor = min(1.0, total_limits / 100.0)
+
+        # 方向分 + 活跃度加权
+        sentiment_raw = limit_ratio * 20
+        sentiment = round(sentiment_raw * (0.5 + 0.5 * activity_factor))
+        return max(0, min(20, sentiment))
+
+    @staticmethod
+    async def _calc_concentration_score(db: AsyncSession, date: str) -> int:
+        """4. 板块集中度 (20): 头部 3 行业资金流入占比
+
+        适度集中最好（30%-50%），过度集中或过度分散都不健康。
+        """
+        stmt = select(DailySectorFlow.__table__.c.net_inflow).where(
+            DailySectorFlow.trade_date == date,
+            DailySectorFlow.sector_type == "industry",
+        )
+        result = await db.execute(stmt)
+        inflows = [abs(r[0]) for r in result.all() if r[0] is not None]
+
+        if not inflows:
+            return 10
+
+        total_abs = sum(inflows)
+        if total_abs == 0:
+            return 10
+
+        top3_abs = sum(sorted(inflows, reverse=True)[:3])
+        concentration = top3_abs / total_abs  # 0.0 - 1.0
+
+        # 倒 U 型评分：适度集中最好
+        if 0.30 <= concentration <= 0.50:
+            return 20
+        elif 0.20 <= concentration < 0.30 or 0.50 < concentration <= 0.60:
+            return 15
+        elif 0.10 <= concentration < 0.20 or 0.60 < concentration <= 0.70:
+            return 10
+        elif 0.0 < concentration < 0.10 or 0.70 < concentration <= 0.80:
+            return 5
+        else:  # > 0.80 过度集中
+            return 0
+
+    @staticmethod
+    async def _calc_continuity_score(db: AsyncSession, date: str) -> int:
+        """5. 热度延续 (20): 热门主题与前一日 Jaccard 相似度"""
+        # 当日主题
+        today_stmt = select(DailyHotTheme.theme_name).where(
+            DailyHotTheme.trade_date == date,
+        )
+        today_result = await db.execute(today_stmt)
+        today_themes = {r[0] for r in today_result.all()}
+
+        if not today_themes:
+            return 10
+
+        # 前一交易日
+        prev_stmt = select(func.max(DailyHotTheme.trade_date)).where(
+            DailyHotTheme.trade_date < date,
+        )
+        prev_date_result = await db.execute(prev_stmt)
+        prev_date = prev_date_result.scalar()
+
+        if not prev_date:
+            return 10  # 无前一日数据 → 中性
+
+        yesterday_stmt = select(DailyHotTheme.theme_name).where(
+            DailyHotTheme.trade_date == prev_date,
+        )
+        yesterday_result = await db.execute(yesterday_stmt)
+        yesterday_themes = {r[0] for r in yesterday_result.all()}
+
+        if not yesterday_themes:
+            return 10
+
+        intersection = today_themes & yesterday_themes
+        union = today_themes | yesterday_themes
+        jaccard = len(intersection) / len(union) if union else 0
+
+        return round(jaccard * 20)
+
+    @staticmethod
+    async def _calc_temperature(
         northbound: Optional[dict],
         adv: dict,
         date: str,
-        db: Optional[AsyncSession] = None,
+        db: AsyncSession,
     ) -> dict:
         """5 维度综合评分，每维度 0-20 分，满分 100"""
         scores = {}
 
-        # 1. 资金面 (20): 北向净流入方向+规模
-        nb_score = 10  # 中性
-        if northbound and northbound.get("total_net_yi"):
-            net = northbound["total_net_yi"]
-            if net > 50:
-                nb_score = 20
-            elif net > 20:
-                nb_score = 17
-            elif net > 0:
-                nb_score = 14
-            elif net > -20:
-                nb_score = 7
-            elif net > -50:
-                nb_score = 3
-            else:
-                nb_score = 0
-        scores["capital"] = nb_score
-
-        # 2. 涨跌结构 (20): 上涨占比
-        total = adv.get("total", 0) or 0
-        up = adv.get("up_count", 0) or 0
-        ratio = up / total if total > 0 else 0.5
-        scores["breadth"] = min(20, round(ratio * 25))  # 80%+ = 满分
-
-        # 3. 情绪面 (20): 涨停数（从 daily 表统计，简化处理）
-        # 注：数据库中无直接 limit_up/down 列，使用 change_pct 推算
-        # 此处从 adv 统计中提取，若无精确数据则给中值
-        scores["sentiment"] = 10  # 中性默认值
-
-        # 4. 板块集中度 (20): 适中最好（过度集中=不可持续）
-        scores["concentration"] = 10  # 中性默认值
-
-        # 5. 热度延续 (20): 需要前后两天数据比较
-        scores["continuity"] = 10  # 中性默认值
+        scores["capital"] = await MarketHeatService._calc_capital_score(northbound)
+        scores["breadth"] = MarketHeatService._calc_breadth_score(adv)
+        scores["sentiment"] = await MarketHeatService._calc_sentiment_score(db, date)
+        scores["concentration"] = await MarketHeatService._calc_concentration_score(db, date)
+        scores["continuity"] = await MarketHeatService._calc_continuity_score(db, date)
 
         total_score = sum(scores.values())
-        level = (
-            "冰点" if total_score <= 30 else
-            "偏冷" if total_score <= 50 else
-            "中性" if total_score <= 70 else
-            "偏热" if total_score <= 85 else
-            "过热"
-        )
+        level = MarketHeatService._score_to_level(total_score)
 
         return {
             "score": total_score,
             "level": level,
             "dimensions": scores,
         }
+
+    @staticmethod
+    async def save_temperature(db: AsyncSession, trade_date: str) -> dict:
+        """计算并持久化指定交易日市场温度（幂等）"""
+        from ..models.stock_tables import DailyMarketTemperature
+
+        # 获取概览所需的基础数据
+        nb_stmt = select(DailyNorthboundFlow.__table__).where(
+            DailyNorthboundFlow.trade_date == trade_date
+        )
+        nb_result = await db.execute(nb_stmt)
+        nb_row = nb_result.mappings().first()
+        northbound = dict(nb_row) if nb_row else None
+
+        adv_stmt = select(
+            func.count().label("total"),
+            func.sum(case((Daily.close > Daily.open, 1), else_=0)).label("up_count"),
+            func.sum(case((Daily.close < Daily.open, 1), else_=0)).label("down_count"),
+        ).where(Daily.trade_date == trade_date, ~Daily.ts_code.like("%.IDX"))
+        adv_result = await db.execute(adv_stmt)
+        adv_row = adv_result.mappings().first()
+        adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
+
+        temperature = await MarketHeatService._calc_temperature(
+            northbound=northbound, adv=adv, date=trade_date, db=db,
+        )
+
+        dims = temperature["dimensions"]
+
+        # 幂等 upsert（Core 级别）
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        stmt = pg_insert(DailyMarketTemperature.__table__).values(
+            trade_date=trade_date,
+            score=temperature["score"],
+            level=temperature["level"],
+            capital_score=dims["capital"],
+            breadth_score=dims["breadth"],
+            sentiment_score=dims["sentiment"],
+            concentration_score=dims["concentration"],
+            continuity_score=dims["continuity"],
+        ).on_conflict_do_update(
+            constraint="uq_market_temp_date",
+            set_=dict(
+                score=temperature["score"],
+                level=temperature["level"],
+                capital_score=dims["capital"],
+                breadth_score=dims["breadth"],
+                sentiment_score=dims["sentiment"],
+                concentration_score=dims["concentration"],
+                continuity_score=dims["continuity"],
+            ),
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+        return temperature
+
+    @staticmethod
+    async def get_temperature_history(
+        db: AsyncSession, days: int = 60
+    ) -> list[dict]:
+        """近 N 日市场温度历史"""
+        from ..models.stock_tables import DailyMarketTemperature
+
+        stmt = (
+            select(DailyMarketTemperature.__table__)
+            .order_by(DailyMarketTemperature.__table__.c.trade_date.desc())
+            .limit(days)
+        )
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        history = []
+        for row in reversed(list(rows)):
+            r = dict(row)
+            history.append({
+                "trade_date": r["trade_date"],
+                "score": r["score"],
+                "level": r["level"],
+                "dimensions": {
+                    "capital": r["capital_score"],
+                    "breadth": r["breadth_score"],
+                    "sentiment": r["sentiment_score"],
+                    "concentration": r["concentration_score"],
+                    "continuity": r["continuity_score"],
+                },
+            })
+        return history
+
+    # ── 四大指数板块温度 ────────────────────────────────────
+
+    # 板块定义：board_code → (board_name, PostgreSQL ts_code 正则)
+    BOARD_DEFINITIONS = [
+        ("sh_main",  "上证主板", r"^[56]0[0-5]"),
+        ("sh_star",  "科创板",   r"^688"),
+        ("sz_main",  "深证主板", r"^00[0-3]"),
+        ("sz_chi",   "创业板",   r"^30[01]"),
+    ]
+
+    @staticmethod
+    async def _calc_board_temp(
+        db: AsyncSession,
+        date: str,
+        ts_pattern: str,
+    ) -> dict:
+        """计算单个板块的温度（3 维度 × 100 分）"""
+        from sqlalchemy import text as sa_text
+
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(prev_alias.c.close, daily_alias.c.open), 0)
+            * 100
+        )
+
+        # 涨跌结构 + 情绪面 + 成交量
+        stmt = select(
+            func.count().label("total"),
+            func.sum(case((daily_alias.c.close > daily_alias.c.open, 1), else_=0)).label("up_count"),
+            func.sum(case((daily_alias.c.close < daily_alias.c.open, 1), else_=0)).label("down_count"),
+            func.sum(case((change_expr >= 9.8, 1), else_=0)).label("limit_up"),
+            func.sum(case((change_expr <= -9.8, 1), else_=0)).label("limit_down"),
+            func.sum(daily_alias.c.amount).label("total_amount"),
+        ).select_from(daily_alias).outerjoin(
+            prev_alias,
+            (daily_alias.c.ts_code == prev_alias.c.ts_code)
+            & (prev_alias.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                    & (Daily.__table__.c.trade_date < date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            daily_alias.c.trade_date == date,
+            ~daily_alias.c.ts_code.like("%.IDX"),
+            sa_text(f"daily_1.ts_code ~ '{ts_pattern}'"),
+        )
+
+        result = await db.execute(stmt)
+        row = result.mappings().first()
+        if not row or (row.get("total", 0) or 0) == 0:
+            return {"score": 50, "level": "中性",
+                    "dimensions": {"breadth": 20, "sentiment": 15, "volume": 15}}
+
+        total = row["total"] or 0
+        up = row["up_count"] or 0
+        limit_up = row["limit_up"] or 0
+        limit_down = row["limit_down"] or 0
+        total_amount = row["total_amount"] or 0
+
+        # 1. 涨跌结构 (0-40)
+        ratio = up / total if total > 0 else 0.5
+        breadth = min(40, round(ratio * 50))
+
+        # 2. 情绪面 (0-30)
+        total_limits = limit_up + limit_down
+        if total_limits > 0:
+            limit_ratio = limit_up / total_limits
+            activity = min(1.0, total_limits / (total * 0.03))  # 活跃度：3%触及涨跌停即满分
+            sentiment = round(limit_ratio * 30 * (0.5 + 0.5 * activity))
+        else:
+            sentiment = 15
+
+        # 3. 量能活跃度 (0-30): 当日成交额 vs 近20日日均成交额
+        # 先按日汇总板块成交额，再取20日均值
+        daily_sum_subq = (
+            select(
+                Daily.__table__.c.trade_date,
+                func.sum(Daily.__table__.c.amount).label("daily_total"),
+            )
+            .where(
+                Daily.__table__.c.trade_date < date,
+                sa_text(f"daily.ts_code ~ '{ts_pattern}'"),
+                ~Daily.__table__.c.ts_code.like("%.IDX"),
+            )
+            .group_by(Daily.__table__.c.trade_date)
+            .order_by(Daily.__table__.c.trade_date.desc())
+            .limit(20)
+        ).subquery()
+        avg_amt_stmt = select(func.avg(daily_sum_subq.c.daily_total))
+        avg_result = await db.execute(avg_amt_stmt)
+        avg_amount = avg_result.scalar() or total_amount
+
+        if avg_amount and avg_amount > 0 and total_amount > 0:
+            vol_ratio = total_amount / avg_amount
+            volume = min(30, round(vol_ratio * 15))
+        else:
+            volume = 15
+
+        scores = {"breadth": breadth, "sentiment": max(0, min(30, sentiment)), "volume": max(0, min(30, volume))}
+        total_score = sum(scores.values())
+        level = MarketHeatService._score_to_level(total_score)
+
+        return {"score": total_score, "level": level, "dimensions": scores}
+
+    @staticmethod
+    async def save_board_temperatures(db: AsyncSession, trade_date: str) -> list[dict]:
+        """计算并持久化四大板块温度（幂等）"""
+        from ..models.stock_tables import DailyBoardTemperature
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        results = []
+        for board_code, board_name, ts_pattern in MarketHeatService.BOARD_DEFINITIONS:
+            temp = await MarketHeatService._calc_board_temp(db, trade_date, ts_pattern)
+            dims = temp["dimensions"]
+
+            stmt = pg_insert(DailyBoardTemperature.__table__).values(
+                trade_date=trade_date,
+                board_code=board_code,
+                board_name=board_name,
+                score=temp["score"],
+                level=temp["level"],
+                breadth_score=dims["breadth"],
+                sentiment_score=dims["sentiment"],
+                volume_score=dims["volume"],
+            ).on_conflict_do_update(
+                constraint="uq_board_temp",
+                set_=dict(
+                    score=temp["score"],
+                    level=temp["level"],
+                    breadth_score=dims["breadth"],
+                    sentiment_score=dims["sentiment"],
+                    volume_score=dims["volume"],
+                ),
+            )
+            await db.execute(stmt)
+            results.append({
+                "board_code": board_code,
+                "board_name": board_name,
+                **temp,
+            })
+
+        await db.commit()
+        return results
+
+    @staticmethod
+    async def get_board_temperatures(
+        db: AsyncSession, trade_date: Optional[str] = None
+    ) -> list[dict]:
+        """获取指定日期的板块温度（默认最新）"""
+        from ..models.stock_tables import DailyBoardTemperature
+
+        if not trade_date:
+            stmt = select(func.max(DailyBoardTemperature.__table__.c.trade_date))
+            result = await db.execute(stmt)
+            trade_date = result.scalar()
+        if not trade_date:
+            return []
+
+        stmt = select(DailyBoardTemperature.__table__).where(
+            DailyBoardTemperature.__table__.c.trade_date == trade_date,
+        ).order_by(DailyBoardTemperature.__table__.c.board_code)
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        return [
+            {
+                "board_code": r["board_code"],
+                "board_name": r["board_name"],
+                "score": r["score"],
+                "level": r["level"],
+                "dimensions": {
+                    "breadth": r["breadth_score"],
+                    "sentiment": r["sentiment_score"],
+                    "volume": r["volume_score"],
+                },
+            }
+            for r in rows
+        ]
 
     # ── 涨跌分布 ─────────────────────────────────────────────
 
@@ -519,7 +934,21 @@ class MarketHeatService:
         import re
         base_name = re.sub(r'[Ⅰ-ⅧⅠⅡⅢⅣⅤⅥⅦⅧ]+$', '', sector_name).strip()
 
-        change_expr = (Daily.close - Daily.open) / func.nullif(Daily.open, 0) * 100
+        # 标准当日涨跌幅 = (close - pre_close) / pre_close * 100
+        # 用关联子查询取前一交易日收盘价
+        PrevDaily = aliased(Daily)
+        pre_close_subq = (
+            select(PrevDaily.close)
+            .where(PrevDaily.ts_code == Stock.ts_code, PrevDaily.trade_date < date)
+            .order_by(PrevDaily.trade_date.desc())
+            .limit(1)
+            .correlate(Stock)
+            .scalar_subquery()
+        )
+        change_expr = (
+            (Daily.close - pre_close_subq)
+            / func.nullif(pre_close_subq, 0) * 100
+        )
         order_clause = change_expr.desc() if sort_order == "desc" else change_expr.asc()
 
         stmt = (
