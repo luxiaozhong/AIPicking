@@ -135,7 +135,12 @@ class DailyHotTheme(BaseModel):
 
 
 class DailyNorthboundFlow(BaseModel):
-    """每日北向资金流向表"""
+    """每日北向资金流向表
+
+    数据源：东财 RPT_MUTUAL_DEAL_HISTORY（深股通 MUTUAL_TYPE="002"）
+    注意：沪股通自 2024-08-16 起不再披露净买额（港交所政策调整），hgt_net_yi 为 NULL。
+    total_net_yi = sgt_net_yi（仅深股通）。
+    """
     __tablename__ = "daily_northbound_flow"
     __table_args__ = (
         UniqueConstraint("trade_date", name="uq_northbound"),
@@ -143,10 +148,10 @@ class DailyNorthboundFlow(BaseModel):
     )
 
     trade_date = Column(String(10), nullable=False)
-    hgt_net_yi = Column(Float)
-    sgt_net_yi = Column(Float)
-    total_net_yi = Column(Float)
-    data_points = Column(Integer)
+    hgt_net_yi = Column(Float, nullable=True)   # 沪股通净买入(亿) — 2024-08 后不可用
+    sgt_net_yi = Column(Float)                   # 深股通净买入(亿)
+    total_net_yi = Column(Float)                 # 合计净买入(亿) = sgt_net_yi
+    data_points = Column(Integer)                # 已弃用（原 hexin 分钟点数）
 
 
 class DailyDragonTiger(BaseModel):

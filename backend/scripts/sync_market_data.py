@@ -330,69 +330,86 @@ def extract_themes(stocks: list[dict]) -> list[dict]:
 # ═════════════════════════════════════════════════════════════════════════
 # Fetch: 北向资金
 # ═════════════════════════════════════════════════════════════════════════
+#
+# 2026-06 数据源迁移说明：
+#   - hexin dayChart API 已停止更新，返回重复假数据，已弃用
+#   - 东财 push2 KAMT 接口的净买额字段自 2024-08 起全为 0（港交所停止实时披露）
+#   - 新数据源：东财 datacenter RPT_MUTUAL_DEAL_HISTORY（深股通 MUTUAL_TYPE="002"）
+#   - 沪股通 (MUTUAL_TYPE="001") 自 2024-08-16 起不再披露净买额，不可用
+#   - 深股通数据每日仍在更新，单位为百万元，需 /100 转为亿元
+#   - 该接口支持历史日期查询，可正常回补
 
-HSGT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/117.0.0.0 Safari/537.36",
-    "Host": "data.hexin.cn",
-    "Referer": "https://data.hexin.cn/",
-}
+NORTHBOUND_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
 
 def fetch_northbound_flow(date_str: str) -> Optional[dict]:
-    """Fetch northbound capital flow from hexin dayChart API.
+    """从东财 datacenter 拉取深股通北向资金净流入。
 
-    IMPORTANT: The dayChart endpoint only returns TODAY's intraday data.
-    It does NOT support historical dates.  Attempting to backfill historical
-    northbound data via this function will silently store today's values for
-    every date, producing identical rows.  For today's data this works
-    correctly because the cron runs at 18:30 CST after market close.
+    沪股通自 2024-08-16 起不再披露净买额（港交所政策调整），
+    仅深股通数据可用。total_net_yi = sgt_net_yi（深股通净买额）。
+
+    单位：API 返回百万元 → 转为亿元存储。
     """
-    today_str = date.today().strftime("%Y-%m-%d")
-    if date_str != today_str:
-        logging.warning(
-            f"Northbound dayChart API only returns today's data "
-            f"(today={today_str}, requested={date_str}). Skipping."
-        )
-        return None
+    params = {
+        "reportName": "RPT_MUTUAL_DEAL_HISTORY",
+        "columns": "TRADE_DATE,NET_DEAL_AMT,BUY_AMT,SELL_AMT",
+        "filter": f'(MUTUAL_TYPE="002")(TRADE_DATE>=\'{date_str}\')(TRADE_DATE<=\'{date_str}\')',
+        "pageNumber": "1",
+        "pageSize": "1",
+        "sortColumns": "TRADE_DATE",
+        "sortTypes": "-1",
+        "source": "WEB",
+        "client": "WEB",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Referer": "https://data.eastmoney.com/",
+    }
 
-    url = "https://data.hexin.cn/market/hsgtApi/method/dayChart/"
     try:
-        r = requests.get(url, headers=HSGT_HEADERS, timeout=10)
+        r = _em_get(NORTHBOUND_URL, params=params, headers=headers, timeout=15)
         d = r.json()
     except Exception as e:
-        logging.warning(f"Northbound fetch failed: {e}")
+        logging.warning(f"Northbound fetch failed for {date_str}: {e}")
         return None
 
-    times = d.get("time", [])
-    hgt = d.get("hgt", [])
-    sgt = d.get("sgt", [])
-
-    if not times or not hgt or not sgt:
-        logging.info("No northbound data (non-trading day)")
+    result = d.get("result")
+    if result is None:
+        logging.warning(f"Northbound API returned null result for {date_str}")
         return None
 
-    hgt_last = sgt_last = None
-    for v in reversed(hgt):
-        if v is not None:
-            hgt_last = float(v)
-            break
-    for v in reversed(sgt):
-        if v is not None:
-            sgt_last = float(v)
-            break
-
-    if hgt_last is None and sgt_last is None:
-        logging.info("No valid northbound values")
+    data = result.get("data", [])
+    if not data:
+        logging.info(f"No northbound data for {date_str} (non-trading day or not yet published)")
         return None
 
-    hgt_val = hgt_last or 0.0
-    sgt_val = sgt_last or 0.0
+    row = data[0]
+    net_deal = row.get("NET_DEAL_AMT")
+    buy_amt = row.get("BUY_AMT")
+    sell_amt = row.get("SELL_AMT")
+
+    if net_deal is None:
+        logging.info(f"Northbound NET_DEAL_AMT is null for {date_str}")
+        return None
+
+    # API 单位：百万元 → 转为亿元
+    sgt_yi = round(float(net_deal) / 100, 2)
+    buy_yi = round(float(buy_amt or 0) / 100, 2)
+    sell_yi = round(float(sell_amt or 0) / 100, 2)
+
+    direction = "流入" if sgt_yi >= 0 else "流出"
+    logging.info(
+        f"Northbound 深股通 {date_str}: "
+        f"净{direction}{abs(sgt_yi):.2f}亿 "
+        f"(买{buy_yi:.2f}亿 卖{sell_yi:.2f}亿)"
+    )
+
     return {
         "trade_date": date_str,
-        "hgt_net_yi": round(hgt_val, 2),
-        "sgt_net_yi": round(sgt_val, 2),
-        "total_net_yi": round(hgt_val + sgt_val, 2),
-        "data_points": len(times),
+        "hgt_net_yi": None,          # 沪股通自 2024-08 起不再披露
+        "sgt_net_yi": sgt_yi,        # 深股通净买入(亿)
+        "total_net_yi": sgt_yi,      # 合计 = 深股通(亿)
+        "data_points": 0,            # 不再适用（原 hexin 分钟点数）
     }
 
 
@@ -655,9 +672,10 @@ def _save_northbound(date_str: str, data: dict) -> bool:
         conn.commit()
     finally:
         conn.close()
-    direction = "流入" if data["total_net_yi"] >= 0 else "流出"
-    logging.info(f"Saved northbound: 沪{data['hgt_net_yi']:+.2f} "
-                 f"深{data['sgt_net_yi']:+.2f} 合计{direction}{abs(data['total_net_yi']):.2f}亿")
+    hgt_str = f"沪{data['hgt_net_yi']:+.2f}" if data.get("hgt_net_yi") is not None else "沪(N/A)"
+    direction = "流入" if (data["total_net_yi"] or 0) >= 0 else "流出"
+    logging.info(f"Saved northbound: {hgt_str} "
+                 f"深{data['sgt_net_yi']:+.2f} 合计{direction}{abs(data['total_net_yi'] or 0):.2f}亿")
     return True
 
 

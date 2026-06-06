@@ -43,7 +43,7 @@ const TemperatureCard: React.FC<Props> = ({
       onClick: undefined,
     },
     {
-      label: '💰 北向资金',
+      label: '💰 北向(深股通)',
       value: overview.northbound
         ? `${overview.northbound.total_net_yi > 0 ? '+' : ''}${overview.northbound.total_net_yi.toFixed(1)}亿`
         : '--',

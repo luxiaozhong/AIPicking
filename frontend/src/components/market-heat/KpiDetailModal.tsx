@@ -34,7 +34,7 @@ const KpiDetailModal: React.FC<Props> = ({ open, type, tradeDate, sectorName, on
     }
   }, [open, type, tradeDate, sectorName]);
 
-  const title = type === 'northbound' ? '北向资金近 10 日' :
+  const title = type === 'northbound' ? '北向资金(深股通)近 10 日' :
     type === 'advance_decline' ? '涨跌幅度分布' :
     type === 'leading_sector' ? `${sectorName} — 涨幅前 15` : '';
 
