@@ -546,17 +546,23 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
     #    - 今天非交易日 → 历史接口补昨天（或最近交易日）
     #    顺带检查昨天（最近交易日）是否有数据，没有则补
     # ────────────────────────────────────────────────────────────────────
+    # 完整交易日至少应有 4500+ 只股票，盘中实时数据通常只有 ~3000 只
+    MIN_DAILY_COUNT = 4500
+
     if today_is_trade:
         if is_intraday_now():
             print(f"🕐 盘中模式（{today_str}），使用实时接口")
             await run_intraday(stocks, today_str)
         else:
-            # 盘后：检查今天数据
+            # 盘后：检查今天数据是否完整
             cnt = count_daily(today_str)
-            if cnt > 0:
-                print(f"✅ 今天({today_str})已有 {cnt} 条数据")
+            if cnt >= MIN_DAILY_COUNT:
+                print(f"✅ 今天({today_str})已有 {cnt} 条数据，数据完整，跳过")
             else:
-                print(f"📅 盘后更新今天({today_str})，使用历史日线接口")
+                if cnt > 0:
+                    print(f"⚠️ 今天({today_str})仅有 {cnt} 条数据（不完整，可能是盘中写入），执行完整更新")
+                else:
+                    print(f"📅 今天({today_str})无数据，使用历史日线接口")
                 await run_history(stocks, today_str, today_str, do_fallback=True)
     else:
         # 今天非交易日，补最近交易日
@@ -565,10 +571,13 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
             print("⚠️  找不到最近交易日，退出")
             return
         cnt = count_daily(latest)
-        if cnt > 0:
-            print(f"✅ 最近交易日({latest})已有 {cnt} 条数据，无需更新")
+        if cnt >= MIN_DAILY_COUNT:
+            print(f"✅ 最近交易日({latest})已有 {cnt} 条数据，数据完整，无需更新")
             return
-        print(f"📅 补充最近交易日({latest})数据，使用历史日线接口")
+        if cnt > 0:
+            print(f"⚠️ 最近交易日({latest})仅有 {cnt} 条数据（不完整），执行补充更新")
+        else:
+            print(f"📅 最近交易日({latest})无数据，使用历史日线接口")
         await run_history(stocks, latest, latest, do_fallback=False)
 
 
