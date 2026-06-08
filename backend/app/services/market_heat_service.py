@@ -320,15 +320,33 @@ class MarketHeatService:
             northbound = dict(nb_row) if nb_row else None
 
         # 涨跌比（用 daily 表的日期）
+        # 使用标准日间涨跌幅公式 (close - pre_close) / pre_close，与涨跌分布弹窗一致
+        # pre_close 优先取同步存储值（同一复权因子），回退到自连接前一日 close
+        adv_daily_a = Daily.__table__.alias()
+        adv_prev_a = Daily.__table__.alias()
+        adv_change = (
+            (adv_daily_a.c.close - func.coalesce(adv_daily_a.c.pre_close, adv_prev_a.c.close))
+            / func.nullif(func.coalesce(adv_daily_a.c.pre_close, adv_prev_a.c.close), 0)
+        )
         adv_stmt = select(
             func.count().label("total"),
-            func.sum(
-                case((Daily.close > Daily.open, 1), else_=0)
-            ).label("up_count"),
-            func.sum(
-                case((Daily.close < Daily.open, 1), else_=0)
-            ).label("down_count"),
-        ).where(Daily.trade_date == daily_date, ~Daily.ts_code.like("%.IDX"))
+            func.sum(case((adv_change > 0, 1), else_=0)).label("up_count"),
+            func.sum(case((adv_change < 0, 1), else_=0)).label("down_count"),
+        ).select_from(adv_daily_a).outerjoin(
+            adv_prev_a,
+            (adv_daily_a.c.ts_code == adv_prev_a.c.ts_code)
+            & (adv_prev_a.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == adv_daily_a.c.ts_code)
+                    & (Daily.__table__.c.trade_date < daily_date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            adv_daily_a.c.trade_date == daily_date,
+            ~adv_daily_a.c.ts_code.like("%.IDX"),
+        )
         adv_result = await db.execute(adv_stmt)
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
@@ -951,11 +969,32 @@ class MarketHeatService:
         nb_row = nb_result.mappings().first()
         northbound = dict(nb_row) if nb_row else None
 
+        # 使用标准日间涨跌幅公式，与 get_change_distribution 一致
+        save_daily_a = Daily.__table__.alias()
+        save_prev_a = Daily.__table__.alias()
+        save_change = (
+            (save_daily_a.c.close - func.coalesce(save_daily_a.c.pre_close, save_prev_a.c.close))
+            / func.nullif(func.coalesce(save_daily_a.c.pre_close, save_prev_a.c.close), 0)
+        )
         adv_stmt = select(
             func.count().label("total"),
-            func.sum(case((Daily.close > Daily.open, 1), else_=0)).label("up_count"),
-            func.sum(case((Daily.close < Daily.open, 1), else_=0)).label("down_count"),
-        ).where(Daily.trade_date == trade_date, ~Daily.ts_code.like("%.IDX"))
+            func.sum(case((save_change > 0, 1), else_=0)).label("up_count"),
+            func.sum(case((save_change < 0, 1), else_=0)).label("down_count"),
+        ).select_from(save_daily_a).outerjoin(
+            save_prev_a,
+            (save_daily_a.c.ts_code == save_prev_a.c.ts_code)
+            & (save_prev_a.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == save_daily_a.c.ts_code)
+                    & (Daily.__table__.c.trade_date < trade_date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            save_daily_a.c.trade_date == trade_date,
+            ~save_daily_a.c.ts_code.like("%.IDX"),
+        )
         adv_result = await db.execute(adv_stmt)
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
@@ -1732,11 +1771,32 @@ class MarketHeatService:
         northbound = dict(nb_row) if nb_row else None
 
         # 获取涨跌数据
+        # 使用标准日间涨跌幅公式，与 get_change_distribution 一致
+        stress_daily_a = Daily.__table__.alias()
+        stress_prev_a = Daily.__table__.alias()
+        stress_change = (
+            (stress_daily_a.c.close - func.coalesce(stress_daily_a.c.pre_close, stress_prev_a.c.close))
+            / func.nullif(func.coalesce(stress_daily_a.c.pre_close, stress_prev_a.c.close), 0)
+        )
         adv_stmt = select(
             func.count().label("total"),
-            func.sum(case((Daily.close > Daily.open, 1), else_=0)).label("up_count"),
-            func.sum(case((Daily.close < Daily.open, 1), else_=0)).label("down_count"),
-        ).where(Daily.trade_date == trade_date, ~Daily.ts_code.like("%.IDX"))
+            func.sum(case((stress_change > 0, 1), else_=0)).label("up_count"),
+            func.sum(case((stress_change < 0, 1), else_=0)).label("down_count"),
+        ).select_from(stress_daily_a).outerjoin(
+            stress_prev_a,
+            (stress_daily_a.c.ts_code == stress_prev_a.c.ts_code)
+            & (stress_prev_a.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == stress_daily_a.c.ts_code)
+                    & (Daily.__table__.c.trade_date < trade_date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            stress_daily_a.c.trade_date == trade_date,
+            ~stress_daily_a.c.ts_code.like("%.IDX"),
+        )
         adv_result = await db.execute(adv_stmt)
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
