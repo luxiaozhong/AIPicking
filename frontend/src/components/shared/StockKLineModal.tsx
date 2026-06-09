@@ -39,10 +39,18 @@ export default function StockKLineModal({
     }
   }, [open, ts_code]);
 
+  // ts_code 格式为 "300658.SZ" → 转换为 "SZ300658"
+  const xueqiuCode = ts_code ? ts_code.replace(/^(\d+)\.(SH|SZ|BJ)$/, '$2$1') : ts_code;
+  const xueqiuUrl = xueqiuCode ? `https://xueqiu.com/S/${xueqiuCode}` : '#';
+
   const daysLabel = days >= 504 ? '近两年' : days >= 365 ? '近一年' : `近${days}天`;
-  const title = name
-    ? `${name}（${ts_code}）— ${daysLabel} K 线图`
-    : `${ts_code} — ${daysLabel} K 线图`;
+  const stockLabel = name || ts_code;
+  const title = (
+    <span>
+      <a href={xueqiuUrl} target="_blank" rel="noopener noreferrer">{stockLabel}</a>
+      <span style={{ fontWeight: 400 }}>（{ts_code}）— {daysLabel} K 线图</span>
+    </span>
+  );
 
   return (
     <Modal
@@ -54,16 +62,6 @@ export default function StockKLineModal({
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
-      <div style={{ marginBottom: 8 }}>
-        <a
-          href={`https://xueqiu.com/S/${ts_code}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 13 }}
-        >
-          🔗 雪球 — {name || ts_code}
-        </a>
-      </div>
       <KLineChart
         data={data?.items ?? []}
         loading={loading}
