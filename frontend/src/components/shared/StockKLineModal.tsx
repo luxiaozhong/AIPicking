@@ -54,6 +54,16 @@ export default function StockKLineModal({
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+      <div style={{ marginBottom: 8 }}>
+        <a
+          href={`https://xueqiu.com/S/${ts_code}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ fontSize: 13 }}
+        >
+          🔗 雪球 — {name || ts_code}
+        </a>
+      </div>
       <KLineChart
         data={data?.items ?? []}
         loading={loading}
