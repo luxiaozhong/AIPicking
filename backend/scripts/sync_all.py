@@ -52,6 +52,11 @@ JOBS = [
         "log_key": "market_data",
     },
     {
+        "script": "sync_stock_fund_flow.py",
+        "desc": "个股资金流向",
+        "log_key": "stock_fund_flow",
+    },
+    {
         "script": "sync_market_temperature.py",
         "desc": "市场温度计算",
         "log_key": "market_temperature",

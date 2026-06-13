@@ -261,4 +261,58 @@ class DailyMarketStress(BaseModel):
     northbound_score = Column(Float, nullable=False)  # 北向出逃 0-10
 
 
+class DailyStockFundFlow(BaseModel):
+    """每日个股资金流向表 — 腾讯自选股资金流数据
+
+    数据源：proxy.finance.qq.com（通过 westock-data-clawhub npm 包获取）
+    覆盖全体 A 股，每交易日每只股票一条记录。
+    金额单位：元（与 API 返回一致）。
+
+    写入脚本：scripts/sync_stock_fund_flow.py
+    """
+    __tablename__ = "daily_stock_fund_flow"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "ts_code", name="uq_stock_fund_flow"),
+        Index("idx_sff_date", "trade_date"),
+        Index("idx_sff_code", "ts_code"),
+    )
+
+    trade_date = Column(String(10), nullable=False, index=True, comment="交易日期 YYYY-MM-DD")
+    ts_code = Column(String(20), nullable=False, index=True, comment="股票代码 ts_code 格式 600519.SH")
+
+    # ── 核心资金流（元）──
+    main_net_flow = Column(Float, comment="主力净流入")
+    jumbo_net_flow = Column(Float, comment="超大单净流入")
+    block_net_flow = Column(Float, comment="大单净流入")
+    mid_net_flow = Column(Float, comment="中单净流入")
+    small_net_flow = Column(Float, comment="小单净流入")
+    main_in_flow = Column(Float, comment="主力流入")
+    main_out_flow = Column(Float, comment="主力流出")
+    retail_in_flow = Column(Float, comment="散户流入")
+    retail_out_flow = Column(Float, comment="散户流出")
+
+    # ── 多日窗口累计（元）──
+    main_net_flow_5d = Column(Float, comment="主力净流入 5 日累计")
+    main_net_flow_10d = Column(Float, comment="主力净流入 10 日累计")
+    main_net_flow_20d = Column(Float, comment="主力净流入 20 日累计")
+
+    # ── 排名与比率 ──
+    main_inflow_circ_rate = Column(Float, comment="主买占流通市值比率")
+    main_inflow_rank = Column(Integer, comment="全市场主力流入排名")
+    main_inflow_industry_rank = Column(Integer, comment="行业主力流入排名")
+
+    # ── 价格 ──
+    close_price = Column(Float, comment="收盘价")
+    fwd_close_price = Column(Float, comment="前收盘价")
+    lastest_traded_price = Column(Float, comment="最新成交价")
+    end_date = Column(String(10), comment="数据截止日期 YYYY-MM-DD")
+    secu_code = Column(String(20), comment="证券代码（腾讯格式）")
+
+    # ── 复杂结构体（JSON 文本）──
+    block_trading_infos = Column(Text, comment="大宗交易信息 JSON")
+    margin_trade_infos = Column(Text, comment="融资融券信息 JSON")
+    lhb_trading_details = Column(Text, comment="龙虎榜交易明细 JSON")
+    lhb_infos = Column(Text, comment="龙虎榜信息 JSON")
+
+
 # daily_industry_flow → 已合并到 daily_sector_flow (sector_type='industry')
