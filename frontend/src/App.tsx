@@ -17,6 +17,8 @@ import BatchTradeSimDetail from '@/pages/BatchTradeSimDetail';
 import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
 import Dashboard from '@/pages/Dashboard';
 import MarketHeat from '@/pages/MarketHeat';
+import FundFlow from '@/pages/FundFlow';
+import IndexMACD from '@/pages/IndexMACD';
 import LoginPage from '@/pages/LoginPage';
 import UserManagement from '@/pages/UserManagement';
 import EducationPage from '@/pages/EducationPage';
@@ -66,6 +68,22 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <MarketHeat />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/fund-flow"
+          element={
+            <ProtectedRoute>
+              <FundFlow />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/index-macd"
+          element={
+            <ProtectedRoute>
+              <IndexMACD />
             </ProtectedRoute>
           }
         />

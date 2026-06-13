@@ -12,6 +12,8 @@ import {
   ReadOutlined,
   QuestionCircleOutlined,
   FireOutlined,
+  DollarOutlined,
+  StockOutlined,
 } from '@ant-design/icons';
 import { useThemeStore } from '@/stores/themeStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -48,6 +50,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       key: '/market-heat',
       icon: <FireOutlined />,
       label: '市场热度',
+    },
+    {
+      key: '/fund-flow',
+      icon: <DollarOutlined />,
+      label: '资金流向',
+    },
+    {
+      key: '/index-macd',
+      icon: <StockOutlined />,
+      label: '指数MACD',
     },
     {
       key: '/education',
@@ -87,6 +99,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     if (location.pathname.startsWith('/strategies')) return '/strategies';
     if (location.pathname.startsWith('/education')) return '/education';
     if (location.pathname.startsWith('/market-heat')) return '/market-heat';
+    if (location.pathname.startsWith('/fund-flow')) return '/fund-flow';
+    if (location.pathname.startsWith('/index-macd')) return '/index-macd';
     if (location.pathname.startsWith('/dashboard')) return '/dashboard';
     return '/dashboard';
   })();
