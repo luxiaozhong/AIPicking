@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-每日增量更新四大指数日线数据（上证指数、深证成指、创业板指、科创50）
+每日增量更新五大指数日线数据（上证指数、深证成指、创业板指、科创50、科创100）
 
 与 update_daily.py 的区别：
   - 指数 K 线数据路径为 data.{symbol}.day（个股是 .qfqday）
@@ -70,7 +70,7 @@ TENCENT_API = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 QUOTE_API   = "http://qt.gtimg.cn/q="
 TIMEOUT     = aiohttp.ClientTimeout(total=15)
 
-# ── 四大指数定义 ───────────────────────────────────────────────────────────
+# ── 五大指数定义 ───────────────────────────────────────────────────────────
 INDICES = [
     {
         "ts_code":    "000001.SH",
@@ -103,6 +103,14 @@ INDICES = [
         "name":       "科创50",
         "market":     "SH",
         "list_date":  "20200723",
+    },
+    {
+        "ts_code":    "000698.SH",
+        "symbol":     "sh000698",
+        "qt_symbol":  "s_sh000698",
+        "name":       "科创100",
+        "market":     "SH",
+        "list_date":  "20230807",
     },
 ]
 
@@ -200,7 +208,7 @@ def ensure_stocks_entries():
               idx["list_date"], now_str))
     conn.commit()
     conn.close()
-    print("✅ stocks 表指数记录已就绪（4 条）")
+    print("✅ stocks 表指数记录已就绪（5 条）")
 
 
 # ── 历史 K 线接口（指数专用：读取 .day 而非 .qfqday）──────────────────────

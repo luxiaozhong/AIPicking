@@ -137,7 +137,7 @@ def _fmt_date(d: str) -> str:
 
 
 # 指数 ts_code（由 update_index_daily.py 处理，此处排除）
-_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH")
+_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH", "000698.SH")
 
 def load_stocks():
     """从 PostgreSQL stocks 表读取股票列表（排除指数）"""

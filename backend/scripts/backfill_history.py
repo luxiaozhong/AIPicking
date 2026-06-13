@@ -62,7 +62,7 @@ COOLDOWN_SECONDS = 8         # 每个月份段之间的冷却时间
 JITTER = 0.5                 # 随机抖动范围（秒）
 
 # ── 数据库工具 ────────────────────────────────────────────────────────
-_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH")
+_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH", "000698.SH")
 
 def get_conn():
     return psycopg2.connect(**_PG_PARAMS)
