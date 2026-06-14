@@ -4,13 +4,8 @@ import {
   Typography, Spin, Empty, Tag, message, Space, Descriptions, Statistic, Alert,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
-import * as echarts from 'echarts/core';
-import { LineChart, BarChart } from 'echarts/charts';
-import {
-  GridComponent, TooltipComponent, LegendComponent, TitleComponent, DataZoomComponent,
-} from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
+import ReactECharts from 'echarts-for-react';
+import * as echarts from 'echarts';
 import dayjs from 'dayjs';
 import { strategyService } from '@/services/strategyService';
 import { fundFlowService } from '@/services/fundFlowService';
@@ -20,12 +15,6 @@ import type { Strategy } from '@/types/strategy';
 import type {
   Recommendation, HoldingItem, NavPoint, HoldingsByDate,
 } from '@/services/strategyTrackerService';
-
-// 按需注册 ECharts 组件
-echarts.use([
-  LineChart, BarChart, GridComponent, TooltipComponent,
-  LegendComponent, TitleComponent, DataZoomComponent, CanvasRenderer,
-]);
 
 const { Title, Text } = Typography;
 
@@ -84,7 +73,7 @@ export default function StrategyTracker() {
   const [form] = Form.useForm();
 
   // ECharts ref
-  const navChartRef = useRef<ReactEChartsCore>(null);
+  const navChartRef = useRef<ReactECharts>(null);
 
   // ── 加载策略列表 ──
   useEffect(() => {
@@ -415,11 +404,9 @@ export default function StrategyTracker() {
                     >
                       {trend?.days?.length ? (
                         <>
-                          <ReactEChartsCore
-                            echarts={echarts}
+                          <ReactECharts
                             option={makeMiniOption(trend)}
                             style={{ height: 100 }}
-                            notMerge
                           />
                           <div style={{ textAlign: 'center', marginTop: 4 }}>
                             <Text style={{ fontSize: 11, color: '#888' }}>
@@ -538,12 +525,10 @@ export default function StrategyTracker() {
                 />
               ) : (
                 <>
-                  <ReactEChartsCore
+                  <ReactECharts
                     ref={navChartRef}
-                    echarts={echarts}
                     option={navOption}
                     style={{ height: 320 }}
-                    notMerge
                   />
                   <Row gutter={16} style={{ marginTop: 12 }} justify="center">
                     <Col>
