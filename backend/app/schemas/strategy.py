@@ -101,6 +101,7 @@ class StrategyResponse(StrategyBase):
     version: int = 1
     is_published: bool = False
     file_path: Optional[str] = None
+    params_schema: Optional[str] = None
     factor_config: Optional[Dict[str, Any]] = None
     generated_code: Optional[str] = None
     avg_score: Optional[float] = None

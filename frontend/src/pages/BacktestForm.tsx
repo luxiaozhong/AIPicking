@@ -68,6 +68,11 @@ export default function BacktestForm() {
 
   const [boardFilter, setBoardFilter] = useState<string[]>(['60', '00', '688/689', '300/301']);
 
+  // 策略自定义参数（基于 params_schema）
+  const [paramSchema, setParamSchema] = useState<Record<string, any> | null>(null);
+  const [strategyParams, setStrategyParams] = useState<Record<string, any>>({});
+  const [hasParams, setHasParams] = useState(false);
+
   const [availableFactors, setAvailableFactors] = useState<Record<string, any>>({});
 
   useEffect(() => {
@@ -77,6 +82,28 @@ export default function BacktestForm() {
   useEffect(() => {
     if (id) fetchStrategy(parseInt(id));
   }, [id, fetchStrategy]);
+
+  // 解析策略 params_schema，初始化参数
+  useEffect(() => {
+    if (currentStrategy?.params_schema) {
+      try {
+        const schema = JSON.parse(currentStrategy.params_schema);
+        setParamSchema(schema);
+        const defaults: Record<string, any> = {};
+        Object.entries(schema).forEach(([key, def]: [string, any]) => {
+          defaults[key] = def.default;
+        });
+        setStrategyParams(defaults);
+        setHasParams(Object.keys(schema).length > 0);
+      } catch {
+        setParamSchema(null);
+        setHasParams(false);
+      }
+    } else {
+      setParamSchema(null);
+      setHasParams(false);
+    }
+  }, [currentStrategy]);
 
   useEffect(() => {
     if (strategyError) {
@@ -126,6 +153,7 @@ export default function BacktestForm() {
             top_n: topN,
             max_hold_days: maxHoldDays,
             stop_factors: stopFactors,
+            config: hasParams ? strategyParams : undefined,
           };
           const result = await tradeSimService.createBatch(payload);
           message.success('批量交易模拟已提交');
@@ -159,6 +187,7 @@ export default function BacktestForm() {
           top_n: topN,
           max_hold_days: maxHoldDays,
           stop_factors: stopFactors,
+          config: hasParams ? strategyParams : undefined,
         };
         const result = await tradeSimService.create(payload);
         message.success('交易模拟回测已提交');
@@ -188,10 +217,12 @@ export default function BacktestForm() {
         if (batchName.trim()) {
           payload.name = batchName.trim();
         }
+        payload.config = {
+          board_filter: boardFilterToPrefixes(boardFilter),
+          ...strategyParams,
+        };
         if (stockCode.trim()) {
-          payload.config = { ts_code: stockCode.trim(), board_filter: boardFilterToPrefixes(boardFilter) };
-        } else {
-          payload.config = { board_filter: boardFilterToPrefixes(boardFilter) };
+          payload.config.ts_code = stockCode.trim();
         }
         const result = await backtestService.createBatchBacktest(payload);
         message.success('批量回测任务已提交');
@@ -217,10 +248,12 @@ export default function BacktestForm() {
         cutoff_date: cutoffDate.format('YYYYMMDD'),
         track_days: trackDays,
       };
+      payload.config = {
+        board_filter: boardFilterToPrefixes(boardFilter),
+        ...strategyParams,
+      };
       if (stockCode.trim()) {
-        payload.config = { ts_code: stockCode.trim(), board_filter: boardFilterToPrefixes(boardFilter) };
-      } else {
-        payload.config = { board_filter: boardFilterToPrefixes(boardFilter) };
+        payload.config.ts_code = stockCode.trim();
       }
       const result = await createBacktest(payload);
       message.success('回测任务已提交');
@@ -341,6 +374,49 @@ export default function BacktestForm() {
                   用于计算入选率的分母，至少选一个
                 </Text>
               </Form.Item>
+
+              {/* 策略参数（基于 params_schema 动态渲染） */}
+              {hasParams && paramSchema && (
+                <>
+                  <Form.Item label="策略参数">
+                    <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                      {currentStrategy.name} 的可调参数
+                    </Text>
+                    {Object.entries(paramSchema).map(([key, def]: [string, any]) => (
+                      <div key={key} style={{ marginBottom: 12 }}>
+                        <Text strong style={{ fontSize: 13 }}>{def.label || key}</Text>
+                        {def.description && (
+                          <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                            {def.description}
+                          </Text>
+                        )}
+                        <div style={{ marginTop: 4 }}>
+                          {def.type === 'int' || def.type === 'float' ? (
+                            <InputNumber
+                              value={strategyParams[key] ?? def.default}
+                              onChange={(v) =>
+                                setStrategyParams((prev) => ({ ...prev, [key]: v ?? def.default }))
+                              }
+                              min={def.min}
+                              max={def.max}
+                              step={def.type === 'float' ? 0.1 : 1}
+                              style={{ width: '100%' }}
+                            />
+                          ) : (
+                            <Input
+                              value={strategyParams[key] ?? def.default}
+                              onChange={(e) =>
+                                setStrategyParams((prev) => ({ ...prev, [key]: e.target.value }))
+                              }
+                              placeholder={def.default}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </Form.Item>
+                </>
+              )}
             </>
           ) : (
             <>

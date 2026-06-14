@@ -21,6 +21,7 @@ class TradeSimCreate(BaseModel):
     top_n: int = Field(default=5, ge=1, le=20, description="选前N只")
     max_hold_days: int = Field(default=60, ge=1, le=365, description="强制平仓天数")
     stop_factors: List[StopFactorConfig]
+    config: Optional[dict] = None  # 策略自定义参数（如 N, M, index_code）
 
 
 # --- 响应 ---
@@ -133,6 +134,7 @@ class BatchTradeSimCreate(BaseModel):
     top_n: int = Field(default=5, ge=1, le=20)
     max_hold_days: int = Field(default=60, ge=1, le=365)
     stop_factors: List[StopFactorConfig]
+    config: Optional[dict] = None  # 策略自定义参数
 
 
 class BatchDailyResult(BaseModel):

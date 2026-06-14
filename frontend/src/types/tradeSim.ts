@@ -21,6 +21,7 @@ export interface TradeSimCreate {
   top_n: number;              // default 5
   max_hold_days: number;      // default 60
   stop_factors: StopFactorConfig[];
+  config?: Record<string, any>;  // 策略自定义参数
 }
 
 export interface DailyTrackingItem {
@@ -115,6 +116,7 @@ export interface BatchTradeSimCreate {
   top_n: number;
   max_hold_days: number;
   stop_factors: StopFactorConfig[];
+  config?: Record<string, any>;  // 策略自定义参数
 }
 
 export interface BatchDailyResult {

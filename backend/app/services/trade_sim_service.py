@@ -64,6 +64,10 @@ class TradeSimService:
             ],
         }
 
+        # 合并策略自定义参数（如 N, M, index_code）
+        if data.config:
+            config.update(data.config)
+
         report = TradeSimReport(
             strategy_id=data.strategy_id,
             user_id=user_id,
