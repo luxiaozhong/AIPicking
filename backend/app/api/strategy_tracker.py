@@ -85,11 +85,15 @@ async def _find_nearest_trading_day(
     return row[0] if row else None
 
 
-def _run_strategy_sync(strategy_code: str, cutoff_yyyymmdd: str) -> list:
+def _run_strategy_sync(
+    strategy_code: str, cutoff_yyyymmdd: str, config: dict
+) -> list:
     """在同步上下文中执行策略（线程池中调用）"""
     from ..services.backtest_engine import BacktestEngine
 
-    engine = BacktestEngine(strategy_code=strategy_code, strategy_params={})
+    engine = BacktestEngine(
+        strategy_code=strategy_code, strategy_params={}, config=config,
+    )
     return engine.run_live(cutoff_yyyymmdd)
 
 
@@ -100,6 +104,8 @@ def _run_strategy_sync(strategy_code: str, cutoff_yyyymmdd: str) -> list:
 async def get_recommendations(
     strategy_id: int = Query(..., description="策略 ID"),
     date: Optional[str] = Query(None, description="期望日期 YYYY-MM-DD，默认今天"),
+    m: int = Query(5, description="资金流回顾天数 M"),
+    n: int = Query(10, description="推荐数量 N"),
     force_refresh: bool = Query(False, description="强制重新计算，忽略缓存"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -107,7 +113,7 @@ async def get_recommendations(
     """获取策略每日推荐（带缓存 & 交易日回退）
 
     - 如果 date 是非交易日，自动回退到最近交易日
-    - 每个 (strategy_id, trade_date) 组合只计算一次，结果缓存到 strategy_daily_recs
+    - 每个 (strategy_id, trade_date, M, N) 组合只计算一次，结果缓存
     - 传 force_refresh=true 可强制重新计算
     """
     requested_date = date or datetime.now().strftime("%Y-%m-%d")
@@ -127,9 +133,11 @@ async def get_recommendations(
         }
 
     cutoff_yyyymmdd = _ymd_to_yyyymmdd(trade_date)
+    strategy_config = {"M": m, "N": n}
 
-    # 2. 查缓存
+    # 2. 查缓存（包含 M, N 参数，参数变了不算命中）
     cached = False
+    cache_key = json.dumps({"M": m, "N": n}, sort_keys=True)
     if not force_refresh:
         cache_result = await db.execute(
             select(StrategyDailyRec)
@@ -141,17 +149,20 @@ async def get_recommendations(
         )
         cache_row = cache_result.scalar_one_or_none()
         if cache_row:
-            cached = True
-            recs = json.loads(cache_row.recommendations)
-            return {
-                "strategy_id": strategy_id,
-                "strategy_name": "",  # 缓存不存策略名，前端已有
-                "requested_date": requested_date,
-                "trade_date": trade_date,
-                "cached": True,
-                "recommendations": recs,
-                "total": len(recs),
-            }
+            # 检查缓存的 config 是否匹配
+            cached_config = getattr(cache_row, 'config', None) or '{}'
+            if cached_config == cache_key:
+                cached = True
+                recs = json.loads(cache_row.recommendations)
+                return {
+                    "strategy_id": strategy_id,
+                    "strategy_name": "",
+                    "requested_date": requested_date,
+                    "trade_date": trade_date,
+                    "cached": True,
+                    "recommendations": recs,
+                    "total": len(recs),
+                }
 
     # 3. 获取策略代码
     strategy_result = await db.execute(
@@ -190,10 +201,10 @@ async def get_recommendations(
             "message": "策略代码不存在",
         }
 
-    # 4. 在线程池中执行策略（避免阻塞事件循环）
+    # 4. 在线程池中执行策略
     loop = asyncio.get_running_loop()
     recommendations = await loop.run_in_executor(
-        None, _run_strategy_sync, strategy_code, cutoff_yyyymmdd
+        None, _run_strategy_sync, strategy_code, cutoff_yyyymmdd, strategy_config,
     )
 
     # 5. 缓存结果
@@ -201,6 +212,7 @@ async def get_recommendations(
         strategy_id=strategy_id,
         cutoff_date=cutoff_yyyymmdd,
         trade_date=trade_date,
+        config=cache_key,
         recommendations=json.dumps(recommendations, ensure_ascii=False),
     )
     db.add(cache_entry)

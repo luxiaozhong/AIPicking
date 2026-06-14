@@ -18,4 +18,5 @@ class StrategyDailyRec(BaseModel):
     )
     cutoff_date = Column(String(8), nullable=False, comment="策略执行截止日 YYYYMMDD")
     trade_date = Column(String(10), nullable=False, comment="实际数据日期 YYYY-MM-DD")
+    config = Column(String(200), nullable=True, comment="策略参数 JSON (如 {'M':5,'N':10})")
     recommendations = Column(Text, nullable=False, comment="推荐结果 JSON")

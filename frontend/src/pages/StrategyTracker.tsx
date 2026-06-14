@@ -92,7 +92,7 @@ export default function StrategyTracker() {
     setCached(false);
     try {
       const [recRes, holdingsRes, navRes] = await Promise.all([
-        strategyTrackerService.getRecommendations(sid, date).catch(() => null),
+        strategyTrackerService.getRecommendations(sid, date, false, 5, 10).catch(() => null),
         strategyTrackerService.getHoldings(sid).catch(() => ({ items: {}, total_dates: 0 })),
         strategyTrackerService.getNav(sid).catch(() => ({ nav: [], count: 0 })),
       ]);
@@ -128,7 +128,7 @@ export default function StrategyTracker() {
     setLoading(true);
     setCached(false);
     Promise.all([
-      strategyTrackerService.getRecommendations(strategyId, selectedDate, true),
+      strategyTrackerService.getRecommendations(strategyId, selectedDate, true, 5, 10),
       strategyTrackerService.getHoldings(strategyId),
       strategyTrackerService.getNav(strategyId),
     ]).then(([recRes, holdingsRes, navRes]) => {

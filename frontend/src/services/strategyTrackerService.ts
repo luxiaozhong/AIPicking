@@ -66,10 +66,12 @@ export const strategyTrackerService = {
     strategyId: number,
     date?: string,
     forceRefresh?: boolean,
+    m?: number,
+    n?: number,
   ): Promise<RecommendationsResponse> {
     const response = await api.get<RecommendationsResponse>(
       `${BASE}/recommendations`,
-      { params: { strategy_id: strategyId, date, force_refresh: forceRefresh } },
+      { params: { strategy_id: strategyId, date, force_refresh: forceRefresh, m, n } },
     );
     return response.data;
   },
