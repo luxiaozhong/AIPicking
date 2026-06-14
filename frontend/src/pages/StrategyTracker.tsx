@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Card, Select, DatePicker, Row, Col, Form, InputNumber, Button,
-  Typography, Spin, Empty, Tag, message, Space, Descriptions, Statistic,
+  Typography, Spin, Empty, Tag, message, Space, Descriptions, Statistic, Alert,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
@@ -12,7 +12,6 @@ import {
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import dayjs from 'dayjs';
-import { backtestService } from '@/services/backtestService';
 import { strategyService } from '@/services/strategyService';
 import { fundFlowService } from '@/services/fundFlowService';
 import strategyTrackerService from '@/services/strategyTrackerService';
@@ -29,6 +28,12 @@ echarts.use([
 ]);
 
 const { Title, Text } = Typography;
+
+// A 股交易日：周一到周五（简化判断，精确判断由后端处理）
+function isWeekend(date: string): boolean {
+  const d = dayjs(date);
+  return d.day() === 0 || d.day() === 6;
+}
 
 // 5 日滚动求和
 function calcRolling5(days: StockTrendDay[]): number[] {
@@ -59,6 +64,10 @@ export default function StrategyTracker() {
   const [selectedDate, setSelectedDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [loading, setLoading] = useState(false);
 
+  // ── 实际交易日（后端可能回退到最近交易日）──
+  const [tradeDate, setTradeDate] = useState<string>(selectedDate);
+  const [cached, setCached] = useState(false);
+
   // ── 推荐数据 ──
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
 
@@ -71,10 +80,10 @@ export default function StrategyTracker() {
   const [navData, setNavData] = useState<NavPoint[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // 持仓表单（Ant Design Form）
+  // 持仓表单
   const [form] = Form.useForm();
 
-  // ECharts ref（避免 findDOMNode 警告）
+  // ECharts ref
   const navChartRef = useRef<ReactEChartsCore>(null);
 
   // ── 加载策略列表 ──
@@ -82,7 +91,6 @@ export default function StrategyTracker() {
     strategyService.getStrategies({ limit: 100, scope: 'all' }).then((res) => {
       const list = res.items || [];
       setStrategies(list);
-      // 默认选中 grow_with_money
       const gwm = list.find((s) => s.name?.includes('grow_with_money'));
       if (gwm) setStrategyId(gwm.id);
       else if (list.length > 0) setStrategyId(list[0].id);
@@ -92,17 +100,21 @@ export default function StrategyTracker() {
   // ── 加载推荐 & 持仓 & NAV ──
   const loadData = useCallback(async (sid: number, date: string) => {
     setLoading(true);
+    setCached(false);
     try {
-      // 并行加载推荐 & 持仓 & NAV
-      const dateFmt = date.replace(/-/g, '');
       const [recRes, holdingsRes, navRes] = await Promise.all([
-        backtestService.executeStrategy(sid, dateFmt).catch(() => null),
+        strategyTrackerService.getRecommendations(sid, date).catch(() => null),
         strategyTrackerService.getHoldings(sid).catch(() => ({ items: {}, total_dates: 0 })),
         strategyTrackerService.getNav(sid).catch(() => ({ nav: [], count: 0 })),
       ]);
 
       if (recRes) {
         setRecommendations(recRes.recommendations || []);
+        setTradeDate(recRes.trade_date || date);
+        setCached(recRes.cached);
+      } else {
+        setRecommendations([]);
+        setTradeDate(date);
       }
       setHoldingsByDate(holdingsRes.items || {});
       setNavData(navRes.nav || []);
@@ -113,12 +125,33 @@ export default function StrategyTracker() {
     }
   }, []);
 
-  // 策略或日期变化时重新加载
+  // 策略变化时重新加载（日期不变时也用缓存）
   useEffect(() => {
     if (strategyId) {
       loadData(strategyId, selectedDate);
     }
   }, [strategyId, selectedDate, loadData]);
+
+  // ── 强制刷新（忽略缓存）──
+  const handleForceRefresh = () => {
+    if (!strategyId) return;
+    // 临时方案：直接调 getRecommendations 带 force_refresh
+    setLoading(true);
+    setCached(false);
+    Promise.all([
+      strategyTrackerService.getRecommendations(strategyId, selectedDate, true),
+      strategyTrackerService.getHoldings(strategyId),
+      strategyTrackerService.getNav(strategyId),
+    ]).then(([recRes, holdingsRes, navRes]) => {
+      if (recRes) {
+        setRecommendations(recRes.recommendations || []);
+        setTradeDate(recRes.trade_date || selectedDate);
+        setCached(recRes.cached);
+      }
+      setHoldingsByDate(holdingsRes.items || {});
+      setNavData(navRes.nav || []);
+    }).catch(() => {}).finally(() => setLoading(false));
+  };
 
   // ── 加载 Top 10 资金流趋势 ──
   useEffect(() => {
@@ -154,7 +187,13 @@ export default function StrategyTracker() {
   // ── Top 3 推荐 ──
   const top3 = recommendations.slice(0, 3);
 
-  // ── 净值填充持仓表单 ──
+  // 日期偏移提示
+  const dateOffsetMsg =
+    selectedDate !== tradeDate
+      ? `${selectedDate} 是${isWeekend(selectedDate) ? '周末' : '非交易日'}，已回退到最近交易日 ${tradeDate}`
+      : null;
+
+  // ── 持仓表单填充 ──
   const fillFormWithTop3 = () => {
     form.setFieldsValue({
       holdings: top3.map((r) => ({
@@ -166,16 +205,14 @@ export default function StrategyTracker() {
     });
   };
 
-  // 当 top3 变化时自动填充
   useEffect(() => {
     if (top3.length > 0) {
       fillFormWithTop3();
     }
   }, [recommendations]);
 
-  // 加载已有持仓
   const loadExistingHoldings = () => {
-    const dayHoldings = holdingsByDate[selectedDate];
+    const dayHoldings = holdingsByDate[selectedDate] || holdingsByDate[tradeDate];
     if (dayHoldings && dayHoldings.length > 0) {
       form.setFieldsValue({
         holdings: dayHoldings.map((h) => ({
@@ -185,7 +222,7 @@ export default function StrategyTracker() {
           buy_price: h.buy_price,
         })),
       });
-      message.info(`已加载 ${selectedDate} 的持仓记录`);
+      message.info('已加载该日期的持仓记录');
     } else if (top3.length > 0) {
       fillFormWithTop3();
       message.info('该日期无持仓记录，已填入推荐股票');
@@ -207,16 +244,17 @@ export default function StrategyTracker() {
         }));
 
       setSaving(true);
+      // 用实际交易日保存
+      const saveDate = tradeDate || selectedDate;
       await strategyTrackerService.saveHoldings({
         strategy_id: strategyId,
-        date: selectedDate,
+        date: saveDate,
         holdings,
       });
-      message.success('持仓已保存');
-      // 重新加载数据
+      message.success(`持仓已保存 (${saveDate})`);
       await loadData(strategyId, selectedDate);
     } catch (err) {
-      if (err && typeof err === 'object' && 'errorFields' in err) return; // 表单验证错误
+      if (err && typeof err === 'object' && 'errorFields' in err) return;
       message.error('保存失败');
     } finally {
       setSaving(false);
@@ -225,7 +263,7 @@ export default function StrategyTracker() {
 
   // ── Mini 资金流 chart option ──
   const makeMiniOption = (trend: StockTrend) => {
-    const dates = trend.days.map((d) => d.trade_date.slice(5)); // MM-DD
+    const dates = trend.days.map((d) => d.trade_date.slice(5));
     const rolling5 = calcRolling5(trend.days);
 
     return {
@@ -237,15 +275,8 @@ export default function StrategyTracker() {
           return `${params[0]?.axisValue}<br/>5日滚动: ${fmtFlow(val)}`;
         },
       },
-      xAxis: {
-        type: 'category' as const,
-        data: dates,
-        show: false,
-      },
-      yAxis: {
-        type: 'value' as const,
-        show: false,
-      },
+      xAxis: { type: 'category' as const, data: dates, show: false },
+      yAxis: { type: 'value' as const, show: false },
       series: [{
         type: 'line',
         data: rolling5,
@@ -267,37 +298,25 @@ export default function StrategyTracker() {
     grid: { top: 40, right: 20, bottom: 30, left: 60 },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: { seriesName: string; data: number; axisValue: string }[]) => {
-        return params.map((p) =>
-          `${p.seriesName}: ¥${(p.data ?? 0).toLocaleString()}`,
-        ).join('<br/>');
-      },
+      formatter: (params: { seriesName: string; data: number; axisValue: string }[]) =>
+        params.map((p) => `${p.seriesName}: ¥${(p.data ?? 0).toLocaleString()}`).join('<br/>'),
     },
     legend: { data: ['持仓市值', '总净值'] },
-    xAxis: {
-      type: 'category' as const,
-      data: navData.map((p) => p.date.slice(5)),
-    },
+    xAxis: { type: 'category' as const, data: navData.map((p) => p.date.slice(5)) },
     yAxis: {
       type: 'value' as const,
       axisLabel: { formatter: (v: number) => `¥${(v / 10000).toFixed(0)}万` },
     },
     series: [
       {
-        name: '持仓市值',
-        type: 'line',
+        name: '持仓市值', type: 'line',
         data: navData.map((p) => p.holdings_value),
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 4,
+        smooth: true, symbol: 'circle', symbolSize: 4,
       },
       {
-        name: '总净值',
-        type: 'line',
+        name: '总净值', type: 'line',
         data: navData.map((p) => p.total_value),
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 4,
+        smooth: true, symbol: 'circle', symbolSize: 4,
         lineStyle: { width: 2.5 },
       },
     ],
@@ -336,26 +355,46 @@ export default function StrategyTracker() {
             />
           </Col>
           <Col>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => strategyId && loadData(strategyId, selectedDate)}
-              loading={loading}
-            >
-              刷新
-            </Button>
+            <Space size={8}>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={handleForceRefresh}
+                loading={loading}
+              >
+                强制刷新
+              </Button>
+            </Space>
+          </Col>
+          <Col flex="auto">
+            <Space size={8}>
+              {tradeDate && (
+                <Tag color="blue">实际数据: {tradeDate}</Tag>
+              )}
+              {cached && (
+                <Tag color="green">缓存</Tag>
+              )}
+            </Space>
           </Col>
         </Row>
+        {dateOffsetMsg && (
+          <Alert
+            message={dateOffsetMsg}
+            type="info"
+            showIcon
+            style={{ marginTop: 8, padding: '4px 12px' }}
+          />
+        )}
       </Card>
 
       <Spin spinning={loading || trendsLoading} tip="加载中...">
         {/* Row 1: Top 10 资金流 mini charts */}
         <Card
-          title="策略 Top 10 — 近 20 日 5 日滚动主力净流入"
+          title={`策略 Top 10 — 近 20 日 5 日滚动主力净流入 (${tradeDate})`}
           size="small"
           style={{ marginBottom: 16 }}
         >
           {recommendations.length === 0 ? (
-            <Empty description="暂无推荐数据，请先选择策略并刷新" />
+            <Empty description="暂无推荐数据" />
           ) : (
             <Row gutter={[12, 12]}>
               {recommendations.slice(0, 10).map((rec, idx) => {
@@ -406,7 +445,7 @@ export default function StrategyTracker() {
           {/* 左列: 日期选择 + Top 3 推荐 */}
           <Col span={6}>
             <Card
-              title="推荐持仓 (Top 3)"
+              title={`推荐持仓 Top 3 (${tradeDate})`}
               size="small"
               style={{ marginBottom: 16 }}
               extra={
@@ -458,7 +497,6 @@ export default function StrategyTracker() {
               )}
             </Card>
 
-            {/* 资金流摘要 */}
             {top3.length > 0 && (
               <Card title="Top 3 资金流概览" size="small">
                 {top3.map((rec) => {
@@ -509,29 +547,15 @@ export default function StrategyTracker() {
                   />
                   <Row gutter={16} style={{ marginTop: 12 }} justify="center">
                     <Col>
-                      <Statistic
-                        title="最新净值"
-                        value={navData[navData.length - 1]?.total_value ?? 0}
-                        precision={2}
-                        prefix="¥"
-                        valueStyle={{ fontSize: 18 }}
-                      />
+                      <Statistic title="最新净值" value={navData[navData.length - 1]?.total_value ?? 0}
+                        precision={2} prefix="¥" valueStyle={{ fontSize: 18 }} />
                     </Col>
                     <Col>
-                      <Statistic
-                        title="起始净值"
-                        value={navData[0]?.total_value ?? 0}
-                        precision={2}
-                        prefix="¥"
-                        valueStyle={{ fontSize: 18 }}
-                      />
+                      <Statistic title="起始净值" value={navData[0]?.total_value ?? 0}
+                        precision={2} prefix="¥" valueStyle={{ fontSize: 18 }} />
                     </Col>
                     <Col>
-                      <Statistic
-                        title="数据天数"
-                        value={navData.length}
-                        valueStyle={{ fontSize: 18 }}
-                      />
+                      <Statistic title="数据天数" value={navData.length} valueStyle={{ fontSize: 18 }} />
                     </Col>
                   </Row>
                 </>
@@ -546,12 +570,8 @@ export default function StrategyTracker() {
               size="small"
               extra={
                 <Space size={4}>
-                  <Button size="small" onClick={loadExistingHoldings}>
-                    加载已有
-                  </Button>
-                  <Button size="small" onClick={fillFormWithTop3}>
-                    填入推荐
-                  </Button>
+                  <Button size="small" onClick={loadExistingHoldings}>加载已有</Button>
+                  <Button size="small" onClick={fillFormWithTop3}>填入推荐</Button>
                 </Space>
               }
             >
@@ -566,18 +586,13 @@ export default function StrategyTracker() {
                           style={{ marginBottom: 8 }}
                           styles={{ body: { padding: 8 } }}
                           extra={
-                            <Button
-                              type="text"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => remove(name)}
-                            />
+                            <Button type="text" size="small" danger
+                              icon={<DeleteOutlined />} onClick={() => remove(name)} />
                           }
                         >
-                          <Form.Item {...rest} name={[name, 'ts_code']} label="股票代码" rules={[{ required: true }]}>
-                            <Select
-                              showSearch
+                          <Form.Item {...rest} name={[name, 'ts_code']} label="股票代码"
+                            rules={[{ required: true }]}>
+                            <Select showSearch
                               filterOption={(input, option) =>
                                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
                               }
@@ -589,8 +604,7 @@ export default function StrategyTracker() {
                             />
                           </Form.Item>
                           <Form.Item {...rest} name={[name, 'stock_name']} label="名称">
-                            <Select
-                              showSearch
+                            <Select showSearch
                               filterOption={(input, option) =>
                                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
                               }
@@ -603,37 +617,31 @@ export default function StrategyTracker() {
                           </Form.Item>
                           <Row gutter={8}>
                             <Col span={12}>
-                              <Form.Item {...rest} name={[name, 'shares']} label="股数" rules={[{ required: true }]}>
+                              <Form.Item {...rest} name={[name, 'shares']} label="股数"
+                                rules={[{ required: true }]}>
                                 <InputNumber min={0} step={100} style={{ width: '100%' }} />
                               </Form.Item>
                             </Col>
                             <Col span={12}>
-                              <Form.Item {...rest} name={[name, 'buy_price']} label="买入价" rules={[{ required: true }]}>
+                              <Form.Item {...rest} name={[name, 'buy_price']} label="买入价"
+                                rules={[{ required: true }]}>
                                 <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
                               </Form.Item>
                             </Col>
                           </Row>
                         </Card>
                       ))}
-                      <Button
-                        type="dashed"
+                      <Button type="dashed"
                         onClick={() => add({ ts_code: '', stock_name: '', shares: 0, buy_price: 0 })}
-                        block
-                        icon={<PlusOutlined />}
-                      >
+                        block icon={<PlusOutlined />}>
                         添加股票
                       </Button>
                     </>
                   )}
                 </Form.List>
                 <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    onClick={handleSaveHoldings}
-                    loading={saving}
-                    block
-                  >
+                  <Button type="primary" icon={<SaveOutlined />}
+                    onClick={handleSaveHoldings} loading={saving} block>
                     保存持仓
                   </Button>
                 </Form.Item>

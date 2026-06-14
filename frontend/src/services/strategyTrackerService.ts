@@ -38,12 +38,15 @@ export interface NavPoint {
   total_value: number;
 }
 
-export interface StrategyExecuteResponse {
+export interface RecommendationsResponse {
   strategy_id: number;
   strategy_name: string;
-  cutoff_date: string;
+  requested_date: string;
+  trade_date: string;
+  cached: boolean;
   recommendations: Recommendation[];
   total: number;
+  message?: string;
 }
 
 export interface Recommendation {
@@ -58,6 +61,33 @@ export interface Recommendation {
 const BASE = '/strategy-tracker';
 
 export const strategyTrackerService = {
+  // 获取策略每日推荐（带缓存 + 交易日回退）
+  async getRecommendations(
+    strategyId: number,
+    date?: string,
+    forceRefresh?: boolean,
+  ): Promise<RecommendationsResponse> {
+    const response = await api.get<RecommendationsResponse>(
+      `${BASE}/recommendations`,
+      { params: { strategy_id: strategyId, date, force_refresh: forceRefresh } },
+    );
+    return response.data;
+  },
+
+  // 获取最近交易日
+  async getLatestTradingDay(date?: string): Promise<{
+    requested_date: string;
+    trade_date: string;
+    is_trading_day: boolean;
+  }> {
+    const response = await api.get<{
+      requested_date: string;
+      trade_date: string;
+      is_trading_day: boolean;
+    }>(`${BASE}/latest-trading-day`, { params: { date } });
+    return response.data;
+  },
+
   // 保存持仓
   async saveHoldings(data: SaveHoldingsRequest): Promise<{ message: string; count: number }> {
     const response = await api.post<{ message: string; count: number }>(
