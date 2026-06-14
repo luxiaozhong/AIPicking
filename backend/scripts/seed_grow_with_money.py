@@ -31,7 +31,7 @@ PARAMS_SCHEMA = json.dumps(
         },
         "N": {
             "type": "int",
-            "default": 5,
+            "default": 3,
             "label": "推荐数量 N",
             "description": "选取资金流前 N 名",
             "min": 1,
@@ -39,7 +39,7 @@ PARAMS_SCHEMA = json.dumps(
         },
         "M": {
             "type": "int",
-            "default": 20,
+            "default": 5,
             "label": "回顾天数 M",
             "description": "过去 M 个交易日的资金流累计",
             "min": 3,

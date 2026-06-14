@@ -15,6 +15,7 @@ import TradeSimList from '@/pages/TradeSimList';
 import TradeSimDetail from '@/pages/TradeSimDetail';
 import BatchTradeSimDetail from '@/pages/BatchTradeSimDetail';
 import BatchBacktestDetail from '@/pages/BatchBacktestDetail';
+import RebalanceDetail from '@/pages/RebalanceDetail';
 import Dashboard from '@/pages/Dashboard';
 import MarketHeat from '@/pages/MarketHeat';
 import FundFlow from '@/pages/FundFlow';
@@ -161,6 +162,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <BatchBacktestDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backtests/rebalance/:id"
+          element={
+            <ProtectedRoute>
+              <RebalanceDetail />
             </ProtectedRoute>
           }
         />

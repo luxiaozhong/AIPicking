@@ -8,11 +8,13 @@ import StatusTag from '@/components/shared/StatusTag';
 import ReturnLabel from '@/components/shared/ReturnLabel';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import backtestService from '@/services/backtestService';
+import rebalanceService from '@/services/rebalanceService';
 import type { BatchBacktestReport } from '@/types/backtest';
+import type { RebalanceReport } from '@/services/rebalanceService';
 
 export default function BacktestList() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'single' | 'batch'>('single');
+  const [mode, setMode] = useState<'single' | 'batch' | 'rebalance'>('single');
 
   // —— 单回测 ——
   const {
@@ -85,6 +87,51 @@ export default function BacktestList() {
     if (mode === 'batch') fetchBatch();
   }, [mode, fetchBatch]);
 
+  // —— 调仓回测 ——
+  const [rebalanceLoading, setRebalanceLoading] = useState(false);
+  const [rebalanceData, setRebalanceData] = useState<RebalanceReport[]>([]);
+  const [rebalanceTotal, setRebalanceTotal] = useState(0);
+  const [rebalancePage, setRebalancePage] = useState(1);
+
+  const fetchRebalance = useCallback(async (p?: { page?: number }) => {
+    setRebalanceLoading(true);
+    try {
+      const res = await rebalanceService.getList({
+        page: p?.page ?? rebalancePage,
+        limit: 20,
+        strategy_id: strategyFilter,
+      });
+      setRebalanceData(res.items);
+      setRebalanceTotal(res.total);
+    } catch {
+      message.error('获取调仓回测列表失败');
+    } finally {
+      setRebalanceLoading(false);
+    }
+  }, [rebalancePage, strategyFilter]);
+
+  useEffect(() => {
+    if (mode === 'rebalance') fetchRebalance();
+  }, [mode, fetchRebalance]);
+
+  // 调仓回测轮询
+  useEffect(() => {
+    const hasActive = rebalanceData.some((r) => r.status === 'pending' || r.status === 'running');
+    if (!hasActive) return;
+    const timer = setInterval(() => fetchRebalance(), 3000);
+    return () => clearInterval(timer);
+  }, [rebalanceData, fetchRebalance]);
+
+  const handleRebalanceDelete = async (id: number) => {
+    try {
+      await rebalanceService.delete(id);
+      message.success('已删除');
+      fetchRebalance();
+    } catch {
+      message.error('删除失败');
+    }
+  };
+
   // 批量回测轮询
   useEffect(() => {
     const hasActive = batchData.some((b) => b.status === 'pending' || b.status === 'running');
@@ -104,6 +151,60 @@ export default function BacktestList() {
   };
 
   // —— 列定义 ——
+
+  const rebalanceCols = [
+    {
+      title: '名称', dataIndex: 'name', key: 'name',
+      render: (text: string, record: RebalanceReport) => (
+        <Button type="link" onClick={() => navigate(`/backtests/rebalance/${record.id}`)}>
+          {text || `调仓回测 #${record.id}`}
+        </Button>
+      ),
+    },
+    {
+      title: '策略', dataIndex: 'strategy_name', key: 'strategy',
+      render: (text: string) => text || '—',
+    },
+    {
+      title: '日期范围', key: 'range',
+      render: (_: unknown, r: RebalanceReport) =>
+        `${r.start_date.slice(0, 4)}-${r.start_date.slice(4, 6)}-${r.start_date.slice(6, 8)} ~ ${r.end_date.slice(0, 4)}-${r.end_date.slice(4, 6)}-${r.end_date.slice(6, 8)}`,
+    },
+    {
+      title: '状态', dataIndex: 'status', key: 'status', width: 120,
+      render: (status: string) => <StatusTag status={status} type="backtest" />,
+    },
+    {
+      title: '进度', key: 'progress', width: 100,
+      render: (_: unknown, r: RebalanceReport) =>
+        r.status === 'completed' ? `${r.total_days}/${r.total_days}` : `${r.completed_days}/${r.total_days}`,
+    },
+    {
+      title: '总收益', key: 'return', width: 100,
+      render: (_: unknown, r: RebalanceReport) => {
+        if (!r.summary?.total_return_pct) return '—';
+        const v = r.summary.total_return_pct;
+        return <span style={{ color: v > 0 ? '#cf1322' : v < 0 ? '#3f8600' : '#999' }}>{v > 0 ? '+' : ''}{v.toFixed(2)}%</span>;
+      },
+    },
+    {
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180,
+      render: (v: string) => v ? new Date(v).toLocaleString() : '—',
+    },
+    {
+      title: '操作', key: 'actions', width: 120,
+      render: (_: unknown, r: RebalanceReport) => (
+        <Space size="small">
+          <Button type="link" size="small" onClick={() => navigate(`/backtests/rebalance/${r.id}`)}>
+            查看
+          </Button>
+          <Popconfirm title="确认删除？" onConfirm={() => handleRebalanceDelete(r.id)}>
+            <Button type="link" size="small" danger>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
 
   const singleCols = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
@@ -215,7 +316,11 @@ export default function BacktestList() {
       <PageHeader
         title="简单回测"
         extra={
-          <Button icon={<ReloadOutlined />} onClick={() => mode === 'single' ? fetchSingle() : fetchBatch()}>
+          <Button icon={<ReloadOutlined />} onClick={() => {
+            if (mode === 'single') fetchSingle();
+            else if (mode === 'batch') fetchBatch();
+            else fetchRebalance();
+          }}>
             刷新
           </Button>
         }
@@ -226,6 +331,7 @@ export default function BacktestList() {
           <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
             <Radio.Button value="single">单策略回测</Radio.Button>
             <Radio.Button value="batch">批量回测</Radio.Button>
+            <Radio.Button value="rebalance">调仓回测</Radio.Button>
           </Radio.Group>
 
           {mode === 'single' && (
@@ -267,9 +373,18 @@ export default function BacktestList() {
               onChange={(v) => { setStrategyFilter(v); setBatchPage(1); }}
             />
           )}
+          {mode === 'rebalance' && (
+            <Select
+              allowClear
+              placeholder="按策略筛选"
+              style={{ width: 200 }}
+              value={strategyFilter}
+              onChange={(v) => { setStrategyFilter(v); setRebalancePage(1); }}
+            />
+          )}
         </div>
 
-        {mode === 'single' ? (
+        {mode === 'single' && (
           <Table
             dataSource={backtests}
             columns={singleCols}
@@ -285,7 +400,8 @@ export default function BacktestList() {
               showTotal: (t: number) => `共 ${t} 条`,
             }}
           />
-        ) : (
+        )}
+        {mode === 'batch' && (
           <Table
             dataSource={batchData}
             columns={batchCols}
@@ -297,6 +413,22 @@ export default function BacktestList() {
               pageSize: 20,
               onChange: (p) => { setBatchPage(p); },
               showTotal: (t) => `共 ${t} 条`,
+            }}
+          />
+        )}
+        {mode === 'rebalance' && (
+          <Table
+            dataSource={rebalanceData}
+            columns={rebalanceCols}
+            rowKey="id"
+            loading={rebalanceLoading}
+            scroll={{ x: 900 }}
+            pagination={{
+              current: rebalancePage,
+              total: rebalanceTotal,
+              pageSize: 20,
+              onChange: (p) => { setRebalancePage(p); },
+              showTotal: (t: number) => `共 ${t} 条`,
             }}
           />
         )}

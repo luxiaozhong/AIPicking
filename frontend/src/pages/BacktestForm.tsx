@@ -8,6 +8,7 @@ import PageHeader from '@/components/shared/PageHeader';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import backtestService from '@/services/backtestService';
 import tradeSimService from '@/services/tradeSimService';
+import rebalanceService from '@/services/rebalanceService';
 import type { TradeSimCreate, BatchTradeSimCreate } from '@/types/tradeSim';
 
 const { Text } = Typography;
@@ -43,8 +44,12 @@ export default function BacktestForm() {
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [batchName, setBatchName] = useState('');
 
-  const [backtestMode, setBacktestMode] = useState<'simple' | 'trade-sim'>('simple');
+  const [backtestMode, setBacktestMode] = useState<'simple' | 'trade-sim' | 'rebalance'>('simple');
   const [tradeSimMode, setTradeSimMode] = useState<'single' | 'batch'>('single');
+
+  // 调仓回测字段
+  const [initialCapital, setInitialCapital] = useState<number>(100000);
+  const [variant, setVariant] = useState<'flow' | 'value'>('flow');
 
   // 交易模拟字段
   const [totalAmount, setTotalAmount] = useState<number>(100000);
@@ -122,6 +127,34 @@ export default function BacktestForm() {
   const handleSubmit = async () => {
     if (!currentStrategy) {
       message.error('策略不存在');
+      return;
+    }
+
+    // 调仓回测模式
+    if (backtestMode === 'rebalance') {
+      if (!dateRange || !dateRange[0] || !dateRange[1]) {
+        message.error('请选择起始和结束日期');
+        return;
+      }
+      if (!initialCapital || initialCapital <= 0) {
+        message.error('请输入初始资金');
+        return;
+      }
+      try {
+        const payload = {
+          strategy_id: currentStrategy.id,
+          start_date: dateRange[0].format('YYYYMMDD'),
+          end_date: dateRange[1].format('YYYYMMDD'),
+          name: batchName.trim() || undefined,
+          initial_capital: initialCapital,
+          config: { ...(hasParams ? strategyParams : {}), variant },
+        };
+        const result = await rebalanceService.create(payload);
+        message.success('调仓回测已提交');
+        navigate(`/backtests/rebalance/${result.id}`);
+      } catch (err: any) {
+        message.error(err.response?.data?.detail || '提交失败');
+      }
       return;
     }
 
@@ -287,11 +320,12 @@ export default function BacktestForm() {
           <Form.Item label="回测类型">
             <Radio.Group value={backtestMode} onChange={(e) => setBacktestMode(e.target.value)}>
               <Radio.Button value="simple">简单回测</Radio.Button>
+              <Radio.Button value="rebalance">调仓回测</Radio.Button>
               <Radio.Button value="trade-sim">交易模拟</Radio.Button>
             </Radio.Group>
           </Form.Item>
 
-          {backtestMode === 'simple' ? (
+          {backtestMode === 'simple' && (
             <>
               <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
                 <Text strong>{currentStrategy.name}</Text>
@@ -377,48 +411,137 @@ export default function BacktestForm() {
 
               {/* 策略参数（基于 params_schema 动态渲染） */}
               {hasParams && paramSchema && (
-                <>
-                  <Form.Item label="策略参数">
-                    <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                      {currentStrategy.name} 的可调参数
-                    </Text>
-                    {Object.entries(paramSchema).map(([key, def]: [string, any]) => (
-                      <div key={key} style={{ marginBottom: 12 }}>
-                        <Text strong style={{ fontSize: 13 }}>{def.label || key}</Text>
-                        {def.description && (
-                          <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                            {def.description}
-                          </Text>
+                <Form.Item label="策略参数">
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                    {currentStrategy.name} 的可调参数
+                  </Text>
+                  {Object.entries(paramSchema).map(([key, def]: [string, any]) => (
+                    <div key={key} style={{ marginBottom: 12 }}>
+                      <Text strong style={{ fontSize: 13 }}>{def.label || key}</Text>
+                      {def.description && (
+                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                          {def.description}
+                        </Text>
+                      )}
+                      <div style={{ marginTop: 4 }}>
+                        {def.type === 'int' || def.type === 'float' ? (
+                          <InputNumber
+                            value={strategyParams[key] ?? def.default}
+                            onChange={(v) =>
+                              setStrategyParams((prev) => ({ ...prev, [key]: v ?? def.default }))
+                            }
+                            min={def.min}
+                            max={def.max}
+                            step={def.type === 'float' ? 0.1 : 1}
+                            style={{ width: '100%' }}
+                          />
+                        ) : (
+                          <Input
+                            value={strategyParams[key] ?? def.default}
+                            onChange={(e) =>
+                              setStrategyParams((prev) => ({ ...prev, [key]: e.target.value }))
+                            }
+                            placeholder={def.default}
+                          />
                         )}
-                        <div style={{ marginTop: 4 }}>
-                          {def.type === 'int' || def.type === 'float' ? (
-                            <InputNumber
-                              value={strategyParams[key] ?? def.default}
-                              onChange={(v) =>
-                                setStrategyParams((prev) => ({ ...prev, [key]: v ?? def.default }))
-                              }
-                              min={def.min}
-                              max={def.max}
-                              step={def.type === 'float' ? 0.1 : 1}
-                              style={{ width: '100%' }}
-                            />
-                          ) : (
-                            <Input
-                              value={strategyParams[key] ?? def.default}
-                              onChange={(e) =>
-                                setStrategyParams((prev) => ({ ...prev, [key]: e.target.value }))
-                              }
-                              placeholder={def.default}
-                            />
-                          )}
-                        </div>
                       </div>
-                    ))}
-                  </Form.Item>
-                </>
+                    </div>
+                  ))}
+                </Form.Item>
               )}
             </>
-          ) : (
+          )}
+
+          {backtestMode === 'rebalance' && (
+            <>
+              <Card size="small" style={{ marginBottom: 16, background: '#f6ffed' }}>
+                <Text strong>📊 每日调仓模式</Text>
+                <br />
+                <Text type="secondary">
+                  每日收盘后运行策略选股 → 次日开盘调仓 → 始终持有资金流入最强的 N 只股票
+                </Text>
+              </Card>
+
+              <Form.Item label="日期范围" required>
+                <DatePicker.RangePicker
+                  value={dateRange as any}
+                  onChange={(v) => setDateRange(v as [dayjs.Dayjs, dayjs.Dayjs])}
+                  style={{ width: '100%' }}
+                  placeholder={['起始日期', '结束日期']}
+                />
+              </Form.Item>
+
+              <Form.Item label="报告名称（可选）">
+                <Input
+                  placeholder="如：H1调仓回测"
+                  value={batchName}
+                  onChange={(e) => setBatchName(e.target.value)}
+                  allowClear
+                />
+              </Form.Item>
+
+              <Form.Item label="初始资金（元）" required>
+                <InputNumber
+                  value={initialCapital}
+                  onChange={(v) => setInitialCapital(v || 100000)}
+                  min={10000}
+                  step={10000}
+                  style={{ width: '100%' }}
+                  placeholder="如 100000"
+                />
+              </Form.Item>
+
+              <Form.Item label="排序方式">
+                <Radio.Group value={variant} onChange={(e) => setVariant(e.target.value)}>
+                  <Radio.Button value="flow">按资金流</Radio.Button>
+                  <Radio.Button value="value">按资金流/市值 (V1)</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+
+              {/* 策略参数（基于 params_schema 动态渲染） */}
+              {hasParams && paramSchema && (
+                <Form.Item label="策略参数">
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                    {currentStrategy.name} 的可调参数
+                  </Text>
+                  {Object.entries(paramSchema).map(([key, def]: [string, any]) => (
+                    <div key={key} style={{ marginBottom: 12 }}>
+                      <Text strong style={{ fontSize: 13 }}>{def.label || key}</Text>
+                      {def.description && (
+                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                          {def.description}
+                        </Text>
+                      )}
+                      <div style={{ marginTop: 4 }}>
+                        {def.type === 'int' || def.type === 'float' ? (
+                          <InputNumber
+                            value={strategyParams[key] ?? def.default}
+                            onChange={(v) =>
+                              setStrategyParams((prev) => ({ ...prev, [key]: v ?? def.default }))
+                            }
+                            min={def.min}
+                            max={def.max}
+                            step={def.type === 'float' ? 0.1 : 1}
+                            style={{ width: '100%' }}
+                          />
+                        ) : (
+                          <Input
+                            value={strategyParams[key] ?? def.default}
+                            onChange={(e) =>
+                              setStrategyParams((prev) => ({ ...prev, [key]: e.target.value }))
+                            }
+                            placeholder={def.default}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </Form.Item>
+              )}
+            </>
+          )}
+
+          {backtestMode === 'trade-sim' && (
             <>
               <Form.Item label="回测模式">
                 <Radio.Group value={tradeSimMode} onChange={(e) => setTradeSimMode(e.target.value)}>
