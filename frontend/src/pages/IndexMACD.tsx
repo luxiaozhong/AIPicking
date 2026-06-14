@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Card, Tabs, Radio, Slider, Row, Col, Tag, Spin, Collapse,
-  Breadcrumb, Typography, theme, Space,
+  Breadcrumb, Typography, theme, Space, message,
 } from 'antd';
 import {
   RiseOutlined, FallOutlined, MinusOutlined,
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import IndexMACDChart from '@/components/charts/IndexMACDChart';
+import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import { stockService } from '@/services/stockService';
 import type { KLineItem } from '@/types/stock';
 import { calcMACD, calcRSI, detectCrosses, detectDivergences } from '@/utils/indicators';
@@ -118,16 +119,31 @@ export default function IndexMACD() {
   // MACD 参数
   const [macdParams, setMacdParams] = useState(DEFAULT_MACD);
 
+  // 自定义个股
+  const [customStocks, setCustomStocks] = useState<{ tsCode: string; name: string }[]>([]);
+  const [searchValue, setSearchValue] = useState('');
+
   // ── 加载数据 ──
+  // 用 ref 追踪自定义股票，避免 customStocks 变化触发全量重载
+  const customRef = useRef(customStocks);
+  useEffect(() => {
+    customRef.current = customStocks;
+  }, [customStocks]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
+    const allCodes = [
+      ...INDICES.map((idx) => idx.tsCode),
+      ...customRef.current.map((s) => s.tsCode),
+    ];
+
     Promise.all(
-      INDICES.map((idx) =>
-        stockService.getKLine(idx.tsCode, Math.max(days + 60, 180)).catch(() => ({
-          ts_code: idx.tsCode,
-          name: idx.name,
+      allCodes.map((code) =>
+        stockService.getKLine(code, Math.max(days + 60, 180)).catch(() => ({
+          ts_code: code,
+          name: code,
           items: [] as KLineItem[],
         }))
       )
@@ -150,9 +166,63 @@ export default function IndexMACD() {
     };
   }, [days]);
 
+  // ── 个股选择 ──
+  const handleStockSelect = useCallback(
+    async (tsCode: string) => {
+      // 始终更新输入框的值（支持用户自由输入搜索关键词）
+      setSearchValue(tsCode);
+
+      // 只处理符合股票代码格式的选择（过滤掉用户输入的搜索关键词）
+      if (!/^\d{6}\.(SH|SZ|BJ)$/.test(tsCode)) return;
+
+      // 如果已是指数，直接切换 tab
+      if (INDICES.some((i) => i.tsCode === tsCode)) {
+        setActiveTab(tsCode);
+        return;
+      }
+
+      // 如果已在自定义股票中，直接切换 tab
+      if (customStocks.some((s) => s.tsCode === tsCode)) {
+        setActiveTab(tsCode);
+        return;
+      }
+
+      // 已加载过数据（例如通过其他方式），直接加入列表
+      if (klineData[tsCode]) {
+        // 从已加载数据推断名称
+        setCustomStocks((prev) => [...prev, { tsCode, name: tsCode }]);
+        setActiveTab(tsCode);
+        return;
+      }
+
+      // 加载 K 线数据
+      setLoading(true);
+      try {
+        const result = await stockService.getKLine(tsCode, Math.max(days + 60, 180));
+        if (result.items.length === 0) {
+          message.warning('该股票暂无数据');
+          setLoading(false);
+          return;
+        }
+        setKlineData((prev) => ({ ...prev, [tsCode]: result.items.slice(-days) }));
+        setCustomStocks((prev) => [...prev, { tsCode, name: result.name || tsCode }]);
+        setActiveTab(tsCode);
+      } catch {
+        message.error('获取股票数据失败');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [days, customStocks, klineData],
+  );
+
   // ── 当前 Tab 数据 ──
   const currentData = klineData[activeTab] || [];
-  const currentIndex = INDICES.find((i) => i.tsCode === activeTab)!;
+  const currentIndex = INDICES.find((i) => i.tsCode === activeTab);
+  const currentStockName =
+    currentIndex?.name ||
+    customStocks.find((s) => s.tsCode === activeTab)?.name ||
+    activeTab;
 
   const latest = currentData.length > 0 ? currentData[currentData.length - 1] : null;
   const prev = currentData.length > 1 ? currentData[currentData.length - 2] : null;
@@ -244,18 +314,41 @@ export default function IndexMACD() {
   // ── 渲染 ──
   return (
     <div>
+      {/* ── 个股搜索 ── */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Text strong style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
+            个股分析：
+          </Text>
+          <StockSearchLookup
+            value={searchValue}
+            onChange={handleStockSelect}
+            placeholder="输入股票代码或名称，选中后查看 MACD 分析"
+            style={{ flex: 1, maxWidth: 480 }}
+          />
+          {customStocks.length > 0 && (
+            <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+              已选 {customStocks.length} 只个股
+            </Text>
+          )}
+        </div>
+      </Card>
+
       {/* 面包屑 */}
       <Breadcrumb
         style={{ marginBottom: 16 }}
         items={[
           { title: <a onClick={() => navigate('/dashboard')}>仪表盘</a> },
-          { title: '指数MACD' },
+          { title: 'MACD 分析' },
         ]}
       />
 
       <Title level={4} style={{ marginBottom: 16 }}>
         <ThunderboltOutlined style={{ marginRight: 8, color: token.colorPrimary }} />
-        指数 MACD 分析
+        MACD 分析
+        {currentStockName && activeTab !== currentIndex?.tsCode && (
+          <Tag style={{ marginLeft: 8, fontSize: 12 }} color="blue">{currentStockName}</Tag>
+        )}
       </Title>
 
       {/* ── 汇总卡片 ── */}
@@ -337,11 +430,22 @@ export default function IndexMACD() {
             gap: 12,
           }}
         >
-          {/* 指数 Tabs */}
+          {/* 指数/个股 Tabs */}
           <Tabs
             activeKey={activeTab}
             onChange={setActiveTab}
-            items={INDICES.map((idx) => ({ key: idx.tsCode, label: idx.name }))}
+            items={[
+              ...INDICES.map((idx) => ({ key: idx.tsCode, label: idx.name })),
+              ...customStocks.map((s) => ({
+                key: s.tsCode,
+                label: (
+                  <span>
+                    {s.name}
+                    <Tag style={{ marginLeft: 4, fontSize: 10, lineHeight: '14px' }}>个股</Tag>
+                  </span>
+                ),
+              })),
+            ]}
             style={{ marginBottom: 0 }}
             size="small"
           />
