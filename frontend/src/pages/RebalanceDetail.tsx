@@ -271,7 +271,6 @@ export default function RebalanceDetail() {
             <Col span={6}><Text type="secondary">指数：</Text>{report.config.index_code}</Col>
             <Col span={6}><Text type="secondary">推荐数 N：</Text>{report.config.N}</Col>
             <Col span={6}><Text type="secondary">回顾天数 M：</Text>{report.config.M}</Col>
-            <Col span={6}><Text type="secondary">排序方式：</Text>{report.config.variant === 'value' ? '资金流/市值 (V1)' : '资金流'}</Col>
           </Row>
         </Card>
       )}

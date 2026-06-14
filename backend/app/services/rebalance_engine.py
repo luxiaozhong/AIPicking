@@ -18,7 +18,6 @@
 """
 
 import json
-from collections import defaultdict
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
 
@@ -87,7 +86,6 @@ class RebalanceEngine:
         N = int(self.config.get("N", 5))
         M = int(self.config.get("M", 20))
         initial_capital = float(self.config.get("initial_capital", 100000))
-        variant = self.config.get("variant", "flow")  # "flow" | "value"
 
         # 1. 加载全时段数据
         loaded = self._backtest_engine._load_data_range(start_date, end_date)
@@ -246,33 +244,24 @@ class RebalanceEngine:
             })
 
             # ── 盘后：运行策略，制定次日计划 ──
-            if variant == "value":
-                # V1: 按资金流流入/总市值排序
-                index_code = str(self.config.get("index_code", "980080"))
-                picks = self._get_picks_by_value(
-                    today, stocks_data, daily_data, fund_flow_data,
-                    index_constituents_data, N, M, index_code,
-                )
-            else:
-                # 默认: 调用策略函数
-                flow_sliced = [
-                    r for r in fund_flow_data
-                    if r.get("trade_date") and r["trade_date"] <= today
-                ]
+            flow_sliced = [
+                r for r in fund_flow_data
+                if r.get("trade_date") and r["trade_date"] <= today
+            ]
 
-                strategy_input = {
-                    "cutoff_date": today_dt.strftime("%Y%m%d"),
-                    "stocks": stocks_data,
-                    "daily": daily_data,
-                    "fund_flow": flow_sliced,
-                    "index_constituents": index_constituents_data,
-                    "config": self.config,
-                }
+            strategy_input = {
+                "cutoff_date": today_dt.strftime("%Y%m%d"),
+                "stocks": stocks_data,
+                "daily": daily_data,
+                "fund_flow": flow_sliced,
+                "index_constituents": index_constituents_data,
+                "config": self.config,
+            }
 
-                try:
-                    picks = self._backtest_engine.strategy_func(strategy_input)
-                except Exception:
-                    picks = []
+            try:
+                picks = self._backtest_engine.strategy_func(strategy_input)
+            except Exception:
+                picks = []
 
             if not picks or not isinstance(picks, list):
                 picks = []
@@ -360,89 +349,6 @@ class RebalanceEngine:
             "trades": all_trades,
             "summary": summary,
         }
-
-    @staticmethod
-    def _get_picks_by_value(
-        today: str,
-        stocks_data: list,
-        daily_data: dict,
-        fund_flow_data: list,
-        index_constituents_data: list,
-        N: int,
-        M: int,
-        index_code: str = "980080",
-    ) -> list:
-        """V1 选股：按 M 日资金流净流入 / 总市值 排序，取 top N"""
-
-        # 1. 成分股
-        target_raw_codes = set(
-            c["ts_code"] for c in index_constituents_data
-            if c.get("index_code") == index_code
-        )
-        if not target_raw_codes:
-            return []
-
-        # 2. raw_code → ts_code 映射
-        raw_to_tscode = {}
-        ts_code_to_name = {}
-        for s in stocks_data:
-            ts_code = s.get("ts_code", "")
-            raw_code = ts_code.split(".")[0] if "." in ts_code else ts_code
-            if raw_code in target_raw_codes:
-                raw_to_tscode[raw_code] = ts_code
-                ts_code_to_name[ts_code] = s.get("name", "")
-
-        # 3. M 日资金流聚合
-        trade_dates = sorted(set(
-            r["trade_date"] for r in fund_flow_data if r.get("trade_date")
-        ), reverse=True)
-        valid_dates = [d for d in trade_dates if d <= today][:M]
-
-        if not valid_dates:
-            return []
-
-        flow_by_tscode = defaultdict(float)
-        for row in fund_flow_data:
-            if row["trade_date"] in valid_dates:
-                ts_code = row["ts_code"]
-                flow_by_tscode[ts_code] += row.get("main_net_flow") or 0.0
-                flow_by_tscode[ts_code] += row.get("jumbo_net_flow") or 0.0
-                flow_by_tscode[ts_code] += row.get("block_net_flow") or 0.0
-
-        # 4. 获取当日市值（从 daily_valuation 合并而来，单位：亿元）
-        market_cap_by_tscode = {}
-        for ts_code, rows in daily_data.items():
-            for r in rows:
-                if r["trade_date"] == today:
-                    mc = r.get("market_cap")
-                    if mc and mc > 0:
-                        market_cap_by_tscode[ts_code] = mc  # 亿元
-                    break
-
-        # 5. 计算 flow / market_cap 得分
-        # total_flow: 元, mc: 亿元 → 统一为亿元后计算百分比
-        recommendations = []
-        for raw_code in target_raw_codes:
-            ts_code = raw_to_tscode.get(raw_code)
-            if not ts_code:
-                continue
-            total_flow = flow_by_tscode.get(ts_code, 0.0)
-            mc = market_cap_by_tscode.get(ts_code, 0)
-            if mc <= 0:
-                continue
-            flow_yi = total_flow / 1e8  # 元 → 亿元
-            score = flow_yi / mc * 100  # 资金流占市值百分比
-
-            direction = "流入" if total_flow > 0 else "流出"
-            recommendations.append({
-                "ts_code": ts_code,
-                "name": ts_code_to_name.get(ts_code, raw_code),
-                "score": round(score, 4),
-                "signal": f"{valid_dates[-1]}~{valid_dates[0]} 主力净{direction}: {abs(flow_yi):.2f}亿 / 市值比: {score:.4f}%",
-            })
-
-        recommendations.sort(key=lambda x: x["score"], reverse=True)
-        return recommendations[:N]
 
     def _calculate_summary(
         self,

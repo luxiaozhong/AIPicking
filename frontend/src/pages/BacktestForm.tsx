@@ -49,7 +49,6 @@ export default function BacktestForm() {
 
   // 调仓回测字段
   const [initialCapital, setInitialCapital] = useState<number>(100000);
-  const [variant, setVariant] = useState<'flow' | 'value'>('flow');
 
   // 交易模拟字段
   const [totalAmount, setTotalAmount] = useState<number>(100000);
@@ -147,7 +146,7 @@ export default function BacktestForm() {
           end_date: dateRange[1].format('YYYYMMDD'),
           name: batchName.trim() || undefined,
           initial_capital: initialCapital,
-          config: { ...(hasParams ? strategyParams : {}), variant },
+          config: { ...(hasParams ? strategyParams : {}) },
         };
         const result = await rebalanceService.create(payload);
         message.success('调仓回测已提交');
@@ -489,13 +488,6 @@ export default function BacktestForm() {
                   style={{ width: '100%' }}
                   placeholder="如 100000"
                 />
-              </Form.Item>
-
-              <Form.Item label="排序方式">
-                <Radio.Group value={variant} onChange={(e) => setVariant(e.target.value)}>
-                  <Radio.Button value="flow">按资金流</Radio.Button>
-                  <Radio.Button value="value">按资金流/市值 (V1)</Radio.Button>
-                </Radio.Group>
               </Form.Item>
 
               {/* 策略参数（基于 params_schema 动态渲染） */}

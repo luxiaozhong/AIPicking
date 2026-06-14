@@ -87,6 +87,18 @@ BUILTIN_STRATEGIES = [
         "file_path": "app/strategies/examples/laoyatou.py",
         "tags": "老鸭头,形态,均线,MACD,量能,技术面",
     },
+    {
+        "name": "grow_with_money",
+        "description": "成长100 + 资金流选股：以国证成长100成分股为股票池，按过去M日主力资金净流入排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money.py",
+        "tags": "指数成分股,资金流,成长100,主力净流入",
+    },
+    {
+        "name": "grow_with_money_v1",
+        "description": "成长100 + 资金流/市值选股：以国证成长100成分股为股票池，按过去M日主力资金净流入/总市值比率排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money_v1.py",
+        "tags": "指数成分股,资金流,成长100,资金效率,市值比率",
+    },
 ]
 
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-注册 grow_with_money 策略到数据库
+注册 grow_with_money_v1 策略到数据库
 
 Usage:
     cd backend
-    venv/bin/python scripts/seed_grow_with_money.py
-    venv/bin/python scripts/seed_grow_with_money.py --pg-url postgresql://...
+    venv/bin/python scripts/seed_grow_with_money_v1.py
+    venv/bin/python scripts/seed_grow_with_money_v1.py --pg-url postgresql://...
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import sys
 import psycopg2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("seed_grow_with_money")
+log = logging.getLogger("seed_grow_with_money_v1")
 
 PARAMS_SCHEMA = json.dumps(
     {
@@ -31,15 +31,15 @@ PARAMS_SCHEMA = json.dumps(
         },
         "N": {
             "type": "int",
-            "default": 5,
+            "default": 3,
             "label": "推荐数量 N",
-            "description": "选取资金流前 N 名",
+            "description": "选取资金流/市值比率前 N 名",
             "min": 1,
             "max": 20,
         },
         "M": {
             "type": "int",
-            "default": 20,
+            "default": 5,
             "label": "回顾天数 M",
             "description": "过去 M 个交易日的资金流累计",
             "min": 3,
@@ -50,11 +50,11 @@ PARAMS_SCHEMA = json.dumps(
 )
 
 STRATEGY_DATA = {
-    "name": "grow_with_money",
-    "description": "成长100 + 资金流选股：以国证成长100成分股为股票池，按过去M日主力资金净流入排序，推荐前N只",
-    "file_path": "app/strategies/examples/grow_with_money.py",
+    "name": "grow_with_money_v1",
+    "description": "成长100 + 资金流/市值选股：以国证成长100成分股为股票池，按过去M日主力资金净流入/总市值比率排序，推荐前N只",
+    "file_path": "app/strategies/examples/grow_with_money_v1.py",
     "params_schema": PARAMS_SCHEMA,
-    "tags": "指数成分股,资金流,成长100,主力净流入",
+    "tags": "指数成分股,资金流,成长100,资金效率,市值比率",
     "user_id": 1,  # admin
     "is_published": True,
 }
@@ -76,7 +76,7 @@ def get_pg_url(pg_url: str | None = None) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="注册 grow_with_money 策略")
+    parser = argparse.ArgumentParser(description="注册 grow_with_money_v1 策略")
     parser.add_argument("--pg-url", default=None, help="PostgreSQL 连接 URL")
     parser.add_argument("--dry-run", action="store_true", help="只打印不写入")
     parser.add_argument("--update", action="store_true", help="更新已有记录（默认跳过）")
