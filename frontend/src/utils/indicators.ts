@@ -230,6 +230,12 @@ export function detectMACrosses(dates: string[], closes: number[], fastPeriod: n
   return detectCrosses(dates, fastLine, slowLine);
 }
 
+/** 单步 EMA 递推：给定上期 EMA 和新值，计算最新 EMA */
+export function extendEMA(lastEMA: number, newValue: number, period: number): number {
+  const k = 2 / (period + 1);
+  return newValue * k + lastEMA * (1 - k);
+}
+
 /** 计算 WR（威廉指标）*/
 export function calcWR(highs: number[], lows: number[], closes: number[], period: number = 10): (number | null)[] {
   const n = closes.length;
