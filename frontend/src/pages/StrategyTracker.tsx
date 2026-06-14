@@ -367,7 +367,7 @@ export default function StrategyTracker() {
         </Row>
         {dateOffsetMsg && (
           <Alert
-            message={dateOffsetMsg}
+            title={dateOffsetMsg}
             type="info"
             showIcon
             style={{ marginTop: 8, padding: '4px 12px' }}
@@ -375,7 +375,7 @@ export default function StrategyTracker() {
         )}
       </Card>
 
-      <Spin spinning={loading || trendsLoading} tip="加载中...">
+      <Spin spinning={loading || trendsLoading} description="加载中...">
         {/* Row 1: Top 10 资金流 mini charts */}
         <Card
           title={`策略 Top 10 — 近 20 日 5 日滚动主力净流入 (${tradeDate})`}
@@ -495,8 +495,7 @@ export default function StrategyTracker() {
                       size="small"
                       column={1}
                       style={{ marginBottom: 8 }}
-                      labelStyle={{ fontSize: 11 }}
-                      contentStyle={{ fontSize: 12 }}
+                      styles={{ label: { fontSize: 11 }, content: { fontSize: 12 } }}
                       title={<Text strong style={{ fontSize: 12 }}>{rec.name}</Text>}
                     >
                       <Descriptions.Item label="今日主力净流入">
