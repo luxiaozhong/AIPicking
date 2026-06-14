@@ -18,20 +18,25 @@
 """
 
 import json
+from collections import defaultdict
 from typing import Dict, List, Any, Optional, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import create_engine, update as sql_update
+from sqlalchemy import create_engine, select, update as sql_update
 from sqlalchemy.orm import sessionmaker
 from ..config import settings
 from ..models.rebalance import RebalanceReport
 from ..models.strategy import Strategy
+from ..models.stock_tables import Daily
 from ..models.base import beijing_now
 
 # ── 费率常量 ──────────────────────────────────────────────
 BUY_COMMISSION_RATE = 0.00015   # 万 1.5 买入手续费
 SELL_COMMISSION_RATE = 0.00015  # 万 1.5 卖出手续费
 STAMP_DUTY_RATE = 0.003         # 千 3 印花税（仅卖出）
+
+# ── 分块加载常量 ──────────────────────────────────────────
+CHUNK_SIZE = 20  # 每批加载的交易日数量
 
 _sync_engine = create_engine(settings.SYNC_DATABASE_URL)
 SyncSession = sessionmaker(bind=_sync_engine)
@@ -54,6 +59,17 @@ def _sell_cost(gross_amount: float) -> tuple:
     commission = gross_amount * SELL_COMMISSION_RATE
     stamp_duty = gross_amount * STAMP_DUTY_RATE
     return commission, stamp_duty, gross_amount - commission - stamp_duty
+
+
+def _get_trading_days(session, start_fmt: str, end_fmt: str) -> List[str]:
+    """获取指定日期范围内的交易日列表（从 daily 表 DISTINCT trade_date）"""
+    stmt = (
+        select(Daily.trade_date)
+        .where(Daily.trade_date.between(start_fmt, end_fmt))
+        .distinct()
+        .order_by(Daily.trade_date)
+    )
+    return [r[0] for r in session.execute(stmt)]
 
 
 class RebalanceEngine:
@@ -82,67 +98,309 @@ class RebalanceEngine:
         end_date: str,
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
-        """主入口"""
+        """主入口（优化版：分块加载日线 + 资金流预索引 + 策略预计算注入）"""
         N = int(self.config.get("N", 5))
         M = int(self.config.get("M", 20))
         initial_capital = float(self.config.get("initial_capital", 100000))
 
-        # 1. 加载全时段数据
-        loaded = self._backtest_engine._load_data_range(start_date, end_date)
-        daily_data = loaded["daily"]
-        fund_flow_data = loaded.get("fund_flow", [])
-        index_constituents_data = loaded.get("index_constituents", [])
-        stocks_data = loaded["stocks"]
-
-        # 2. 获取交易日列表
         start_fmt = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:8]}"
         end_fmt = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:8]}"
-        all_trading_days = sorted(set(
-            row["trade_date"]
-            for rows in daily_data.values()
-            for row in rows
-            if start_fmt <= row["trade_date"] <= end_fmt
-        ))
+        start_dt = datetime.strptime(start_date, "%Y%m%d")
 
-        if len(all_trading_days) < 2:
-            raise ValueError(f"交易日不足（需要至少2天），实际: {len(all_trading_days)}天")
+        session = SyncSession()
+        try:
+            # ── 1. 加载轻量常驻数据 ──────────────────────────
+            stocks_data = self._backtest_engine._load_stocks(session)
 
-        # 3. 构建 raw_code → ts_code 映射
-        ts_code_to_name = {}
-        for s in stocks_data:
-            ts_code = s.get("ts_code", "")
-            ts_code_to_name[ts_code] = s.get("name", "")
+            index_constituents_data = []
+            if self._backtest_engine._should_load("index_constituents"):
+                index_constituents_data = (
+                    self._backtest_engine._load_index_constituents(session)
+                )
 
-        # 4. 逐日迭代
-        holdings = {}       # ts_code → {shares, buy_price, buy_cost}
-        cash = initial_capital
-        pending_sells = []  # ts_code list
-        pending_buys = []   # [{ts_code, name}] list
-        all_trades = []     # 所有交易记录
-        daily_snapshots = []  # 每日快照
-        total_fees_paid = 0.0  # 累计手续费 + 印花税
+            # ── 2. 加载资金流 + 按日期索引 ────────────────────
+            fund_flow_start = (start_dt - timedelta(days=120)).strftime("%Y-%m-%d")
+            fund_flow_data = []
+            if self._backtest_engine._should_load("fund_flow"):
+                fund_flow_data = self._backtest_engine._load_fund_flow(
+                    session, fund_flow_start, end_fmt
+                )
 
-        for day_idx, today in enumerate(all_trading_days):
-            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            flow_by_date = defaultdict(list)
+            for r in fund_flow_data:
+                flow_by_date[r["trade_date"]].append(r)
+            # 释放 fund_flow_data 大列表，后续用 flow_by_date
+            del fund_flow_data
 
-            # ── 获取今日日线 ──
-            today_prices = {}
-            for ts_code, rows in daily_data.items():
-                for r in rows:
-                    if r["trade_date"] == today:
-                        today_prices[ts_code] = r
-                        break
+            # ── 3. 预计算 raw_code → ts_code 映射（一次性） ───
+            raw_to_tscode = {}
+            ts_code_to_name = {}
+            for s in stocks_data:
+                ts_code = s.get("ts_code", "")
+                ts_code_to_name[ts_code] = s.get("name", "")
+                raw_code = ts_code.split(".")[0] if "." in ts_code else ts_code
+                raw_to_tscode[raw_code] = ts_code
 
-            # ── 开盘：执行前一日制定的买卖计划 ──
-            # 先卖出（释放资金），再买入
-            for ts_code in pending_sells:
-                if ts_code not in holdings:
-                    continue
-                h = holdings[ts_code]
-                day_info = today_prices.get(ts_code, {})
-                sell_price = day_info.get("open")
-                if sell_price is None or sell_price <= 0:
-                    continue  # 停牌跳过
+            # ── 4. 获取交易日列表 ─────────────────────────────
+            all_trading_days = _get_trading_days(session, start_fmt, end_fmt)
+
+            if len(all_trading_days) < 2:
+                raise ValueError(
+                    f"交易日不足（需要至少2天），实际: {len(all_trading_days)}天"
+                )
+
+            # ── 5. 初始化交易状态 ─────────────────────────────
+            holdings = {}           # ts_code → {shares, buy_price, buy_cost}
+            cash = initial_capital
+            pending_sells = []      # ts_code list
+            pending_buys = []       # [{ts_code, name}] list
+            all_trades = []         # 所有交易记录
+            daily_snapshots = []    # 每日快照
+            total_fees_paid = 0.0   # 累计手续费 + 印花税
+
+            # 资金流 M 日滚动聚合状态
+            valid_dates_all = []                     # ≤today 的全部资金流日期
+            flow_aggregated_m = defaultdict(float)   # M 日窗口滚动聚合
+            last_day_prices = {}                     # 最后一天收盘价（清仓用）
+
+            # ── 6. 分块加载日线，逐日处理 ─────────────────────
+            for chunk_start in range(0, len(all_trading_days), CHUNK_SIZE):
+                chunk_end = min(chunk_start + CHUNK_SIZE, len(all_trading_days))
+                chunk_dates = all_trading_days[chunk_start:chunk_end]
+                is_last_chunk = (chunk_end == len(all_trading_days))
+
+                # 加载本 chunk 的日线数据
+                chunk_daily = self._backtest_engine._load_daily_for_dates(
+                    session, chunk_dates, stocks_data
+                )
+
+                # 构建 O(1) 索引: {date: {ts_code: row}}
+                daily_index = defaultdict(dict)
+                for ts_code, rows in chunk_daily.items():
+                    for r in rows:
+                        daily_index[r["trade_date"]][ts_code] = r
+
+                # 逐日处理本 chunk
+                for day_idx_offset, today in enumerate(chunk_dates):
+                    day_idx = chunk_start + day_idx_offset
+                    today_dt = datetime.strptime(today, "%Y-%m-%d")
+
+                    # ── O(1) 获取今日日线 ──
+                    today_prices = daily_index.get(today, {})
+
+                    # ── 开盘：执行前一日制定的买卖计划 ──
+                    for ts_code in pending_sells:
+                        if ts_code not in holdings:
+                            continue
+                        h = holdings[ts_code]
+                        day_info = today_prices.get(ts_code, {})
+                        sell_price = day_info.get("open")
+                        if sell_price is None or sell_price <= 0:
+                            continue
+                        gross_amount = h["shares"] * sell_price
+                        comm, duty, net_proceeds = _sell_cost(gross_amount)
+                        total_fees_paid += comm + duty
+                        cash += net_proceeds
+
+                        pnl = net_proceeds - h["buy_cost"]
+                        pnl_pct = (
+                            (pnl / h["buy_cost"] * 100)
+                            if h["buy_cost"] > 0 else 0.0
+                        )
+
+                        all_trades.append({
+                            "date": today, "ts_code": ts_code,
+                            "name": ts_code_to_name.get(ts_code, ts_code),
+                            "action": "sell",
+                            "price": round(sell_price, 2),
+                            "shares": round(h["shares"], 0),
+                            "amount": round(gross_amount, 2),
+                            "commission": round(comm, 2),
+                            "stamp_duty": round(duty, 2),
+                            "net_proceeds": round(net_proceeds, 2),
+                            "buy_cost": round(h["buy_cost"], 2),
+                            "pnl": round(pnl, 2),
+                            "pnl_pct": round(pnl_pct, 2),
+                            "reason": "调仓移除",
+                        })
+                        del holdings[ts_code]
+
+                    # 再买入
+                    if pending_buys:
+                        n_buy = len(pending_buys)
+                        per_stock_budget = cash / n_buy
+
+                        for buy_info in pending_buys:
+                            ts_code = buy_info["ts_code"]
+                            day_info = today_prices.get(ts_code, {})
+                            buy_price = day_info.get("open")
+                            if buy_price is None or buy_price <= 0:
+                                continue
+                            shares = int(
+                                per_stock_budget
+                                / (buy_price * (1 + BUY_COMMISSION_RATE))
+                                / 100
+                            ) * 100
+                            if shares <= 0:
+                                continue
+                            gross_amount = shares * buy_price
+                            comm = _buy_commission(gross_amount)
+                            total_cost = gross_amount + comm
+                            total_fees_paid += comm
+
+                            cash -= total_cost
+                            holdings[ts_code] = {
+                                "shares": shares,
+                                "buy_price": buy_price,
+                                "buy_cost": total_cost,
+                            }
+                            all_trades.append({
+                                "date": today, "ts_code": ts_code,
+                                "name": ts_code_to_name.get(ts_code, ts_code),
+                                "action": "buy",
+                                "price": round(buy_price, 2),
+                                "shares": shares,
+                                "amount": round(gross_amount, 2),
+                                "commission": round(comm, 2),
+                                "total_cost": round(total_cost, 2),
+                                "reason": (
+                                    "初始建仓" if day_idx == 1 else "调仓新增"
+                                ),
+                            })
+
+                    # ── 收盘：记录持仓快照 ──
+                    holdings_value = 0.0
+                    holdings_detail = []
+                    for ts_code, h in holdings.items():
+                        day_info = today_prices.get(ts_code, {})
+                        close_price = _get_price(day_info, "close")
+                        if close_price is None:
+                            close_price = h["buy_price"]
+                        mv = h["shares"] * close_price
+                        holdings_value += mv
+                        holdings_detail.append({
+                            "ts_code": ts_code,
+                            "name": ts_code_to_name.get(ts_code, ts_code),
+                            "shares": h["shares"],
+                            "buy_price": round(h["buy_price"], 2),
+                            "buy_cost": round(h["buy_cost"], 2),
+                            "close_price": round(close_price, 2),
+                            "market_value": round(mv, 2),
+                            "unrealized_pnl": round(mv - h["buy_cost"], 2),
+                            "unrealized_pnl_pct": (
+                                round((mv - h["buy_cost"]) / h["buy_cost"] * 100, 2)
+                                if h["buy_cost"] > 0 else 0.0
+                            ),
+                        })
+
+                    total_value = cash + holdings_value
+                    prev_total = (
+                        daily_snapshots[-1]["total_value"] if daily_snapshots
+                        else initial_capital
+                    )
+                    daily_return = (
+                        (total_value - prev_total) / prev_total
+                        if prev_total > 0 else 0.0
+                    )
+
+                    daily_snapshots.append({
+                        "date": today,
+                        "holdings": holdings_detail,
+                        "cash": round(cash, 2),
+                        "total_value": round(total_value, 2),
+                        "daily_return_pct": round(daily_return * 100, 4),
+                        "action": (
+                            "rebalance" if (pending_sells or pending_buys) else "hold"
+                        ),
+                    })
+
+                    # ── 盘后：运行策略 ──
+                    # M 日滚动资金流聚合（O(1) 摊销，仅处理当日新增 + 窗口外移除）
+                    if today in flow_by_date:
+                        valid_dates_all.append(today)
+                        for r in flow_by_date[today]:
+                            flow_aggregated_m[r["ts_code"]] += (
+                                r.get("main_net_flow") or 0.0
+                            )
+
+                    # 移除 M 日窗口外的日期
+                    if len(valid_dates_all) > M:
+                        dropped_date = valid_dates_all[-(M + 1)]
+                        for r in flow_by_date.get(dropped_date, []):
+                            flow_aggregated_m[r["ts_code"]] -= (
+                                r.get("main_net_flow") or 0.0
+                            )
+
+                    strategy_input = {
+                        "cutoff_date": today_dt.strftime("%Y%m%d"),
+                        "stocks": stocks_data,
+                        "daily": chunk_daily,  # 当前 chunk 的日线
+                        "fund_flow": (
+                            flow_by_date.get(today, [])
+                        ),  # 向后兼容（大部分策略不需要全量）
+                        "index_constituents": index_constituents_data,
+                        "config": self.config,
+                        # 预计算注入（策略可选使用）
+                        "_raw_to_tscode": raw_to_tscode,
+                        "_ts_code_to_name": ts_code_to_name,
+                        "_flow_aggregated_m": dict(flow_aggregated_m),
+                        "_valid_dates": (
+                            valid_dates_all[-M:]
+                            if len(valid_dates_all) >= M
+                            else list(valid_dates_all)
+                        ),
+                    }
+
+                    try:
+                        picks = self._backtest_engine.strategy_func(strategy_input)
+                    except Exception:
+                        picks = []
+
+                    if not picks or not isinstance(picks, list):
+                        picks = []
+
+                    new_codes = set()
+                    for p in picks:
+                        tc = p.get("ts_code", "")
+                        if tc:
+                            new_codes.add(tc)
+
+                    current_codes = set(holdings.keys())
+
+                    if day_idx == 0:
+                        pending_sells = []
+                        pending_buys = [
+                            {"ts_code": tc, "name": ts_code_to_name.get(tc, tc)}
+                            for tc in list(new_codes)[:N]
+                        ]
+                    elif current_codes == new_codes:
+                        pending_sells = []
+                        pending_buys = []
+                    else:
+                        to_sell = current_codes - new_codes
+                        to_buy = new_codes - current_codes
+                        pending_sells = list(to_sell)
+                        pending_buys = [
+                            {"ts_code": tc, "name": ts_code_to_name.get(tc, tc)}
+                            for tc in to_buy
+                        ]
+
+                    if progress_callback:
+                        progress_callback(day_idx + 1, len(all_trading_days))
+
+                    # 最后一天：缓存收盘价供清仓使用
+                    if is_last_chunk and day_idx_offset == len(chunk_dates) - 1:
+                        last_day_prices = today_prices
+
+                # 释放本 chunk 的内存
+                del chunk_daily, daily_index
+
+            # ── 7. 最后一天：清仓 ──
+            for ts_code, h in list(holdings.items()):
+                lp = last_day_prices.get(ts_code, {})
+                sell_price = _get_price(lp, "close")
+                if sell_price is None:
+                    sell_price = h["buy_price"]
                 gross_amount = h["shares"] * sell_price
                 comm, duty, net_proceeds = _sell_cost(gross_amount)
                 total_fees_paid += comm + duty
@@ -152,7 +410,7 @@ class RebalanceEngine:
                 pnl_pct = (pnl / h["buy_cost"] * 100) if h["buy_cost"] > 0 else 0.0
 
                 all_trades.append({
-                    "date": today,
+                    "date": all_trading_days[-1],
                     "ts_code": ts_code,
                     "name": ts_code_to_name.get(ts_code, ts_code),
                     "action": "sell",
@@ -165,180 +423,14 @@ class RebalanceEngine:
                     "buy_cost": round(h["buy_cost"], 2),
                     "pnl": round(pnl, 2),
                     "pnl_pct": round(pnl_pct, 2),
-                    "reason": "调仓移除",
+                    "reason": "回测结束清仓",
                 })
-                del holdings[ts_code]
+            holdings.clear()
 
-            # 再买入（尽量平均分配，全仓）
-            if pending_buys:
-                n_buy = len(pending_buys)
-                per_stock_budget = cash / n_buy  # 含手续费预算
+        finally:
+            session.close()
 
-                for buy_info in pending_buys:
-                    ts_code = buy_info["ts_code"]
-                    day_info = today_prices.get(ts_code, {})
-                    buy_price = day_info.get("open")
-                    if buy_price is None or buy_price <= 0:
-                        continue
-                    # 尽量用完预算：整手买入
-                    shares = int(per_stock_budget / (buy_price * (1 + BUY_COMMISSION_RATE)) / 100) * 100
-                    if shares <= 0:
-                        continue
-                    gross_amount = shares * buy_price
-                    comm = _buy_commission(gross_amount)
-                    total_cost = gross_amount + comm
-                    total_fees_paid += comm
-
-                    cash -= total_cost
-                    holdings[ts_code] = {
-                        "shares": shares,
-                        "buy_price": buy_price,
-                        "buy_cost": total_cost,  # 含手续费的买入总成本
-                    }
-                    all_trades.append({
-                        "date": today,
-                        "ts_code": ts_code,
-                        "name": ts_code_to_name.get(ts_code, ts_code),
-                        "action": "buy",
-                        "price": round(buy_price, 2),
-                        "shares": shares,
-                        "amount": round(gross_amount, 2),
-                        "commission": round(comm, 2),
-                        "total_cost": round(total_cost, 2),
-                        "reason": "初始建仓" if day_idx == 1 else "调仓新增",
-                    })
-
-            # ── 收盘：记录持仓快照 ──
-            holdings_value = 0.0
-            holdings_detail = []
-            for ts_code, h in holdings.items():
-                day_info = today_prices.get(ts_code, {})
-                close_price = _get_price(day_info, "close")
-                if close_price is None:
-                    close_price = h["buy_price"]
-                mv = h["shares"] * close_price
-                holdings_value += mv
-                holdings_detail.append({
-                    "ts_code": ts_code,
-                    "name": ts_code_to_name.get(ts_code, ts_code),
-                    "shares": h["shares"],
-                    "buy_price": round(h["buy_price"], 2),
-                    "buy_cost": round(h["buy_cost"], 2),
-                    "close_price": round(close_price, 2),
-                    "market_value": round(mv, 2),
-                    "unrealized_pnl": round(mv - h["buy_cost"], 2),
-                    "unrealized_pnl_pct": round((mv - h["buy_cost"]) / h["buy_cost"] * 100, 2) if h["buy_cost"] > 0 else 0.0,
-                })
-
-            total_value = cash + holdings_value
-            prev_total = daily_snapshots[-1]["total_value"] if daily_snapshots else initial_capital
-            daily_return = (total_value - prev_total) / prev_total if prev_total > 0 else 0.0
-
-            daily_snapshots.append({
-                "date": today,
-                "holdings": holdings_detail,
-                "cash": round(cash, 2),
-                "total_value": round(total_value, 2),
-                "daily_return_pct": round(daily_return * 100, 4),
-                "action": "rebalance" if (pending_sells or pending_buys) else "hold",
-            })
-
-            # ── 盘后：运行策略，制定次日计划 ──
-            flow_sliced = [
-                r for r in fund_flow_data
-                if r.get("trade_date") and r["trade_date"] <= today
-            ]
-
-            strategy_input = {
-                "cutoff_date": today_dt.strftime("%Y%m%d"),
-                "stocks": stocks_data,
-                "daily": daily_data,
-                "fund_flow": flow_sliced,
-                "index_constituents": index_constituents_data,
-                "config": self.config,
-            }
-
-            try:
-                picks = self._backtest_engine.strategy_func(strategy_input)
-            except Exception:
-                picks = []
-
-            if not picks or not isinstance(picks, list):
-                picks = []
-
-            new_codes = set()
-            for p in picks:
-                tc = p.get("ts_code", "")
-                if tc:
-                    new_codes.add(tc)
-
-            current_codes = set(holdings.keys())
-
-            if day_idx == 0:
-                # 第一个交易日：建仓（次日开盘买入）
-                pending_sells = []
-                pending_buys = [
-                    {"ts_code": tc, "name": ts_code_to_name.get(tc, tc)}
-                    for tc in list(new_codes)[:N]
-                ]
-            elif current_codes == new_codes:
-                # 持仓不变
-                pending_sells = []
-                pending_buys = []
-            else:
-                # 调仓
-                to_sell = current_codes - new_codes
-                to_buy = new_codes - current_codes
-                pending_sells = list(to_sell)
-                pending_buys = [
-                    {"ts_code": tc, "name": ts_code_to_name.get(tc, tc)}
-                    for tc in to_buy
-                ]
-
-            if progress_callback:
-                progress_callback(day_idx + 1, len(all_trading_days))
-
-        # ── 最后一天：清仓 ──
-        last_day = all_trading_days[-1]
-        last_prices = {}
-        for tc, rows in daily_data.items():
-            for r in rows:
-                if r["trade_date"] == last_day:
-                    last_prices[tc] = r
-                    break
-
-        for ts_code, h in list(holdings.items()):
-            lp = last_prices.get(ts_code, {})
-            sell_price = _get_price(lp, "close")
-            if sell_price is None:
-                sell_price = h["buy_price"]
-            gross_amount = h["shares"] * sell_price
-            comm, duty, net_proceeds = _sell_cost(gross_amount)
-            total_fees_paid += comm + duty
-            cash += net_proceeds
-
-            pnl = net_proceeds - h["buy_cost"]
-            pnl_pct = (pnl / h["buy_cost"] * 100) if h["buy_cost"] > 0 else 0.0
-
-            all_trades.append({
-                "date": last_day,
-                "ts_code": ts_code,
-                "name": ts_code_to_name.get(ts_code, ts_code),
-                "action": "sell",
-                "price": round(sell_price, 2),
-                "shares": round(h["shares"], 0),
-                "amount": round(gross_amount, 2),
-                "commission": round(comm, 2),
-                "stamp_duty": round(duty, 2),
-                "net_proceeds": round(net_proceeds, 2),
-                "buy_cost": round(h["buy_cost"], 2),
-                "pnl": round(pnl, 2),
-                "pnl_pct": round(pnl_pct, 2),
-                "reason": "回测结束清仓",
-            })
-        holdings.clear()
-
-        # 5. 计算汇总统计
+        # ── 8. 计算汇总统计 ─────────────────────────────────
         summary = self._calculate_summary(
             daily_snapshots, all_trades, initial_capital,
             len(all_trading_days), total_fees_paid,

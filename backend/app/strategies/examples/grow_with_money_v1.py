@@ -61,34 +61,48 @@ def run(data):
     if not target_raw_codes:
         return []
 
-    # ── 2. 构建 raw_code → ts_code 映射（stocks 表） ───────────
-    raw_to_tscode = {}
-    ts_code_to_name = {}
-    for s in data.get("stocks", []):
-        ts_code = s.get("ts_code", "")
-        raw_code = ts_code.split(".")[0] if "." in ts_code else ts_code
-        if raw_code in target_raw_codes:
-            raw_to_tscode[raw_code] = ts_code
-            ts_code_to_name[ts_code] = s.get("name", "")
+    # ── 2. 构建 raw_code → ts_code 映射（优先使用引擎预计算） ──
+    precomputed_raw_map = data.get("_raw_to_tscode")
+    ts_code_to_name = data.get("_ts_code_to_name", {})
+    if precomputed_raw_map:
+        raw_to_tscode = precomputed_raw_map
+    else:
+        raw_to_tscode = {}
+        for s in data.get("stocks", []):
+            ts_code = s.get("ts_code", "")
+            raw_code = ts_code.split(".")[0] if "." in ts_code else ts_code
+            if raw_code in target_raw_codes:
+                raw_to_tscode[raw_code] = ts_code
+                ts_code_to_name[ts_code] = s.get("name", "")
 
-    # ── 3. 按 M 日窗口聚合资金流 ──────────────────────────────
-    fund_flows = data.get("fund_flow", [])
+    # ── 3. 按 M 日窗口聚合资金流（优先使用引擎预聚合） ──────────
+    precomputed_flow = data.get("_flow_aggregated_m")
+    precomputed_dates = data.get("_valid_dates")
 
-    trade_dates = sorted(set(
-        r["trade_date"] for r in fund_flows
-        if r.get("trade_date")
-    ), reverse=True)
-    cutoff_fmt = _to_date_fmt(cutoff_date)
-    valid_dates = [d for d in trade_dates if d <= cutoff_fmt][:M]
+    if precomputed_flow is not None and precomputed_dates is not None:
+        flow_by_tscode = defaultdict(float, precomputed_flow)
+        valid_dates = precomputed_dates  # 引擎提供升序排列
+    else:
+        fund_flows = data.get("fund_flow", [])
+        # 升序排列（与引擎注入的 _valid_dates 顺序一致）
+        trade_dates = sorted(set(
+            r["trade_date"] for r in fund_flows
+            if r.get("trade_date")
+        ))
+        cutoff_fmt = _to_date_fmt(cutoff_date)
+        valid_dates = [d for d in trade_dates if d <= cutoff_fmt][-M:]
+
+        flow_by_tscode = defaultdict(float)
+        if valid_dates:
+            date_set = set(valid_dates)
+            for row in fund_flows:
+                if row["trade_date"] in date_set:
+                    flow_by_tscode[row["ts_code"]] += (
+                        row.get("main_net_flow") or 0.0
+                    )
 
     if not valid_dates:
         return []
-
-    flow_by_tscode = defaultdict(float)
-    for row in fund_flows:
-        if row["trade_date"] in valid_dates:
-            ts_code = row["ts_code"]
-            flow_by_tscode[ts_code] += row.get("main_net_flow") or 0.0
 
     # ── 4. 获取截止日的市值数据 ────────────────────────────────
     # market_cap 单位：亿元（由 DailyValuation 表合并）
@@ -139,12 +153,12 @@ def _to_date_fmt(cutoff_date: str) -> str:
 
 
 def _describe(dates: list, total_flow: float, mc: float, score: float) -> str:
-    """生成信号描述文本"""
+    """生成信号描述文本（dates 为升序排列）"""
     yi = total_flow / 1e8
     direction = "流入" if total_flow > 0 else "流出"
     m = len(dates)
     if m == 0:
         return f"{m}日主力净{direction}: {abs(yi):.2f}亿 / 市值: {mc:.0f}亿 比率: {score:.4f}%"
-    first = dates[-1]
-    last = dates[0]
+    first = dates[0]   # 最早的日期（升序第一项）
+    last = dates[-1]   # 最近的日期（升序末项）
     return f"{first}~{last} 主力净{direction}: {abs(yi):.2f}亿 / 市值: {mc:.0f}亿 比率: {score:.4f}%"

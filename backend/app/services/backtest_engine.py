@@ -120,6 +120,87 @@ class BacktestEngine:
         )
         return [dict(row._mapping) for row in session.execute(stmt)]
 
+    @staticmethod
+    def _load_stocks(session) -> List[Dict]:
+        """加载全量股票基础信息（独立方法，供 RebalanceEngine 复用）"""
+        stmt = select(
+            Stock.ts_code, Stock.symbol, Stock.name, Stock.market,
+            Stock.industry_l1, Stock.industry_l2, Stock.industry_l3,
+            Stock.concepts, Stock.total_shares, Stock.float_shares
+        ).where(Stock.ts_code.isnot(None), Stock.ts_code != "")
+        return [dict(row._mapping) for row in session.execute(stmt)]
+
+    @staticmethod
+    def _load_daily_for_dates(
+        session, dates: List[str], stocks_data: List[Dict] = None
+    ) -> Dict[str, List[Dict]]:
+        """按日期列表加载日线数据，返回 {ts_code: [rows]} 格式
+
+        dates: YYYY-MM-DD 格式的日期列表
+        stocks_data: 可选，用于市值 fallback 计算
+        """
+        if not dates:
+            return {}
+
+        dates_sorted = sorted(dates)
+        start_date = dates_sorted[0]
+        end_date = dates_sorted[-1]
+
+        daily_stmt = select(
+            Daily.ts_code, Daily.trade_date, Daily.open, Daily.high,
+            Daily.low, Daily.close, Daily.vol, Daily.amount,
+            Daily.adj_close,
+        ).where(
+            Daily.trade_date.between(start_date, end_date)
+        ).order_by(Daily.ts_code, Daily.trade_date)
+        daily_rows = [dict(row._mapping) for row in session.execute(daily_stmt)]
+
+        # 估值数据（市值从 daily_valuation 获取）
+        valuation_map = {}
+        val_stmt = select(
+            DailyValuation.ts_code, DailyValuation.trade_date,
+            DailyValuation.market_cap, DailyValuation.circ_market_cap,
+        ).where(
+            DailyValuation.trade_date.between(start_date, end_date)
+        )
+        for vr in session.execute(val_stmt).mappings().all():
+            valuation_map[(vr["ts_code"], vr["trade_date"])] = (
+                vr["market_cap"], vr["circ_market_cap"]
+            )
+
+        # 市值 fallback
+        shares_map = {}
+        if stocks_data:
+            shares_map = {s["ts_code"]: (s.get("total_shares") or 0) for s in stocks_data}
+        for row in daily_rows:
+            mc, cmc = valuation_map.get(
+                (row["ts_code"], row["trade_date"]), (None, None)
+            )
+            if mc is None:
+                shares = shares_map.get(row["ts_code"], 0)
+                close = row.get("close")
+                if shares > 0 and close:
+                    mc = shares * close / 1e8
+            row["market_cap"] = mc
+            row["circ_market_cap"] = cmc
+
+        # 按 ts_code 分组
+        daily_data = {}
+        for row in daily_rows:
+            ts_code = row["ts_code"]
+            if ts_code not in daily_data:
+                daily_data[ts_code] = []
+            daily_data[ts_code].append({
+                "trade_date": row["trade_date"], "open": row["open"],
+                "high": row["high"], "low": row["low"], "close": row["close"],
+                "vol": row["vol"], "amount": row["amount"],
+                "adj_close": row["adj_close"],
+                "market_cap": row.get("market_cap"),
+                "circ_market_cap": row.get("circ_market_cap"),
+            })
+
+        return daily_data
+
     def _load_strategy(self) -> None:
         """加载策略代码（安全检查 + 编译）"""
         is_valid, error_msg = self._validate_strategy(self.strategy_code)

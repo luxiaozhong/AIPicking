@@ -119,17 +119,18 @@ class RebalanceService:
                     config=config,
                 )
 
-                # 进度回调
+                # 进度回调（每 5 天写一次 DB，减少 IO）
                 def update_progress(completed: int, total: int):
-                    try:
-                        db.execute(
-                            sql_update(RebalanceReport)
-                            .where(RebalanceReport.id == report_id)
-                            .values(total_days=total, completed_days=completed)
-                        )
-                        db.commit()
-                    except Exception:
-                        pass
+                    if completed % 5 == 0 or completed == total:
+                        try:
+                            db.execute(
+                                sql_update(RebalanceReport)
+                                .where(RebalanceReport.id == report_id)
+                                .values(total_days=total, completed_days=completed)
+                            )
+                            db.commit()
+                        except Exception:
+                            pass
 
                 result = engine_obj.run(
                     start_date, end_date,
