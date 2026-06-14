@@ -14,10 +14,6 @@ APP_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data", "database", "aipicking.db"
 )
-STOCK_DB_PATH = os.getenv(
-    "STOCK_DB_PATH",
-    os.path.expanduser("~") + "/workbuddy/2026-05-22-21-48-44/data/stock_db.sqlite"
-)
 PG_URL = os.getenv("PG_MIGRATE_URL", "")
 if not PG_URL:
     _user = os.getenv("DB_USER", "aipicking")
@@ -28,11 +24,8 @@ if not PG_URL:
     PG_URL = f"postgresql://{_user}:{_pass}@{_host}:{_port}/{_name}"
 PG_URL = PG_URL.replace("+asyncpg", "").replace("+psycopg2", "")
 
+# 所有表均从 app SQLite DB 迁移（stock 相关表已随 stock_db.sqlite 废弃移除）
 TABLE_SOURCES = {
-    "stocks": "stock", "daily": "stock",
-    # sector_flow / daily_industry_flow → 已合并到 daily_sector_flow（2026-05-31）
-    "stock_themes": "stock", "daily_hot_stocks": "stock",
-    "daily_hot_themes": "stock", "daily_northbound_flow": "stock",
     "users": "app", "strategies": "app", "backtest_reports": "app",
     "strategy_runs": "app", "batch_backtest_reports": "app",
     "ai_strategy_tasks": "app", "ai_factors": "app",
@@ -151,7 +144,6 @@ def _verify_aggregate(sq_conn, pg_conn, table_name, common, total):
 
 def main():
     app_sqlite = get_sqlite(APP_DB_PATH)
-    stock_sqlite = get_sqlite(STOCK_DB_PATH)
     pg_conn = get_pg()
 
     all_ok = True
@@ -165,7 +157,7 @@ def main():
 
     for table_name in sorted(TABLE_SOURCES.keys()):
         source = TABLE_SOURCES[table_name]
-        sqlite_conn = stock_sqlite if source == "stock" else app_sqlite
+        sqlite_conn = app_sqlite
         s_count, p_count, match = verify_row_count(sqlite_conn, pg_conn, table_name)
         status = "✓ OK" if match else f"✗ DIFF: {p_count - s_count:+d}"
         print(f"{table_name:<30} {s_count:>10} {p_count:>10} {status:>10}")
@@ -179,7 +171,7 @@ def main():
 
     for table_name in sorted(TABLE_SOURCES.keys()):
         source = TABLE_SOURCES[table_name]
-        sqlite_conn = stock_sqlite if source == "stock" else app_sqlite
+        sqlite_conn = app_sqlite
         match, info = verify_content(sqlite_conn, pg_conn, table_name)
         status = "✓ OK" if match else "✗ MISMATCH"
         print(f"  {table_name:<30} → {status}  ({info})")
@@ -195,7 +187,6 @@ def main():
     print("=" * 70)
 
     app_sqlite.close()
-    stock_sqlite.close()
     pg_conn.close()
 
     return 0 if all_ok else 1

@@ -7,7 +7,6 @@ SQLite → PostgreSQL 数据迁移脚本
     python scripts/migrate_sqlite_to_pg.py
 
 环境变量:
-    STOCK_DB_PATH    — 股票 SQLite 路径（默认 /opt/stock_data/stock_db.sqlite）
     PG_MIGRATE_URL   — 目标 PostgreSQL URL
 """
 import sqlite3
@@ -25,10 +24,6 @@ from sqlalchemy import create_engine
 APP_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data", "database", "aipicking.db"
-)
-STOCK_DB_PATH = os.getenv(
-    "STOCK_DB_PATH",
-    os.path.expanduser("~") + "/workbuddy/2026-05-22-21-48-44/data/stock_db.sqlite"
 )
 
 _pg_url = os.getenv("PG_MIGRATE_URL", "")
@@ -67,19 +62,10 @@ def get_pg_conn() -> psycopg2.extensions.connection:
 
 # ── 表迁移顺序（先独立表，后 FK 依赖表） ──────────────
 # (table_name, source_db)
+# 股票相关表已随 stock_db.sqlite 废弃移除
 TABLE_ORDER = [
-    # 股票数据（无 FK 依赖）
-    ("stocks", "stock"),
-    ("daily", "stock"),
-    # sector_flow / daily_industry_flow → 已合并到 daily_sector_flow（2026-05-31）
-    ("stock_themes", "stock"),
-    ("daily_hot_stocks", "stock"),
-    ("daily_hot_themes", "stock"),
-    ("daily_northbound_flow", "stock"),
-    # 应用数据 — 独立表
     ("users", "app"),
     ("strategies", "app"),
-    # 应用数据 — 依赖 users + strategies
     ("backtest_reports", "app"),
     ("strategy_runs", "app"),
     ("batch_backtest_reports", "app"),
@@ -89,10 +75,6 @@ TABLE_ORDER = [
 
 # PostgreSQL SERIAL 序列名列表
 SEQUENCES = [
-    "stocks_id_seq", "daily_id_seq",
-    # sector_flow_id_seq / daily_industry_flow_id_seq → 已随表删除（2026-05-31）
-    "stock_themes_id_seq", "daily_hot_stocks_id_seq",
-    "daily_hot_themes_id_seq", "daily_northbound_flow_id_seq",
     "users_id_seq", "strategies_id_seq",
     "backtest_reports_id_seq", "strategy_runs_id_seq",
     "batch_backtest_reports_id_seq", "ai_strategy_tasks_id_seq",
@@ -209,7 +191,6 @@ def run_migration() -> dict:
     print("  SQLite → PostgreSQL 数据迁移")
     print("=" * 60)
     print(f"  App DB:    {APP_DB_PATH}")
-    print(f"  Stock DB:  {STOCK_DB_PATH}")
     print(f"  Target PG: {_pg_url.replace('postgresql+psycopg2://', 'postgresql://')}")
     print()
 
@@ -217,14 +198,10 @@ def run_migration() -> dict:
     if not os.path.exists(APP_DB_PATH):
         print(f"ERROR: App DB not found: {APP_DB_PATH}")
         sys.exit(1)
-    if not os.path.exists(STOCK_DB_PATH):
-        print(f"ERROR: Stock DB not found: {STOCK_DB_PATH}")
-        sys.exit(1)
 
     # 2. 连接
     print("Connecting...")
     app_sqlite = get_sqlite_conn(APP_DB_PATH)
-    stock_sqlite = get_sqlite_conn(STOCK_DB_PATH)
     pg_conn = get_pg_conn()
     pg_cur = pg_conn.cursor()
 
@@ -237,7 +214,7 @@ def run_migration() -> dict:
     total = 0
     print("Migrating data...")
     for table_name, source in TABLE_ORDER:
-        src_conn = stock_sqlite if source == "stock" else app_sqlite
+        src_conn = app_sqlite
         count = migrate_table(pg_conn, src_conn, table_name, pg_cur)
         stats[table_name] = {"source": source, "count": count}
         total += count
@@ -249,7 +226,6 @@ def run_migration() -> dict:
     # 6. 关闭
     pg_cur.close()
     app_sqlite.close()
-    stock_sqlite.close()
     pg_conn.close()
 
     print(f"Total: {total} rows across {len(TABLE_ORDER)} tables")

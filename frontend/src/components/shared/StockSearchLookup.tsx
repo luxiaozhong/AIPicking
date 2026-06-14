@@ -8,6 +8,7 @@ const { Text } = Typography;
 interface StockSearchLookupProps {
   value: string;
   onChange: (code: string) => void;
+  onSelect?: (code: string) => void;
   placeholder?: string;
   style?: React.CSSProperties;
 }
@@ -15,6 +16,7 @@ interface StockSearchLookupProps {
 export default function StockSearchLookup({
   value,
   onChange,
+  onSelect,
   placeholder = '输入股票代码或名称搜索',
   style,
 }: StockSearchLookupProps) {
@@ -63,7 +65,10 @@ export default function StockSearchLookup({
       value={value}
       options={options}
       onSearch={handleSearch}
-      onSelect={(val: string) => onChange(val)}
+      onSelect={(val: string) => {
+        if (onSelect) onSelect(val);
+        else onChange(val);
+      }}
       onChange={(val: string) => onChange(val)}
       placeholder={placeholder}
       allowClear

@@ -136,7 +136,6 @@ DATABASE_URL=sqlite+aiosqlite:///./data/database/aipicking.db
 CORS_ORIGINS=http://DOMAIN_PLACEHOLDER
 BACKTEST_DATA_DIR=./data/market_data
 JWT_SECRET_KEY=JWT_PLACEHOLDER
-STOCK_DB_PATH=/opt/stock_data/stock_db.sqlite
 DEEPSEEK_API_KEY=sk-your-key-here
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_TIMEOUT=120

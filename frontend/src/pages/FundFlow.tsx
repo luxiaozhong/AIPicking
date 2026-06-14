@@ -5,13 +5,15 @@ import {
 } from 'antd';
 import {
   RiseOutlined, FallOutlined, DollarOutlined, PieChartOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useFundFlowStore } from '@/stores/fundFlowStore';
 import type { StockFlowItem } from '@/services/fundFlowService';
+import { fundFlowService } from '@/services/fundFlowService';
 import type { ColumnsType } from 'antd/es/table';
+import StockSearchLookup from '@/components/shared/StockSearchLookup';
 
 const { Title, Text } = Typography;
 
@@ -66,12 +68,97 @@ function pivotBoardHistory(
   };
 }
 
+// ── 图表 option 构建（复用） ──
+function buildOrderFlowChart(days: Array<{
+  trade_date: string;
+  jumbo_net_flow: number;
+  block_net_flow: number;
+  mid_net_flow: number;
+  small_net_flow: number;
+}>) {
+  const dates = days.map((d) => d.trade_date);
+  return {
+    tooltip: { trigger: 'axis' as const },
+    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+    yAxis: { type: 'value' as const, name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
+    series: [
+      {
+        name: '超大单', type: 'bar' as const,
+        data: days.map((d) => d.jumbo_net_flow),
+        itemStyle: { color: '#cf1322' },
+      },
+      {
+        name: '大单', type: 'bar' as const,
+        data: days.map((d) => d.block_net_flow),
+        itemStyle: { color: '#fa8c16' },
+      },
+      {
+        name: '中单', type: 'bar' as const,
+        data: days.map((d) => d.mid_net_flow),
+        itemStyle: { color: '#1677ff' },
+      },
+      {
+        name: '小单', type: 'bar' as const,
+        data: days.map((d) => d.small_net_flow),
+        itemStyle: { color: '#3f8600' },
+      },
+    ],
+  };
+}
+
+function buildCumTrendChart(days: Array<{ trade_date: string; main_net_flow_5d: number; main_net_flow_10d: number; main_net_flow_20d: number }>) {
+  const dates = days.map((d) => d.trade_date);
+  return {
+    tooltip: { trigger: 'axis' as const },
+    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+    yAxis: { type: 'value' as const, name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
+    series: [
+      {
+        name: '5日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
+        data: days.map((d) => d.main_net_flow_5d),
+        lineStyle: { color: '#fa8c16', width: 1.5 },
+      },
+      {
+        name: '10日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
+        data: days.map((d) => d.main_net_flow_10d),
+        lineStyle: { color: '#1677ff', width: 1.5 },
+      },
+      {
+        name: '20日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
+        data: days.map((d) => d.main_net_flow_20d),
+        lineStyle: { color: '#722ed1', width: 1.5 },
+      },
+    ],
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // FundFlow Page
 // ═══════════════════════════════════════════════════════════════
 
 const FundFlow: React.FC = () => {
   const store = useFundFlowStore();
+
+  // 个股搜索
+  const [stockSearchValue, setStockSearchValue] = useState('');
+  const [searchedStock, setSearchedStock] = useState<string | null>(null);  // ts_code
+
+  const handleStockSelect = (tsCode: string) => {
+    if (!tsCode) return;
+    setSearchedStock(tsCode);
+    setStockSearchValue(tsCode);
+    store.fetchStockTrend(tsCode, 30);
+  };
+
+  const handleClearStock = () => {
+    setSearchedStock(null);
+    setStockSearchValue('');
+    store.setSelectedStock(null);
+  };
 
   // 初始化
   useEffect(() => {
@@ -386,83 +473,36 @@ const FundFlow: React.FC = () => {
     },
   ];
 
-  // ── 个股展开：趋势图 ──
-  const [expandedStock, setExpandedStock] = useState<string | null>(null);
+  // ── 个股展开：趋势图（按股票缓存，避免多行展开时数据串扰） ──
+  const [trendCache, setTrendCache] = useState<Record<string, typeof store.stockTrend>>({});
 
   const handleExpand = (expanded: boolean, record: StockFlowItem) => {
     if (expanded) {
-      setExpandedStock(record.ts_code);
-      store.fetchStockTrend(record.ts_code, 30);
-    } else {
-      setExpandedStock(null);
+      if (!trendCache[record.ts_code]) {
+        // 异步获取后写入缓存
+        fundFlowService.getStockTrend(record.ts_code, 30).then((trend) => {
+          setTrendCache((prev) => ({ ...prev, [record.ts_code]: trend }));
+        }).catch(() => {});
+      }
     }
   };
 
-  const expandedRowRender = () => {
-    if (!store.stockTrend?.days.length) {
-      return <Empty description="暂无趋势数据" />;
+  const expandedRowRender = (record: StockFlowItem) => {
+    const trend = trendCache[record.ts_code];
+    if (!trend?.days?.length) {
+      return <Spin style={{ display: 'block', padding: 20 }} />;
     }
-
-    const days = store.stockTrend.days;
-    const dates = days.map((d) => d.trade_date);
-
-    // 主力 vs 散户
-    const mainRetailOption = {
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, textStyle: { fontSize: 11 } },
-      grid: { left: 60, right: 20, top: 10, bottom: 35 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
-      series: [
-        {
-          name: '主力净流入', type: 'bar',
-          data: days.map((d) => d.main_net_flow),
-          itemStyle: { color: RED_COLOR },
-        },
-        {
-          name: '散户净流入', type: 'bar',
-          data: days.map((d) => d.retail_in_flow - d.retail_out_flow),
-          itemStyle: { color: GREEN_COLOR },
-        },
-      ],
-    };
-
-    // 多日累计
-    const cumOption = {
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, textStyle: { fontSize: 11 } },
-      grid: { left: 60, right: 20, top: 10, bottom: 35 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
-      series: [
-        {
-          name: '5日累计', type: 'line', smooth: true, symbol: 'none',
-          data: days.map((d) => d.main_net_flow_5d),
-          lineStyle: { color: '#fa8c16', width: 1.5 },
-        },
-        {
-          name: '10日累计', type: 'line', smooth: true, symbol: 'none',
-          data: days.map((d) => d.main_net_flow_10d),
-          lineStyle: { color: '#1677ff', width: 1.5 },
-        },
-        {
-          name: '20日累计', type: 'line', smooth: true, symbol: 'none',
-          data: days.map((d) => d.main_net_flow_20d),
-          lineStyle: { color: '#722ed1', width: 1.5 },
-        },
-      ],
-    };
-
+    const days = trend.days;
     return (
       <Row gutter={16}>
         <Col span={12}>
-          <Card size="small" title="主力 vs 散户 每日净流入">
-            <ReactECharts option={mainRetailOption} style={{ height: 250 }} />
+          <Card size="small" title="四类订单净流入（超大/大/中/小）">
+            <ReactECharts option={buildOrderFlowChart(days)} style={{ height: 250 }} />
           </Card>
         </Col>
         <Col span={12}>
           <Card size="small" title="多日累计趋势">
-            <ReactECharts option={cumOption} style={{ height: 250 }} />
+            <ReactECharts option={buildCumTrendChart(days)} style={{ height: 250 }} />
           </Card>
         </Col>
       </Row>
@@ -684,25 +724,167 @@ const FundFlow: React.FC = () => {
       </Card>
 
       {/* ═════════════════════════════════════════════╗
-          ║  Layer 3: 个股异动                           ║
+          ║  Layer 3: 个股资金流                          ║
           ╚════════════════════════════════════════════╝ */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <Title level={4} style={{ margin: 0 }}>
           <FallOutlined /> 个股资金流
         </Title>
-        <Select
-          value="main_net"
-          style={{ width: 140 }}
-          onChange={(v) => store.fetchStockRanking(store.selectedDate, v)}
-          options={[
-            { label: '主力净流入↓', value: 'main_net' },
-            { label: '主力净流出↑', value: 'main_net_asc' },
-            { label: '占流通市值比', value: 'inflow_rate' },
-            { label: '超大单', value: 'jumbo' },
-            { label: '大单', value: 'block' },
-          ]}
-        />
+        <Space>
+          <StockSearchLookup
+            value={stockSearchValue}
+            onChange={setStockSearchValue}
+            onSelect={handleStockSelect}
+            placeholder="搜索个股代码或名称"
+            style={{ width: 220 }}
+          />
+          {searchedStock && (
+            <Tag
+              closable
+              onClose={handleClearStock}
+              color="blue"
+              style={{ cursor: 'default' }}
+            >
+              已选: {searchedStock}
+            </Tag>
+          )}
+          <Select
+            value="main_net"
+            style={{ width: 140 }}
+            onChange={(v) => store.fetchStockRanking(store.selectedDate, v)}
+            options={[
+              { label: '主力净流入↓', value: 'main_net' },
+              { label: '主力净流出↑', value: 'main_net_asc' },
+              { label: '占流通市值比', value: 'inflow_rate' },
+              { label: '超大单', value: 'jumbo' },
+              { label: '大单', value: 'block' },
+            ]}
+          />
+        </Space>
       </div>
+
+      {/* ── 个股搜索详情面板 ── */}
+      {searchedStock && (
+        <Card
+          size="small"
+          style={{ marginBottom: 12 }}
+          title={
+            <Space>
+              <Tag color="blue">{searchedStock}</Tag>
+              <Text strong>{store.stockTrend?.stock_name || ''}</Text>
+            </Space>
+          }
+          extra={
+            <Tag
+              closable
+              onClose={handleClearStock}
+              style={{ cursor: 'pointer' }}
+            >
+              关闭
+            </Tag>
+          }
+        >
+          {store.loading.stockTrend ? (
+            <Spin style={{ display: 'block', padding: 20 }} />
+          ) : store.stockTrend && store.stockTrend.days.length > 0 ? (
+            (() => {
+              const latest = store.stockTrend.days[store.stockTrend.days.length - 1];
+              return (
+                <>
+                  {/* 指标卡片 */}
+                  <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+                    <Col xs={12} sm={6} md={3}>
+                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>主力净流入</Text>
+                        <br />
+                        <Text strong style={{ fontSize: 16, color: posColor(latest.main_net_flow) }}>
+                          {fmtYiShort(latest.main_net_flow / 1e8)}
+                        </Text>
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6} md={3}>
+                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>超大单</Text>
+                        <br />
+                        <Text strong style={{ fontSize: 16, color: posColor(latest.jumbo_net_flow) }}>
+                          {fmtYiShort(latest.jumbo_net_flow / 1e8)}
+                        </Text>
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6} md={3}>
+                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>大单</Text>
+                        <br />
+                        <Text strong style={{ fontSize: 16, color: posColor(latest.block_net_flow) }}>
+                          {fmtYiShort(latest.block_net_flow / 1e8)}
+                        </Text>
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6} md={3}>
+                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>中单 / 小单</Text>
+                        <br />
+                        <Text strong style={{ fontSize: 14, color: posColor(latest.mid_net_flow) }}>
+                          {fmtYiShort(latest.mid_net_flow / 1e8)}
+                        </Text>
+                        <Text style={{ fontSize: 12, marginLeft: 8, color: posColor(latest.small_net_flow) }}>
+                          {fmtYiShort(latest.small_net_flow / 1e8)}
+                        </Text>
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6} md={3}>
+                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>5日 / 10日 / 20日累计</Text>
+                        <br />
+                        <Text strong style={{ fontSize: 14, color: posColor(latest.main_net_flow_5d) }}>
+                          {fmtYiShort(latest.main_net_flow_5d / 1e8)}
+                        </Text>
+                        <Text style={{ fontSize: 12, marginLeft: 8, color: posColor(latest.main_net_flow_10d) }}>
+                          {fmtYiShort(latest.main_net_flow_10d / 1e8)}
+                        </Text>
+                        <Text style={{ fontSize: 12, marginLeft: 8, color: posColor(latest.main_net_flow_20d) }}>
+                          {fmtYiShort(latest.main_net_flow_20d / 1e8)}
+                        </Text>
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6} md={3}>
+                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>收盘价</Text>
+                        <br />
+                        <Text strong style={{ fontSize: 16 }}>
+                          {latest.close_price?.toFixed(2) || '-'}
+                        </Text>
+                      </Card>
+                    </Col>
+                  </Row>
+
+                  {/* 趋势图表 */}
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Card size="small" title="四类订单净流入（超大/大/中/小）">
+                        <ReactECharts
+                          option={buildOrderFlowChart(store.stockTrend.days)}
+                          style={{ height: 250 }}
+                        />
+                      </Card>
+                    </Col>
+                    <Col span={12}>
+                      <Card size="small" title="多日累计趋势">
+                        <ReactECharts
+                          option={buildCumTrendChart(store.stockTrend.days)}
+                          style={{ height: 250 }}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+                </>
+              );
+            })()
+          ) : (
+            <Empty description="暂无该股票资金流数据" />
+          )}
+        </Card>
+      )}
 
       <Card size="small">
         {loading.stockRanking ? (

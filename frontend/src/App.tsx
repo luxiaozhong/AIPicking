@@ -20,6 +20,7 @@ import Dashboard from '@/pages/Dashboard';
 import MarketHeat from '@/pages/MarketHeat';
 import FundFlow from '@/pages/FundFlow';
 import IndexMACD from '@/pages/IndexMACD';
+import StrategyTracker from '@/pages/StrategyTracker';
 import LoginPage from '@/pages/LoginPage';
 import UserManagement from '@/pages/UserManagement';
 import EducationPage from '@/pages/EducationPage';
@@ -85,6 +86,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <IndexMACD />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/strategy-tracker"
+          element={
+            <ProtectedRoute>
+              <StrategyTracker />
             </ProtectedRoute>
           }
         />

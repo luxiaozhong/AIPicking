@@ -19,6 +19,7 @@ from .financial import FinancialReport, DailyValuation
 from .index_tables import IndexInfo, IndexConstituent
 from .trade_sim import TradeSimReport, BatchTradeSimReport
 from .rebalance import RebalanceReport
+from .user_holding import UserHolding
 
 # 设置关系
 Strategy.backtest_reports = relationship("BacktestReport", back_populates="strategy", cascade="all, delete-orphan")
@@ -45,3 +46,7 @@ User.batch_trade_sim_reports = relationship("BatchTradeSimReport", back_populate
 Strategy.rebalance_reports = relationship("RebalanceReport", back_populates="strategy", cascade="all, delete-orphan")
 RebalanceReport.owner = relationship("User", back_populates="rebalance_reports")
 User.rebalance_reports = relationship("RebalanceReport", back_populates="owner")
+UserHolding.owner = relationship("User", back_populates="holdings")
+UserHolding.strategy = relationship("Strategy", back_populates="holdings")
+User.holdings = relationship("UserHolding", back_populates="owner")
+Strategy.holdings = relationship("UserHolding", back_populates="strategy")
