@@ -80,7 +80,7 @@ export default function StrategyTracker() {
     strategyService.getStrategies({ limit: 100, scope: 'all' }).then((res) => {
       const list = res.items || [];
       setStrategies(list);
-      const gwm = list.find((s) => s.name?.includes('grow_with_money'));
+      const gwm = list.find((s) => s.name === 'grow_with_money');
       if (gwm) setStrategyId(gwm.id);
       else if (list.length > 0) setStrategyId(list[0].id);
     }).catch(() => {});
