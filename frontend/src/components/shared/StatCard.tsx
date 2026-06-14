@@ -5,9 +5,10 @@ interface StatCardProps {
   value: string | number;
   color?: string;
   suffix?: string;
+  subtitle?: string;
 }
 
-export default function StatCard({ title, value, color = '#1677ff', suffix }: StatCardProps) {
+export default function StatCard({ title, value, color = '#1677ff', suffix, subtitle }: StatCardProps) {
   return (
     <Card size="small" style={{ textAlign: 'center' }}>
       <div style={{ fontSize: 13, color: '#999', marginBottom: 8 }}>{title}</div>
@@ -17,6 +18,9 @@ export default function StatCard({ title, value, color = '#1677ff', suffix }: St
           <span style={{ fontSize: 14, fontWeight: 400, marginLeft: 4 }}>{suffix}</span>
         )}
       </div>
+      {subtitle && (
+        <div style={{ fontSize: 12, color: '#bbb', marginTop: 4 }}>{subtitle}</div>
+      )}
     </Card>
   );
 }

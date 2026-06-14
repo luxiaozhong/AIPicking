@@ -209,13 +209,13 @@ export default function RebalanceDetail() {
           {/* 统计卡片 */}
           <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
             <Col span={6}>
-              <StatCard title="总收益率" value={formatPct(summary.total_return_pct)} valueColor={pctColor(summary.total_return_pct)} />
+              <StatCard title="总收益率" value={formatPct(summary.total_return_pct)} color={pctColor(summary.total_return_pct)} />
             </Col>
             <Col span={6}>
-              <StatCard title="年化收益率" value={formatPct(summary.annualized_return_pct)} valueColor={pctColor(summary.annualized_return_pct)} />
+              <StatCard title="年化收益率" value={formatPct(summary.annualized_return_pct)} color={pctColor(summary.annualized_return_pct)} />
             </Col>
             <Col span={6}>
-              <StatCard title="最大回撤" value={formatPct(summary.max_drawdown_pct)} valueColor="#3f8600" />
+              <StatCard title="最大回撤" value={formatPct(summary.max_drawdown_pct)} color="#3f8600" />
             </Col>
             <Col span={6}>
               <StatCard title="夏普比率" value={summary.sharpe_ratio?.toFixed(2)} />
@@ -248,7 +248,7 @@ export default function RebalanceDetail() {
               <StatCard title="累计费用" value={`¥${summary.total_fees_paid?.toLocaleString()}`} subtitle="手续费 + 印花税" />
             </Col>
             <Col span={6}>
-              <StatCard title="已实现盈亏" value={`¥${summary.realized_pnl?.toLocaleString()}`} valueColor={pctColor(summary.realized_pnl)} subtitle={`${summary.win_trades}赢 / ${summary.lose_trades}亏`} />
+              <StatCard title="已实现盈亏" value={`¥${summary.realized_pnl?.toLocaleString()}`} color={pctColor(summary.realized_pnl)} subtitle={`${summary.win_trades}赢 / ${summary.lose_trades}亏`} />
             </Col>
           </Row>
         </>
