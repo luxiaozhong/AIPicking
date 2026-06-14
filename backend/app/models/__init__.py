@@ -16,6 +16,7 @@ from .stock_tables import (
     DailyMarketTemperature, DailyBoardTemperature, DailyMarketStress,
 )
 from .financial import FinancialReport, DailyValuation
+from .index_tables import IndexInfo, IndexConstituent
 from .trade_sim import TradeSimReport, BatchTradeSimReport
 
 # 设置关系
