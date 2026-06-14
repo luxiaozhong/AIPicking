@@ -169,3 +169,8 @@ async def get_index_stocks(session, index_code: str) -> list[str]:
 | 国证 | `index_all_cni` | 全指数列表 |
 | 中证 | `index_stock_cons_csindex` | 中证成分股 |
 | 申万 | `index_component_sw` | 申万指数成分股 |
+
+## 相关策略
+
+- [grow_with_money](./grow-with-money.md) — 成长100 + 资金流选股，基于指数成分股+主力资金流入的选股策略
+- 回测引擎支持 `REQUIRED_DATA = ["fund_flow", "index_constituents"]` 自动加载数据

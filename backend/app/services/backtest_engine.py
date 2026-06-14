@@ -14,8 +14,11 @@ from ..config import settings
 from ..models.stock_tables import (
     Stock, Daily, DailySectorFlow,
     DailyHotStock, DailyHotTheme, DailyDragonTiger, DailyDragonTigerSeat,
+    DailyStockFundFlow,
 )
 from ..models.financial import FinancialReport
+from ..models.index_tables import IndexConstituent
+from sqlalchemy import func
 
 # 同步引擎（用于 thread pool 中的回测）
 _sync_engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -63,7 +66,10 @@ class BacktestEngine:
             - sector_flow  → daily_sector_flow 表
             - hot_stocks   → daily_hot_stock 表
             - hot_themes   → daily_hot_theme 表
-            - dragon_tiger → daily_dragon_tiger + daily_dragon_tiger_seats 表
+            - dragon_tiger     → daily_dragon_tiger + daily_dragon_tiger_seats 表
+            - fund_flow        → daily_stock_fund_flow 表
+            - index_constituents → index_constituents 表（最新调样）
+            - financials       → financial_reports 表
 
         返回 None 表示未声明 REQUIRED_DATA（向后兼容，加载全部数据）。
         返回空 set 表示声明了但不需要任何额外数据。
@@ -83,6 +89,36 @@ class BacktestEngine:
         if self.required_data is None:
             return True  # 向后兼容：未声明则加载全部
         return source in self.required_data
+
+    def _load_fund_flow(
+        self, session, start_date: str, end_date: str
+    ) -> List[Dict]:
+        """加载个股资金流向（主力净流入等）"""
+        stmt = select(DailyStockFundFlow.__table__).where(
+            DailyStockFundFlow.trade_date.between(start_date, end_date)
+        ).order_by(DailyStockFundFlow.trade_date, DailyStockFundFlow.ts_code)
+        return [dict(row._mapping) for row in session.execute(stmt)]
+
+    def _load_index_constituents(self, session) -> List[Dict]:
+        """加载所有指数的最新成分股列表"""
+        # 获取每个指数最新 eff_date
+        latest_subq = (
+            select(
+                IndexConstituent.index_code,
+                func.max(IndexConstituent.eff_date).label("latest_date"),
+            )
+            .group_by(IndexConstituent.index_code)
+            .subquery()
+        )
+        stmt = (
+            select(IndexConstituent.__table__)
+            .join(
+                latest_subq,
+                (IndexConstituent.index_code == latest_subq.c.index_code)
+                & (IndexConstituent.eff_date == latest_subq.c.latest_date),
+            )
+        )
+        return [dict(row._mapping) for row in session.execute(stmt)]
 
     def _load_strategy(self) -> None:
         """加载策略代码（安全检查 + 编译）"""
@@ -345,6 +381,8 @@ class BacktestEngine:
                 # 切片横截面数据到当日
                 sliced_hot_stocks = [r for r in loaded["hot_stocks"] if r.get("trade_date") == cutoff_date_fmt]
                 sliced_hot_themes = [r for r in loaded["hot_themes"] if r.get("trade_date") == cutoff_date_fmt]
+                # 资金流同理按日切片
+                sliced_fund_flow = [r for r in loaded.get("fund_flow", []) if r.get("trade_date") and r["trade_date"] <= cutoff_date_fmt]
 
                 strategy_input = {
                     "cutoff_date": cutoff_date,
@@ -355,6 +393,8 @@ class BacktestEngine:
                     "hot_themes": sliced_hot_themes,
                     "dragon_tiger": loaded["dragon_tiger"],
                     "dragon_tiger_seats": loaded["dragon_tiger_seats"],
+                    "fund_flow": sliced_fund_flow,
+                    "index_constituents": loaded.get("index_constituents", []),
                     "financials": loaded["financials"],
                     "config": self.config or {},
                 }
@@ -459,6 +499,19 @@ class BacktestEngine:
                 ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
                 dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
 
+            # 7b. 个股资金流向（按需，回顾 120 个自然日覆盖 M 日窗口）
+            fund_flow_start = (cutoff_dt - timedelta(days=120)).strftime("%Y-%m-%d")
+            fund_flow_data = []
+            if self._should_load("fund_flow"):
+                fund_flow_data = self._load_fund_flow(
+                    session, fund_flow_start, cutoff_date_fmt
+                )
+
+            # 7c. 指数成分股（按需，最新调样）
+            index_constituents_data = []
+            if self._should_load("index_constituents"):
+                index_constituents_data = self._load_index_constituents(session)
+
             # 8. 基本面数据（按需）
             financials_data = []
             if self._should_load("financials"):
@@ -503,6 +556,8 @@ class BacktestEngine:
             "hot_themes": hot_themes_data,
             "dragon_tiger": dragon_tiger_data,
             "dragon_tiger_seats": dragon_tiger_seats_data,
+            "fund_flow": fund_flow_data,
+            "index_constituents": index_constituents_data,
             "financials": financials_data,
         }
 
@@ -569,6 +624,19 @@ class BacktestEngine:
                 ).order_by(DailyDragonTigerSeat.trade_date, DailyDragonTigerSeat.stock_code, DailyDragonTigerSeat.rank)
                 dragon_tiger_seats_data = [dict(row._mapping) for row in session.execute(dt_seat_stmt)]
 
+            # 个股资金流向（按需，120 天窗口覆盖 M 日参数）
+            fund_flow_start = (start_dt - timedelta(days=120)).strftime("%Y-%m-%d")
+            fund_flow_data = []
+            if self._should_load("fund_flow"):
+                fund_flow_data = self._load_fund_flow(
+                    session, fund_flow_start, end_date_fmt
+                )
+
+            # 指数成分股（按需，最新调样）
+            index_constituents_data = []
+            if self._should_load("index_constituents"):
+                index_constituents_data = self._load_index_constituents(session)
+
             # 基本面数据（按需，加载 end_date 之前发布的全部财报）
             financials_data = []
             if self._should_load("financials"):
@@ -612,6 +680,8 @@ class BacktestEngine:
             "hot_themes": hot_themes_data,
             "dragon_tiger": dragon_tiger_data,
             "dragon_tiger_seats": dragon_tiger_seats_data,
+            "fund_flow": fund_flow_data,
+            "index_constituents": index_constituents_data,
             "financials": financials_data,
         }
 
