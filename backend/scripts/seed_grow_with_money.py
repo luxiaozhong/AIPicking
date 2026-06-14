@@ -105,7 +105,10 @@ def main():
                             file_path = %s,
                             params_schema = %s,
                             tags = %s,
-                            is_published = %s
+                            is_published = %s,
+                            version = COALESCE(version, 1),
+                            created_at = COALESCE(created_at, NOW()),
+                            updated_at = NOW()
                         WHERE name = %s
                         RETURNING id
                         """,
@@ -127,8 +130,10 @@ def main():
                 cur.execute(
                     """
                     INSERT INTO strategies (name, description, file_path, params_schema,
-                                            tags, user_id, is_published, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'active')
+                                            tags, user_id, is_published, status,
+                                            version, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'active',
+                            1, NOW(), NOW())
                     RETURNING id
                     """,
                     (
