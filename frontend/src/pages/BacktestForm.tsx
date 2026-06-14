@@ -553,6 +553,47 @@ export default function BacktestForm() {
                   用于计算入选率的分母，至少选一个
                 </Text>
               </Form.Item>
+
+              {/* 策略参数（基于 params_schema 动态渲染） */}
+              {hasParams && paramSchema && (
+                <Form.Item label="策略参数">
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                    {currentStrategy.name} 的可调参数
+                  </Text>
+                  {Object.entries(paramSchema).map(([key, def]: [string, any]) => (
+                    <div key={key} style={{ marginBottom: 12 }}>
+                      <Text strong style={{ fontSize: 13 }}>{def.label || key}</Text>
+                      {def.description && (
+                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                          {def.description}
+                        </Text>
+                      )}
+                      <div style={{ marginTop: 4 }}>
+                        {def.type === 'int' || def.type === 'float' ? (
+                          <InputNumber
+                            value={strategyParams[key] ?? def.default}
+                            onChange={(v) =>
+                              setStrategyParams((prev) => ({ ...prev, [key]: v ?? def.default }))
+                            }
+                            min={def.min}
+                            max={def.max}
+                            step={def.type === 'float' ? 0.1 : 1}
+                            style={{ width: '100%' }}
+                          />
+                        ) : (
+                          <Input
+                            value={strategyParams[key] ?? def.default}
+                            onChange={(e) =>
+                              setStrategyParams((prev) => ({ ...prev, [key]: e.target.value }))
+                            }
+                            placeholder={def.default}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </Form.Item>
+              )}
             </>
           )}
 
