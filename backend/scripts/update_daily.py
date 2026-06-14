@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-每日增量更新 A 股日线数据（后复权）+ 市值数据
+每日增量更新 A 股日线数据（后复权）
 
 模式选择逻辑（优先级从高到低）：
   1. --intraday          强制使用实时接口（拉今天盘中数据）
@@ -223,7 +223,7 @@ async def download_one(session, ts_code, symbol, start_date, end_date, fetch_ext
 # ── 实时报价接口（盘中 + 兜底） ───────────────────────────────────────────
 async def fetch_realtime_quote(session, symbol, trade_date):
     """
-    拉取实时报价，返回 (record_tuple, market_cap, circ_market_cap)
+    拉取实时报价，返回 record_tuple
     trade_date 为 YYYY-MM-DD
     """
     url = f"{QUOTE_API}{symbol}"
@@ -232,15 +232,15 @@ async def fetch_realtime_quote(session, symbol, trade_date):
             raw = await resp.read()
         text = raw.decode("gbk", errors="replace")
     except Exception:
-        return None, None, None
+        return None
 
     if "=" not in text:
-        return None, None, None
+        return None
     try:
         content = text.split("=", 1)[1].strip().strip('"')
         fields = content.split("~")
         if len(fields) < 46:
-            return None, None, None
+            return None
 
         price      = float(fields[3]) if fields[3].strip() else None
         prev_close = float(fields[4]) if fields[4].strip() else None
@@ -250,45 +250,19 @@ async def fetch_realtime_quote(session, symbol, trade_date):
         vol        = float(fields[6])  if fields[6].strip()  else 0
         amount     = float(fields[37]) if fields[37].strip() else 0
         amount     = amount * 10000
-        market_cap      = float(fields[44]) if fields[44].strip() else None
-        circ_market_cap = float(fields[45]) if fields[45].strip() else None
 
         if price is None or price == 0:
-            return None, None, None
+            return None
         if vol == 0 and open_p == 0:
-            return None, None, None
+            return None
 
         record = (None, trade_date,
                   open_p or prev_close, high_p or price,
                   low_p or price, price, prev_close,
-                  vol, amount, price,
-                  market_cap, circ_market_cap)
-        return record, market_cap, circ_market_cap
+                  vol, amount, price)
+        return record
     except (ValueError, IndexError):
-        return None, None, None
-
-
-async def fetch_market_cap(session, symbol):
-    """仅拉取市值，返回 (market_cap, circ_market_cap)"""
-    url = f"{QUOTE_API}{symbol}"
-    try:
-        async with session.get(url, timeout=TIMEOUT) as resp:
-            raw = await resp.read()
-        text = raw.decode("gbk", errors="replace")
-    except Exception:
-        return None, None
-    if "=" not in text:
-        return None, None
-    try:
-        content = text.split("=", 1)[1].strip().strip('"')
-        fields = content.split("~")
-        if len(fields) < 46:
-            return None, None
-        market_cap      = float(fields[44]) if fields[44].strip() else None
-        circ_market_cap = float(fields[45]) if fields[45].strip() else None
-        return market_cap, circ_market_cap
-    except (ValueError, IndexError):
-        return None, None
+        return None
 
 
 # ── 数据库写入 ────────────────────────────────────────────────────────────
@@ -296,14 +270,13 @@ def upsert_daily(record):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close, market_cap, circ_market_cap)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
             open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
             close = EXCLUDED.close, pre_close = EXCLUDED.pre_close,
             vol = EXCLUDED.vol, amount = EXCLUDED.amount,
-            adj_close = EXCLUDED.adj_close,
-            market_cap = EXCLUDED.market_cap, circ_market_cap = EXCLUDED.circ_market_cap
+            adj_close = EXCLUDED.adj_close
     """, record)
     conn.commit()
     conn.close()
@@ -313,14 +286,13 @@ def bulk_upsert(records):
     conn = get_conn()
     cur = conn.cursor()
     psycopg2.extras.execute_batch(cur, """
-        INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close, market_cap, circ_market_cap)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
             open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
             close = EXCLUDED.close, pre_close = EXCLUDED.pre_close,
             vol = EXCLUDED.vol, amount = EXCLUDED.amount,
-            adj_close = EXCLUDED.adj_close,
-            market_cap = EXCLUDED.market_cap, circ_market_cap = EXCLUDED.circ_market_cap
+            adj_close = EXCLUDED.adj_close
     """, records)
     conn.commit()
     conn.close()
@@ -336,16 +308,16 @@ async def run_intraday(stocks, trade_date: str):
 
         async def bounded_fetch(s):
             async with semaphore:
-                record, mcap, cmcap = await fetch_realtime_quote(
+                record = await fetch_realtime_quote(
                     session, s["symbol"], trade_date)
-                return s["ts_code"], record, mcap, cmcap
+                return s["ts_code"], record
 
         tasks = [bounded_fetch(s) for s in stocks]
         updated, skipped = 0, 0
         batch = []
         BATCH_SIZE = 200
         for coro in asyncio.as_completed(tasks):
-            ts_code, record, mcap, cmcap = await coro
+            ts_code, record = await coro
             if record:
                 full_record = (ts_code,) + record[1:]
                 batch.append(full_record)
@@ -395,32 +367,6 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
                 print(f"  ⚠️  {ts_code}：无新数据")
             await asyncio.sleep(0.02)
 
-        # ── 市值数据补充 ──
-        print(f"\n📈 获取市值数据（{end_date}）...")
-        updated_cap = 0
-        for s in stocks:
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(*) FROM daily WHERE ts_code=%s AND trade_date=%s AND market_cap IS NULL",
-                (s["ts_code"], _fmt_date(end_date)))
-            need = cur.fetchone()[0]
-            conn.close()
-            if not need:
-                continue
-            market_cap, circ_market_cap = await fetch_market_cap(session, s["symbol"])
-            if market_cap or circ_market_cap:
-                conn = get_conn()
-                cur = conn.cursor()
-                cur.execute(
-                    "UPDATE daily SET market_cap=%s, circ_market_cap=%s WHERE ts_code=%s AND trade_date=%s",
-                    (market_cap, circ_market_cap, s["ts_code"], _fmt_date(end_date)))
-                conn.commit()
-                conn.close()
-                updated_cap += 1
-            await asyncio.sleep(0.02)
-        print(f"  ✅ 市值更新 {updated_cap} 只")
-
         # ── qt 兜底：补齐日线接口缺失的股票 ──
         if do_fallback:
             fallback_date = _fmt_date(end_date)
@@ -439,7 +385,7 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
                 print(f"\n⚠️  日线接口缺失 {len(missing)} 只，qt 实时接口兜底...")
                 fb_updated, fb_skipped = 0, 0
                 for ts_code, symbol in missing:
-                    record, mcap, cmcap = await fetch_realtime_quote(
+                    record = await fetch_realtime_quote(
                         session, symbol, fallback_date)
                     if record:
                         full_record = (ts_code,) + record[1:]

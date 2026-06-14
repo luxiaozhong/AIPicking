@@ -16,7 +16,7 @@ from ..models.stock_tables import (
     DailyHotStock, DailyHotTheme, DailyDragonTiger, DailyDragonTigerSeat,
     DailyStockFundFlow,
 )
-from ..models.financial import FinancialReport
+from ..models.financial import FinancialReport, DailyValuation
 from ..models.index_tables import IndexConstituent
 from sqlalchemy import func
 
@@ -453,12 +453,38 @@ class BacktestEngine:
             daily_stmt = select(
                 Daily.ts_code, Daily.trade_date, Daily.open, Daily.high,
                 Daily.low, Daily.close, Daily.vol, Daily.amount,
-                Daily.adj_close, Daily.market_cap, Daily.circ_market_cap
+                Daily.adj_close,
             ).where(
                 Daily.trade_date.between(start_date, cutoff_date_fmt)
             ).order_by(Daily.ts_code, Daily.trade_date)
             daily_result = session.execute(daily_stmt)
             daily_rows = [dict(row._mapping) for row in daily_result]
+
+            # 3b. 估值数据（市值从 daily_valuation 获取）
+            valuation_map = {}
+            val_stmt = select(
+                DailyValuation.ts_code, DailyValuation.trade_date,
+                DailyValuation.market_cap, DailyValuation.circ_market_cap,
+            ).where(
+                DailyValuation.trade_date.between(start_date, cutoff_date_fmt)
+            )
+            for vr in session.execute(val_stmt).mappings().all():
+                valuation_map[(vr["ts_code"], vr["trade_date"])] = (
+                    vr["market_cap"], vr["circ_market_cap"]
+                )
+            # 合并市值到日线行（优先 daily_valuation，fallback total_shares × close）
+            shares_map = {s["ts_code"]: (s.get("total_shares") or 0) for s in stocks_data}
+            for row in daily_rows:
+                mc, cmc = valuation_map.get(
+                    (row["ts_code"], row["trade_date"]), (None, None)
+                )
+                if mc is None:
+                    shares = shares_map.get(row["ts_code"], 0)
+                    close = row.get("close")
+                    if shares > 0 and close:
+                        mc = shares * close / 1e8  # 股 × 元 ÷ 1e8 = 亿元
+                row["market_cap"] = mc
+                row["circ_market_cap"] = cmc
 
             # 4. 板块资金流向（按需）
             daily_sector_flow_data = []
@@ -544,8 +570,9 @@ class BacktestEngine:
                 "trade_date": row["trade_date"], "open": row["open"],
                 "high": row["high"], "low": row["low"], "close": row["close"],
                 "vol": row["vol"], "amount": row["amount"],
-                "adj_close": row["adj_close"], "market_cap": row["market_cap"],
-                "circ_market_cap": row["circ_market_cap"],
+                "adj_close": row["adj_close"],
+                "market_cap": row.get("market_cap"),
+                "circ_market_cap": row.get("circ_market_cap"),
             })
 
         return {
@@ -580,11 +607,36 @@ class BacktestEngine:
             daily_stmt = select(
                 Daily.ts_code, Daily.trade_date, Daily.open, Daily.high,
                 Daily.low, Daily.close, Daily.vol, Daily.amount,
-                Daily.adj_close, Daily.market_cap, Daily.circ_market_cap
+                Daily.adj_close,
             ).where(
                 Daily.trade_date.between(earliest_date, end_date)
             ).order_by(Daily.ts_code, Daily.trade_date)
             daily_rows = [dict(row._mapping) for row in session.execute(daily_stmt)]
+
+            # 估值数据（市值从 daily_valuation 获取）
+            valuation_map = {}
+            val_stmt = select(
+                DailyValuation.ts_code, DailyValuation.trade_date,
+                DailyValuation.market_cap, DailyValuation.circ_market_cap,
+            ).where(
+                DailyValuation.trade_date.between(earliest_date, end_date_fmt)
+            )
+            for vr in session.execute(val_stmt).mappings().all():
+                valuation_map[(vr["ts_code"], vr["trade_date"])] = (
+                    vr["market_cap"], vr["circ_market_cap"]
+                )
+            shares_map = {s["ts_code"]: (s.get("total_shares") or 0) for s in stocks_data}
+            for row in daily_rows:
+                mc, cmc = valuation_map.get(
+                    (row["ts_code"], row["trade_date"]), (None, None)
+                )
+                if mc is None:
+                    shares = shares_map.get(row["ts_code"], 0)
+                    close = row.get("close")
+                    if shares > 0 and close:
+                        mc = shares * close / 1e8  # 股 × 元 ÷ 1e8 = 亿元
+                row["market_cap"] = mc
+                row["circ_market_cap"] = cmc
 
             # 板块资金流向（按需）
             daily_sector_flow_data = []
@@ -668,8 +720,9 @@ class BacktestEngine:
                 "trade_date": row["trade_date"], "open": row["open"],
                 "high": row["high"], "low": row["low"], "close": row["close"],
                 "vol": row["vol"], "amount": row["amount"],
-                "adj_close": row["adj_close"], "market_cap": row["market_cap"],
-                "circ_market_cap": row["circ_market_cap"],
+                "adj_close": row["adj_close"],
+                "market_cap": row.get("market_cap"),
+                "circ_market_cap": row.get("circ_market_cap"),
             })
 
         return {

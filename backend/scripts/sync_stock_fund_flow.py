@@ -42,7 +42,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import date as date_type
+from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -719,7 +719,12 @@ def main():
 
     date_str = args.date
     if date_str is None:
-        date_str = (date_type.today() - date_type.resolution).strftime("%Y-%m-%d")
+        now = datetime.now()
+        if now.hour >= 16:
+            target = now
+        else:
+            target = now - timedelta(days=1)
+        date_str = target.strftime("%Y-%m-%d")
 
     # Validate date format
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):

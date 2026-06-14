@@ -150,8 +150,6 @@ def fetch_kline_history(start_date: str, end_date: str) -> list:
                 "vol": vol,
                 "amount": amount,
                 "adj_close": close_p,   # 指数不复权
-                "market_cap": None,
-                "circ_market_cap": None,
             })
             prev_close = close_p
         except (ValueError, IndexError) as e:
@@ -175,14 +173,13 @@ def bulk_upsert_daily(records: list):
             r["ts_code"], r["trade_date"],
             r["open"], r["high"], r["low"], r["close"],
             r["pre_close"], r["vol"], r["amount"],
-            r["adj_close"], r["market_cap"], r["circ_market_cap"],
+            r["adj_close"],
         ))
 
     psycopg2.extras.execute_batch(cur, """
         INSERT INTO daily (ts_code, trade_date, open, high, low, close,
-                           pre_close, vol, amount, adj_close,
-                           market_cap, circ_market_cap)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                           pre_close, vol, amount, adj_close)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
             open = EXCLUDED.open,
             high = EXCLUDED.high,
@@ -191,9 +188,7 @@ def bulk_upsert_daily(records: list):
             pre_close = EXCLUDED.pre_close,
             vol = EXCLUDED.vol,
             amount = EXCLUDED.amount,
-            adj_close = EXCLUDED.adj_close,
-            market_cap = EXCLUDED.market_cap,
-            circ_market_cap = EXCLUDED.circ_market_cap
+            adj_close = EXCLUDED.adj_close
     """, tuples)
     conn.commit()
     conn.close()

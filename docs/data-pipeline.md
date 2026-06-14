@@ -10,7 +10,7 @@
 │                                                                     │
 │  16:15 ── sync_all.py                                              │
 │            │                                                        │
-│            ├─ 1. update_daily.py        ──► daily (日线 + 市值)      │
+│            ├─ 1. update_daily.py        ──► daily (日线)             │
 │            ├─ 2. update_index_daily.py  ──► daily (指数日线)         │
 │            ├─ 3. sync_dragon_tiger.py   ──► daily_dragon_tiger       │
 │            │                                daily_dragon_tiger_seats │
@@ -39,14 +39,15 @@
 
 ## 所有 Job 详解
 
-### 1. `update_daily.py` — 日线数据 + 市值
+### 1. `update_daily.py` — 日线数据
 
 | 维度 | 详情 |
 |------|------|
 | **执行时间** | 每个工作日 17:00（收盘后 2 小时） |
 | **数据库** | PostgreSQL |
-| **写入表** | `daily`（日线 OHLCV + adj_close + market_cap + circ_market_cap） |
+| **写入表** | `daily`（日线 OHLCV + adj_close） |
 | **数据源** | 腾讯财经 K 线 API（不封 IP） |
+| **注意** | 市值数据已迁移至 `daily_valuation` 表（由 `sync_valuation.py` 同步） |
 | **日志** | `/var/log/aipicking/update_daily.log` |
 | **幂等性** | `ON CONFLICT (ts_code, trade_date) DO UPDATE` |
 

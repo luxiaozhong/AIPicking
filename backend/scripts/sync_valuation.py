@@ -247,8 +247,13 @@ if __name__ == "__main__":
             sys.exit(0)
         sync_date(trade_date)
     else:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        if not is_trade_day(yesterday):
-            print(f"⚠️ 昨天（{yesterday}）不是交易日，跳过")
+        # 默认：盘后（≥16:00）用当天，否则用昨天
+        now = datetime.now()
+        if now.hour >= 16:
+            target = now.strftime("%Y%m%d")
+        else:
+            target = (now - timedelta(days=1)).strftime("%Y%m%d")
+        if not is_trade_day(target):
+            print(f"⚠️ {target} 不是交易日，跳过")
             sys.exit(0)
-        sync_date(yesterday)
+        sync_date(target)

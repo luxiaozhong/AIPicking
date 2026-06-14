@@ -86,13 +86,12 @@ def bulk_upsert(records):
             conn = get_conn()
             cur = conn.cursor()
             psycopg2.extras.execute_batch(cur, """
-                INSERT INTO daily (ts_code, trade_date, open, high, low, close, vol, amount, adj_close, market_cap, circ_market_cap)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO daily (ts_code, trade_date, open, high, low, close, vol, amount, adj_close)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (ts_code, trade_date) DO UPDATE SET
                     open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                     close = EXCLUDED.close, vol = EXCLUDED.vol, amount = EXCLUDED.amount,
-                    adj_close = EXCLUDED.adj_close,
-                    market_cap = EXCLUDED.market_cap, circ_market_cap = EXCLUDED.circ_market_cap
+                    adj_close = EXCLUDED.adj_close
             """, records)
             conn.commit()
             return

@@ -409,17 +409,18 @@ class RebalanceEngine:
                 flow_by_tscode[ts_code] += row.get("jumbo_net_flow") or 0.0
                 flow_by_tscode[ts_code] += row.get("block_net_flow") or 0.0
 
-        # 4. 获取每只成分股当天的最新市值
+        # 4. 获取当日市值（从 daily_valuation 合并而来，单位：亿元）
         market_cap_by_tscode = {}
         for ts_code, rows in daily_data.items():
             for r in rows:
                 if r["trade_date"] == today:
                     mc = r.get("market_cap")
                     if mc and mc > 0:
-                        market_cap_by_tscode[ts_code] = mc
+                        market_cap_by_tscode[ts_code] = mc  # 亿元
                     break
 
         # 5. 计算 flow / market_cap 得分
+        # total_flow: 元, mc: 亿元 → 统一为亿元后计算百分比
         recommendations = []
         for raw_code in target_raw_codes:
             ts_code = raw_to_tscode.get(raw_code)
@@ -428,16 +429,16 @@ class RebalanceEngine:
             total_flow = flow_by_tscode.get(ts_code, 0.0)
             mc = market_cap_by_tscode.get(ts_code, 0)
             if mc <= 0:
-                continue  # 无市值数据，跳过
-            score = total_flow / mc * 100  # 资金流占市值百分比
+                continue
+            flow_yi = total_flow / 1e8  # 元 → 亿元
+            score = flow_yi / mc * 100  # 资金流占市值百分比
 
-            yi = total_flow / 1e8
             direction = "流入" if total_flow > 0 else "流出"
             recommendations.append({
                 "ts_code": ts_code,
                 "name": ts_code_to_name.get(ts_code, raw_code),
                 "score": round(score, 4),
-                "signal": f"{valid_dates[-1]}~{valid_dates[0]} 主力净{direction}: {abs(yi):.2f}亿 / 市值比: {score:.4f}%",
+                "signal": f"{valid_dates[-1]}~{valid_dates[0]} 主力净{direction}: {abs(flow_yi):.2f}亿 / 市值比: {score:.4f}%",
             })
 
         recommendations.sort(key=lambda x: x["score"], reverse=True)

@@ -44,8 +44,6 @@ class Daily(BaseModel):
     vol = Column(Float)
     amount = Column(Float)
     adj_close = Column(Float)
-    market_cap = Column(Float, nullable=True)
-    circ_market_cap = Column(Float, nullable=True)
 
 
 class DailySectorFlow(BaseModel):
