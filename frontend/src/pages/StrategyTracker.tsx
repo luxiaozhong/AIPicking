@@ -241,22 +241,45 @@ export default function StrategyTracker() {
   // ── 执行调仓 ──
   const handleExecute = () => {
     if (!strategyId) return;
+    const heldCodes = new Set((status?.holdings || []).map(h => h.ts_code));
+    const newCodes = top3.map(r => r.ts_code);
+    const exits = (status?.holdings || []).filter(h => !newCodes.includes(h.ts_code));
+    const keeps = top3.filter(r => heldCodes.has(r.ts_code));
+    const enters = top3.filter(r => !heldCodes.has(r.ts_code));
+
+    const diffLines: string[] = [];
+    if (exits.length > 0) diffLines.push(`卖出：${exits.map(h => h.stock_name).join('、')}`);
+    if (keeps.length > 0) diffLines.push(`保持：${keeps.map(r => r.name).join('、')}`);
+    if (enters.length > 0) diffLines.push(`新买：${enters.map(r => r.name).join('、')}`);
+    if (diffLines.length === 0) diffLines.push('持仓不变，无需调仓');
+
     Modal.confirm({
       title: '确认执行调仓',
       icon: <ExclamationCircleOutlined />,
-      content: `将以 ${tradeDate || selectedDate} 的推荐结果，在 T+1 开盘价执行买卖。`,
-      okText: '确认执行',
+      content: (
+        <div>
+          <p>将以 {tradeDate || selectedDate} 的推荐结果，在 T+1 开盘价执行：</p>
+          {diffLines.map((line, i) => (
+            <p key={i} style={{ margin: '4px 0', fontWeight: i === 1 ? 'normal' : 500 }}>
+              {line}
+            </p>
+          ))}
+        </div>
+      ),
+      okText: exits.length + enters.length > 0 ? '确认执行' : '无需操作',
       cancelText: '取消',
       onOk: async () => {
+        if (exits.length === 0 && enters.length === 0) return;
         setExecuting(true);
         try {
           const result = await paperTradeService.execute(strategyId, selectedDate);
-          message.success(
-            `调仓完成！${result.summary.sell_count} 卖 ${result.summary.buy_count} 买，`
-            + `手续费 ¥${result.summary.total_commission.toFixed(2)}，`
-            + `印花税 ¥${result.summary.total_stamp_duty.toFixed(2)}`,
-            5,
-          );
+          const parts = [`调仓完成！`];
+          if (result.summary.sell_count > 0) parts.push(`${result.summary.sell_count} 卖`);
+          if (result.summary.buy_count > 0) parts.push(`${result.summary.buy_count} 买`);
+          if (result.summary.keep_count > 0) parts.push(`${result.summary.keep_count} 保持`);
+          parts.push(`手续费 ¥${result.summary.total_commission.toFixed(2)}`);
+          parts.push(`印花税 ¥${result.summary.total_stamp_duty.toFixed(2)}`);
+          message.success(parts.join(' · '), 5);
           await loadData(strategyId, selectedDate);
         } catch (err: unknown) {
           const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -579,12 +602,16 @@ export default function StrategyTracker() {
               ) : (
                 top3.map((rec, idx) => {
                     const lotInfo = calcLots(rec, initialCapital);
+                    const isHeld = status?.holdings?.some(h => h.ts_code === rec.ts_code);
                     return (
                   <Card key={rec.ts_code} size="small"
                     style={{ marginBottom: 8 }} styles={{ body: { padding: 10 } }}>
                     <Space>
                       <Tag color={idx === 0 ? 'red' : idx === 1 ? 'orange' : 'blue'}>
                         #{idx + 1}
+                      </Tag>
+                      <Tag color={isHeld ? 'green' : 'red'} style={{ fontSize: 11 }}>
+                        {isHeld ? '持仓' : '新买入'}
                       </Tag>
                       <div>
                         <div>

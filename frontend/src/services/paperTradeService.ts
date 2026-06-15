@@ -49,6 +49,8 @@ export interface ExecuteSummary {
   holdings_after: number;
   sell_count: number;
   buy_count: number;
+  keep_count: number;
+  kept: string[];
   total_buy_amount: number;
   total_sell_amount: number;
   total_commission: number;
