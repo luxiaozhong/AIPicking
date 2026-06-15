@@ -69,6 +69,7 @@ export interface Recommendation {
   name: string;
   score: number;
   signal: string;
+  close: number;  // T 日收盘价
 }
 
 // ── Service ──────────────────────────────────────────────────

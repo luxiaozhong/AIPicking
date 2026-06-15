@@ -155,6 +155,17 @@ async def get_recommendations(
             if cached_config == cache_key:
                 cached = True
                 recs = json.loads(cache_row.recommendations)
+                # 补充收盘价（兼容旧缓存无 close 或 close=0）
+                if recs and (recs[0].get("close") or 0) <= 0:
+                    ts_codes = [r["ts_code"] for r in recs]
+                    price_stmt = select(Daily.ts_code, Daily.close).where(
+                        Daily.trade_date == trade_date,
+                        Daily.ts_code.in_(ts_codes),
+                    )
+                    price_result = await db.execute(price_stmt)
+                    price_map = {row.ts_code: float(row.close or 0) for row in price_result.all()}
+                    for r in recs:
+                        r["close"] = round(price_map.get(r["ts_code"], 0), 2)
                 return {
                     "strategy_id": strategy_id,
                     "strategy_name": "",
@@ -208,7 +219,25 @@ async def get_recommendations(
         None, _run_strategy_sync, strategy_code, cutoff_yyyymmdd, strategy_config,
     )
 
-    # 5. 缓存结果
+    # 5. 查询 T 日收盘价，合并进推荐结果
+    if recommendations:
+        ts_codes = [r["ts_code"] for r in recommendations]
+        price_stmt = select(Daily.ts_code, Daily.close).where(
+            Daily.trade_date == trade_date,
+            Daily.ts_code.in_(ts_codes),
+        )
+        price_result = await db.execute(price_stmt)
+        price_map = {row.ts_code: float(row.close or 0) for row in price_result.all()}
+        for r in recommendations:
+            r["close"] = round(price_map.get(r["ts_code"], 0), 2)
+
+    # 6. 缓存结果（先删旧缓存再写入，确保无重复）
+    await db.execute(
+        delete(StrategyDailyRec).where(
+            StrategyDailyRec.strategy_id == strategy_id,
+            StrategyDailyRec.cutoff_date == cutoff_yyyymmdd,
+        )
+    )
     cache_entry = StrategyDailyRec(
         strategy_id=strategy_id,
         cutoff_date=cutoff_yyyymmdd,

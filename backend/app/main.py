@@ -73,7 +73,7 @@ async def health_check():
 
 
 # 导入并注册 API 路由
-from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments, financials, trade_sims, market_heat, fund_flow, rebalance, strategy_tracker
+from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments, financials, trade_sims, market_heat, fund_flow, rebalance, strategy_tracker, paper_trade
 app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["strategies"])
 app.include_router(ratings.router, prefix="/api/v1/strategies", tags=["ratings"])
 app.include_router(comments.router, prefix="/api/v1/strategies", tags=["comments"])
@@ -91,3 +91,4 @@ app.include_router(market_heat.router, prefix="/api/v1/market-heat", tags=["mark
 app.include_router(fund_flow.router, prefix="/api/v1/fund-flow", tags=["fund-flow"])
 app.include_router(rebalance.router, prefix="/api/v1/rebalance", tags=["调仓回测"])
 app.include_router(strategy_tracker.router, prefix="/api/v1/strategy-tracker", tags=["策略跟踪"])
+app.include_router(paper_trade.router, prefix="/api/v1/paper-trade", tags=["模拟盘"])
