@@ -750,12 +750,23 @@ def main():
     # Reject weekends — A-share market closed, no fund flow data generated
     target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     if target_date.isoweekday() >= 6:  # Saturday=6, Sunday=7
-        logging.error(
-            f"{date_str} is a weekend (%s), A-share market closed — "
-            "no fund flow data available. Refusing to sync.",
-            target_date.strftime("%A"),
-        )
-        sys.exit(1)
+        if args.date is None:
+            # 默认日期（自动计算）落到周末 → 回退到最近周五
+            days_back = target_date.isoweekday() - 5  # Sat→1, Sun→2
+            target_date = target_date - timedelta(days=days_back)
+            date_str = target_date.strftime("%Y-%m-%d")
+            logging.info(
+                "Default date fell on weekend, using previous trading day: %s",
+                date_str,
+            )
+        else:
+            # 用户显式传了 --date 但却是周末 → 报错
+            logging.error(
+                f"{date_str} is a weekend (%s), A-share market closed — "
+                "no fund flow data available. Refusing to sync.",
+                target_date.strftime("%A"),
+            )
+            sys.exit(1)
 
     # 1. Ensure table exists
     try:

@@ -25,10 +25,27 @@ from datetime import date, datetime
 from pathlib import Path
 from collections import defaultdict
 
-LOG_DIR = Path("/var/log/aipicking")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent  # backend/
+_LOCAL_LOG_DIR = _PROJECT_ROOT.parent / "logs"           # project-root/logs/
+
+# 日志目录：环境变量 > 服务器路径（有实际日志文件）> 本地项目路径
+def _find_log_dir() -> Path:
+    if "AIPICKING_LOG_DIR" in os.environ:
+        return Path(os.environ["AIPICKING_LOG_DIR"])
+    # 检查服务器路径下是否有实际日志文件
+    server_dir = Path("/var/log/aipicking")
+    if (server_dir / "update_daily.log").exists() or (server_dir / "ingest.log").exists():
+        return server_dir
+    return _LOCAL_LOG_DIR
+
+LOG_DIR = _find_log_dir()
+
 UPDATE_LOG = LOG_DIR / "update_daily.log"
 INGEST_LOG = LOG_DIR / "ingest.log"
-ENV_FILE = Path("/opt/AIpicking/backend/.sync_report_env")
+
+# SMTP 配置文件：服务器路径 > 本地项目路径
+_SERVER_ENV = Path("/opt/AIpicking/backend/.sync_report_env")
+ENV_FILE = _SERVER_ENV if _SERVER_ENV.exists() else _PROJECT_ROOT / ".sync_report_env"
 
 
 def load_env():

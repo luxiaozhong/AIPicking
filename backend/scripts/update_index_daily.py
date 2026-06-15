@@ -16,6 +16,11 @@
     venv/bin/python scripts/update_index_daily.py --intraday                 # 强制盘中实时
     venv/bin/python scripts/update_index_daily.py --pg-url postgresql://...  # 指定 PG 地址
 
+盘中 cron（每个交易日，跟随个股日线每30分钟，腾讯实时行情 qt.gtimg.cn）：
+    38,8 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+    8,38 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+    58 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+
 环境变量：
     DATABASE_URL — PostgreSQL 连接（默认解析出 psycopg2 可用 URL）
 """
@@ -253,7 +258,7 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str)
             # 指数成交额估算（K 线不含成交额字段）
             amount  = vol * ((open_p + close_p + high_p + low_p) / 4.0)
             records.append((idx["ts_code"], trade_date, open_p, high_p, low_p,
-                            close_p, vol, amount, close_p, None, None))
+                            close_p, vol, amount, close_p))
         except (ValueError, IndexError):
             continue
     return records

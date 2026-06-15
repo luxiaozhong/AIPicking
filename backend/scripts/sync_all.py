@@ -7,8 +7,8 @@
     venv/bin/python scripts/sync_all.py --date 2026-06-04  # 指定日期
     venv/bin/python scripts/sync_all.py --dry-run          # 仅打印不执行
 
-cron（每个交易日 16:15）：
-    15 16 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
+cron（每个交易日 17:30）：
+    30 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
 """
 
 from __future__ import annotations

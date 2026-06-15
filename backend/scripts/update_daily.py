@@ -22,6 +22,11 @@
     venv/bin/python scripts/update_daily.py --intraday                 # 强制盘中实时模式
     venv/bin/python scripts/update_daily.py --pg-url postgresql://...  # 指定 PG 地址
 
+盘中 cron（每个交易日，跟随板块同步每30分钟，腾讯实时行情 qt.gtimg.cn）：
+    37,7 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+    7,37 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+    57 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+
 环境变量：
     DATABASE_URL — PostgreSQL 连接（默认解析出 psycopg2 可用 URL）
 """
