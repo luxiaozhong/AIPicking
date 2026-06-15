@@ -13,7 +13,7 @@ export interface SaveHoldingsRequest {
   strategy_id: number;
   date: string;
   holdings: HoldingItem[];
-  cash?: number;
+  initial_capital?: number;
 }
 
 export interface HoldingRecord {
@@ -34,8 +34,23 @@ export interface HoldingsByDate {
 export interface NavPoint {
   date: string;
   holdings_value: number;
+  cost_basis: number;
   cash: number;
   total_value: number;
+  initial_capital: number;
+}
+
+export interface NavResponse {
+  nav: NavPoint[];
+  count: number;
+  initial_capital: number;
+  message?: string;
+}
+
+export interface StrategyConfig {
+  strategy_id: number;
+  initial_capital: number;
+  has_config: boolean;
 }
 
 export interface RecommendationsResponse {
@@ -117,10 +132,19 @@ export const strategyTrackerService = {
     strategyId: number,
     startDate?: string,
     endDate?: string,
-  ): Promise<{ nav: NavPoint[]; count: number; message?: string }> {
-    const response = await api.get<{ nav: NavPoint[]; count: number; message?: string }>(
+  ): Promise<NavResponse> {
+    const response = await api.get<NavResponse>(
       `${BASE}/nav`,
       { params: { strategy_id: strategyId, start_date: startDate, end_date: endDate } },
+    );
+    return response.data;
+  },
+
+  // 获取策略配置（初始本金等）
+  async getConfig(strategyId: number): Promise<StrategyConfig> {
+    const response = await api.get<StrategyConfig>(
+      `${BASE}/config`,
+      { params: { strategy_id: strategyId } },
     );
     return response.data;
   },

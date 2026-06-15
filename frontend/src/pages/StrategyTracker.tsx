@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Card, Select, DatePicker, Row, Col, Form, InputNumber, Button,
   Typography, Spin, Empty, Tag, message, Space, Descriptions, Statistic, Alert,
+  Tooltip,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, SaveOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import dayjs from 'dayjs';
@@ -64,7 +65,8 @@ export default function StrategyTracker() {
   const [trendCache, setTrendCache] = useState<Record<string, StockTrend>>({});
   const [trendsLoading, setTrendsLoading] = useState(false);
 
-  // ── 持仓 & 净值 ──
+  // ── 本金 & 持仓 & 净值 ──
+  const [initialCapital, setInitialCapital] = useState<number>(500000);
   const [holdingsByDate, setHoldingsByDate] = useState<HoldingsByDate>({});
   const [navData, setNavData] = useState<NavPoint[]>([]);
   const [saving, setSaving] = useState(false);
@@ -86,6 +88,14 @@ export default function StrategyTracker() {
     }).catch(() => {});
   }, []);
 
+  // ── 加载策略配置（本金）──
+  useEffect(() => {
+    if (!strategyId) return;
+    strategyTrackerService.getConfig(strategyId).then((cfg) => {
+      setInitialCapital(cfg.initial_capital);
+    }).catch(() => {});
+  }, [strategyId]);
+
   // ── 加载推荐 & 持仓 & NAV ──
   const loadData = useCallback(async (sid: number, date: string) => {
     setLoading(true);
@@ -94,7 +104,7 @@ export default function StrategyTracker() {
       const [recRes, holdingsRes, navRes] = await Promise.all([
         strategyTrackerService.getRecommendations(sid, date, false, 5, 10).catch(() => null),
         strategyTrackerService.getHoldings(sid).catch(() => ({ items: {}, total_dates: 0 })),
-        strategyTrackerService.getNav(sid).catch(() => ({ nav: [], count: 0 })),
+        strategyTrackerService.getNav(sid).catch(() => ({ nav: [], count: 0, initial_capital: 0 })),
       ]);
 
       if (recRes) {
@@ -107,6 +117,10 @@ export default function StrategyTracker() {
       }
       setHoldingsByDate(holdingsRes.items || {});
       setNavData(navRes.nav || []);
+      // 同步后端存储的本金到前端状态
+      if (navRes?.initial_capital) {
+        setInitialCapital(navRes.initial_capital);
+      }
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -139,6 +153,9 @@ export default function StrategyTracker() {
       }
       setHoldingsByDate(holdingsRes.items || {});
       setNavData(navRes.nav || []);
+      if (navRes?.initial_capital) {
+        setInitialCapital(navRes.initial_capital);
+      }
     }).catch(() => {}).finally(() => setLoading(false));
   };
 
@@ -239,6 +256,7 @@ export default function StrategyTracker() {
         strategy_id: strategyId,
         date: saveDate,
         holdings,
+        initial_capital: initialCapital,
       });
       message.success(`持仓已保存 (${saveDate})`);
       await loadData(strategyId, selectedDate);
@@ -284,29 +302,57 @@ export default function StrategyTracker() {
 
   // ── NAV chart option ──
   const navOption = {
-    grid: { top: 40, right: 20, bottom: 30, left: 60 },
+    grid: { top: 40, right: 20, bottom: 30, left: 70 },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: { seriesName: string; data: number; axisValue: string }[]) =>
-        params.map((p) => `${p.seriesName}: ¥${(p.data ?? 0).toLocaleString()}`).join('<br/>'),
+      formatter: (params: { seriesName: string; data: number; axisValue: string }[]) => {
+        const lines = params.map((p) => {
+          const v = p.data ?? 0;
+          return `${p.seriesName}: ¥${v.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`;
+        });
+        // 加一行收益率
+        const totalP = params.find((p) => p.seriesName === '总净值');
+        if (totalP && initialCapital > 0) {
+          const pct = (((totalP.data ?? 0) - initialCapital) / initialCapital * 100).toFixed(2);
+          const color = Number(pct) >= 0 ? '#cf1322' : '#3f8600';
+          lines.push(`<b style="color:${color}">收益率: ${pct}%</b>`);
+        }
+        return lines.join('<br/>');
+      },
     },
-    legend: { data: ['持仓市值', '总净值'] },
+    legend: { data: ['持仓市值', '现金', '总净值'] },
     xAxis: { type: 'category' as const, data: navData.map((p) => p.date.slice(5)) },
     yAxis: {
       type: 'value' as const,
       axisLabel: { formatter: (v: number) => `¥${(v / 10000).toFixed(0)}万` },
+      splitLine: { lineStyle: { type: 'dashed' } },
     },
     series: [
       {
         name: '持仓市值', type: 'line',
         data: navData.map((p) => p.holdings_value),
         smooth: true, symbol: 'circle', symbolSize: 4,
+        itemStyle: { color: '#1677ff' },
+      },
+      {
+        name: '现金', type: 'line',
+        data: navData.map((p) => p.cash),
+        smooth: true, symbol: 'diamond', symbolSize: 3,
+        lineStyle: { type: 'dashed', width: 1.5 },
+        itemStyle: { color: '#52c41a' },
       },
       {
         name: '总净值', type: 'line',
         data: navData.map((p) => p.total_value),
-        smooth: true, symbol: 'circle', symbolSize: 4,
+        smooth: true, symbol: 'circle', symbolSize: 5,
         lineStyle: { width: 2.5 },
+        itemStyle: { color: '#cf1322' },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(207,19,34,0.08)' },
+            { offset: 1, color: 'rgba(255,255,255,0.02)' },
+          ]),
+        },
       },
     ],
   };
@@ -342,6 +388,23 @@ export default function StrategyTracker() {
               allowClear={false}
               style={{ width: 160 }}
             />
+          </Col>
+          <Col>
+            <Space size={4}>
+              <Text strong>本金：</Text>
+              <Tooltip title="初始投入资金，用于计算现金 = 本金 - 持仓成本">
+                <InfoCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+              </Tooltip>
+              <InputNumber
+                value={initialCapital}
+                onChange={(v) => setInitialCapital(v ?? 500000)}
+                min={0}
+                step={10000}
+                style={{ width: 140 }}
+                formatter={(value) => `¥ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                parser={(value) => value?.replace(/¥\s?|(,*)/g, '') as unknown as number}
+              />
+            </Space>
           </Col>
           <Col>
             <Space size={8}>
@@ -484,71 +547,7 @@ export default function StrategyTracker() {
               )}
             </Card>
 
-            {top3.length > 0 && (
-              <Card title="Top 3 资金流概览" size="small">
-                {top3.map((rec) => {
-                  const trend = trendCache[rec.ts_code];
-                  const lastDay = trend?.days?.[trend.days.length - 1];
-                  return (
-                    <Descriptions
-                      key={rec.ts_code}
-                      size="small"
-                      column={1}
-                      style={{ marginBottom: 8 }}
-                      styles={{ label: { fontSize: 11 }, content: { fontSize: 12 } }}
-                      title={<Text strong style={{ fontSize: 12 }}>{rec.name}</Text>}
-                    >
-                      <Descriptions.Item label="今日主力净流入">
-                        {lastDay ? fmtFlow(lastDay.main_net_flow) : '-'}
-                      </Descriptions.Item>
-                      <Descriptions.Item label="5日累计">
-                        {lastDay ? fmtFlow(lastDay.main_net_flow_5d) : '-'}
-                      </Descriptions.Item>
-                      <Descriptions.Item label="收盘价">
-                        {lastDay?.close_price ?? '-'}
-                      </Descriptions.Item>
-                    </Descriptions>
-                  );
-                })}
-              </Card>
-            )}
-          </Col>
-
-          {/* 中间: NAV 图表 */}
-          <Col span={12}>
-            <Card title="账户净值变化" size="small" style={{ marginBottom: 16 }}>
-              {navData.length === 0 ? (
-                <Empty
-                  description="暂无净值数据，请先保存持仓"
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                />
-              ) : (
-                <>
-                  <ReactECharts
-                    ref={navChartRef}
-                    option={navOption}
-                    style={{ height: 320 }}
-                  />
-                  <Row gutter={16} style={{ marginTop: 12 }} justify="center">
-                    <Col>
-                      <Statistic title="最新净值" value={navData[navData.length - 1]?.total_value ?? 0}
-                        precision={2} prefix="¥" valueStyle={{ fontSize: 18 }} />
-                    </Col>
-                    <Col>
-                      <Statistic title="起始净值" value={navData[0]?.total_value ?? 0}
-                        precision={2} prefix="¥" valueStyle={{ fontSize: 18 }} />
-                    </Col>
-                    <Col>
-                      <Statistic title="数据天数" value={navData.length} valueStyle={{ fontSize: 18 }} />
-                    </Col>
-                  </Row>
-                </>
-              )}
-            </Card>
-          </Col>
-
-          {/* 右列: 持仓表单 */}
-          <Col span={6}>
+            {/* 持仓表单 */}
             <Card
               title="实际持仓"
               size="small"
@@ -630,6 +629,62 @@ export default function StrategyTracker() {
                   </Button>
                 </Form.Item>
               </Form>
+            </Card>
+          </Col>
+
+          {/* 中间: NAV 图表 */}
+          <Col span={18}>
+            <Card title="账户净值变化" size="small" style={{ marginBottom: 16 }}>
+              {navData.length === 0 ? (
+                <Empty
+                  description="暂无净值数据，请先保存持仓"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              ) : (
+                <>
+                  <ReactECharts
+                    ref={navChartRef}
+                    option={navOption}
+                    style={{ height: 320 }}
+                  />
+                  <Row gutter={16} style={{ marginTop: 12 }} justify="center">
+                    <Col>
+                      <Statistic title="初始本金" value={initialCapital}
+                        precision={0} prefix="¥" valueStyle={{ fontSize: 16, color: '#666' }} />
+                    </Col>
+                    <Col>
+                      <Statistic title="最新市值" value={navData[navData.length - 1]?.holdings_value ?? 0}
+                        precision={0} prefix="¥" valueStyle={{ fontSize: 16 }} />
+                    </Col>
+                    <Col>
+                      <Statistic title="剩余现金" value={navData[navData.length - 1]?.cash ?? 0}
+                        precision={0} prefix="¥" valueStyle={{ fontSize: 16, color: '#52c41a' }} />
+                    </Col>
+                    <Col>
+                      <Statistic title="总净值" value={navData[navData.length - 1]?.total_value ?? 0}
+                        precision={0} prefix="¥" valueStyle={{ fontSize: 16, color: '#cf1322' }} />
+                    </Col>
+                    <Col>
+                      {(() => {
+                        const latest = navData[navData.length - 1];
+                        const pct = latest && initialCapital > 0
+                          ? ((latest.total_value - initialCapital) / initialCapital * 100).toFixed(2)
+                          : '0.00';
+                        return (
+                          <Statistic title="累计收益率" value={pct}
+                            suffix="%" valueStyle={{
+                              fontSize: 16,
+                              color: Number(pct) >= 0 ? '#cf1322' : '#3f8600',
+                            }} />
+                        );
+                      })()}
+                    </Col>
+                    <Col>
+                      <Statistic title="数据天数" value={navData.length} valueStyle={{ fontSize: 16, color: '#999' }} />
+                    </Col>
+                  </Row>
+                </>
+              )}
             </Card>
           </Col>
         </Row>

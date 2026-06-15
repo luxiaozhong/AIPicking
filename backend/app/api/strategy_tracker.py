@@ -13,6 +13,7 @@ from ..database import get_db
 from ..middleware.auth import get_current_user
 from ..models.user_holding import UserHolding
 from ..models.strategy_daily_rec import StrategyDailyRec
+from ..models.user_strategy_config import UserStrategyConfig
 from ..models.strategy import Strategy
 from ..models.stock_tables import Daily
 
@@ -33,7 +34,7 @@ class SaveHoldingsRequest(BaseModel):
     strategy_id: int
     date: str  # YYYY-MM-DD
     holdings: List[HoldingItem]
-    cash: float = 0.0
+    initial_capital: float = 500000.0  # 初始本金，默认 50 万
 
 
 # ── Response schemas ─────────────────────────────────────────
@@ -247,6 +248,30 @@ async def get_latest_trading_day(
     }
 
 
+# ── GET /config ─────────────────────────────────────────────
+
+
+@router.get("/config")
+async def get_strategy_config(
+    strategy_id: int = Query(..., description="策略 ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """获取用户策略配置（初始本金等）"""
+    result = await db.execute(
+        select(UserStrategyConfig).where(
+            UserStrategyConfig.user_id == current_user.id,
+            UserStrategyConfig.strategy_id == strategy_id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    return {
+        "strategy_id": strategy_id,
+        "initial_capital": config.initial_capital if config else 500000.0,
+        "has_config": config is not None,
+    }
+
+
 # ── POST /holdings ───────────────────────────────────────────
 
 
@@ -256,7 +281,26 @@ async def save_holdings(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """保存某日持仓（先删除该日旧数据，再插入新数据）"""
+    """保存某日持仓（先删除该日旧数据，再插入新数据）；同时更新策略本金配置"""
+    # 1. 更新本金配置（upsert）
+    existing_config = await db.execute(
+        select(UserStrategyConfig).where(
+            UserStrategyConfig.user_id == current_user.id,
+            UserStrategyConfig.strategy_id == data.strategy_id,
+        )
+    )
+    config = existing_config.scalar_one_or_none()
+    if config:
+        config.initial_capital = data.initial_capital
+    else:
+        config = UserStrategyConfig(
+            user_id=current_user.id,
+            strategy_id=data.strategy_id,
+            initial_capital=data.initial_capital,
+        )
+        db.add(config)
+
+    # 2. 删除该日旧持仓
     await db.execute(
         delete(UserHolding).where(
             UserHolding.user_id == current_user.id,
@@ -265,6 +309,7 @@ async def save_holdings(
         )
     )
 
+    # 3. 插入新持仓
     for h in data.holdings:
         if not h.ts_code:
             continue
@@ -280,7 +325,11 @@ async def save_holdings(
         db.add(holding)
 
     await db.commit()
-    return {"message": "保存成功", "count": len(data.holdings)}
+    return {
+        "message": "保存成功",
+        "count": len(data.holdings),
+        "initial_capital": data.initial_capital,
+    }
 
 
 # ── GET /holdings ────────────────────────────────────────────
@@ -340,7 +389,23 @@ async def get_nav(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """计算账户净值历史"""
+    """计算账户净值历史
+
+    净值 = 持仓市值 + 现金
+    现金 = 初始本金 - 持仓成本 (sum(shares * buy_price))
+    初始本金从 user_strategy_configs 表读取，默认 50 万
+    """
+    # 1. 读取初始本金
+    config_result = await db.execute(
+        select(UserStrategyConfig).where(
+            UserStrategyConfig.user_id == current_user.id,
+            UserStrategyConfig.strategy_id == strategy_id,
+        )
+    )
+    config = config_result.scalar_one_or_none()
+    initial_capital = config.initial_capital if config else 500000.0
+
+    # 2. 查询持仓
     stmt = select(UserHolding).where(
         UserHolding.user_id == current_user.id,
         UserHolding.strategy_id == strategy_id,
@@ -354,8 +419,13 @@ async def get_nav(
     holdings = result.scalars().all()
 
     if not holdings:
-        return {"nav": [], "message": "暂无持仓记录"}
+        return {
+            "nav": [],
+            "message": "暂无持仓记录",
+            "initial_capital": initial_capital,
+        }
 
+    # 3. 按日期分组
     holdings_by_date: dict = {}
     all_ts_codes: set = set()
     for h in holdings:
@@ -365,6 +435,8 @@ async def get_nav(
         all_ts_codes.add(h.ts_code)
 
     dates = sorted(holdings_by_date.keys())
+
+    # 4. 批量查询收盘价
     price_stmt = select(Daily.trade_date, Daily.ts_code, Daily.close).where(
         Daily.trade_date.in_(dates),
         Daily.ts_code.in_(list(all_ts_codes)),
@@ -379,19 +451,30 @@ async def get_nav(
             price_index[d] = {}
         price_index[d][row.ts_code] = float(row.close or 0)
 
+    # 5. 逐日计算净值
     nav_points = []
     for date in dates:
         day_holdings = holdings_by_date[date]
         holdings_value = 0.0
+        cost_basis = 0.0
         day_prices = price_index.get(date, {})
         for h in day_holdings:
             close_price = day_prices.get(h.ts_code, h.buy_price)
             holdings_value += h.shares * close_price
+            cost_basis += h.shares * h.buy_price
+        cash = initial_capital - cost_basis
+        total_value = holdings_value + cash
         nav_points.append({
             "date": date,
             "holdings_value": round(holdings_value, 2),
-            "cash": 0,
-            "total_value": round(holdings_value, 2),
+            "cost_basis": round(cost_basis, 2),
+            "cash": round(cash, 2),
+            "total_value": round(total_value, 2),
+            "initial_capital": round(initial_capital, 2),
         })
 
-    return {"nav": nav_points, "count": len(nav_points)}
+    return {
+        "nav": nav_points,
+        "count": len(nav_points),
+        "initial_capital": initial_capital,
+    }
