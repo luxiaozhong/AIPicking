@@ -30,8 +30,11 @@ BUY_COMMISSION_RATE = 0.00015    # 万 1.5 买入手续费
 SELL_COMMISSION_RATE = 0.00015   # 万 1.5 卖出手续费
 STAMP_DUTY_RATE = 0.0005         # 万 5 印花税（仅卖出）
 
-# 整手股数（A 股 100 股为 1 手）
-LOT_SIZE = 100
+def _lot_size(ts_code: str) -> int:
+    """获取每手股数：科创板(688) 为 200 股，其余为 100 股"""
+    if ts_code.startswith("688"):
+        return 200
+    return 100
 
 
 # ── Schemas ──────────────────────────────────────────────────
@@ -360,7 +363,40 @@ async def execute_paper_trade(
     if not T:
         raise HTTPException(400, "没有找到最近的交易日")
 
-    # ── Step 3: 防重复 ──
+    # ── Step 3: 找 T+1 日（含向前回溯）──
+    today_str = _beijing_today()
+    T_plus_1 = await _find_next_trading_day(db, T)
+
+    if not T_plus_1 or T_plus_1 > today_str:
+        # T+1 不存在或尚未发生，向前回溯找最近一个有效的 T/T+1 对
+        original_T = T
+        prev_result = await db.execute(
+            select(Daily.trade_date)
+            .where(Daily.trade_date < T)
+            .order_by(Daily.trade_date.desc())
+        )
+        found = False
+        for (prev_T,) in prev_result:
+            next_day = await _find_next_trading_day(db, prev_T)
+            if next_day and next_day <= today_str:
+                T = prev_T
+                T_plus_1 = next_day
+                found = True
+                break
+
+        if not found:
+            if not T_plus_1:
+                raise HTTPException(
+                    400,
+                    f"未找到 {original_T} 之后的下一个交易日，请确认已同步最新数据",
+                )
+            else:
+                raise HTTPException(
+                    400,
+                    f"T+1 执行日 {T_plus_1} 尚未发生（今天是 {today_str}），无法执行",
+                )
+
+    # ── Step 4: 防重复 ──
     existing = await db.execute(
         select(PaperTrade).where(
             PaperTrade.user_id == user_id,
@@ -371,7 +407,7 @@ async def execute_paper_trade(
     if existing.scalar_one_or_none():
         raise HTTPException(409, f"推荐日 {T} 已执行过调仓，请勿重复操作")
 
-    # ── Step 4: 获取 T 日推荐 ──
+    # ── Step 5: 获取 T 日推荐 ──
     cutoff = T.replace("-", "")
     rec_result = await db.execute(
         select(StrategyDailyRec).where(
@@ -392,18 +428,6 @@ async def execute_paper_trade(
         raise HTTPException(400, f"日期 {T} 策略未返回推荐")
 
     top3 = all_recs[:3]
-
-    # ── Step 5: 找 T+1 日 ──
-    T_plus_1 = await _find_next_trading_day(db, T)
-    if not T_plus_1:
-        raise HTTPException(400, f"未找到 {T} 之后的下一个交易日")
-
-    today_str = _beijing_today()
-    if T_plus_1 > today_str:
-        raise HTTPException(
-            400,
-            f"T+1 执行日 {T_plus_1} 尚未发生（今天是 {today_str}），无法执行",
-        )
 
     # ── Step 6: 获取 T+1 开盘价 ──
     new_codes = [r["ts_code"] for r in top3]
@@ -474,10 +498,11 @@ async def execute_paper_trade(
             continue
 
         # shares = floor(budget / (price * (1 + commission_rate)))
+        lot = _lot_size(code)
         raw_shares = int(per_stock_budget / (price * (1 + BUY_COMMISSION_RATE)))
-        shares = (raw_shares // LOT_SIZE) * LOT_SIZE
+        shares = (raw_shares // lot) * lot
 
-        if shares < LOT_SIZE:
+        if shares < lot:
             continue  # 不够买一手，跳过
 
         gross = round(shares * price, 2)

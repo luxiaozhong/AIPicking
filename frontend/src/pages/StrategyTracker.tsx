@@ -15,6 +15,7 @@ import { strategyService } from '@/services/strategyService';
 import { fundFlowService } from '@/services/fundFlowService';
 import strategyTrackerService from '@/services/strategyTrackerService';
 import paperTradeService from '@/services/paperTradeService';
+import StockKLineModal from '@/components/shared/StockKLineModal';
 import type { StockTrend, StockTrendDay } from '@/services/fundFlowService';
 import type { Strategy } from '@/types/strategy';
 import type { Recommendation } from '@/services/strategyTrackerService';
@@ -51,6 +52,26 @@ function fmtFlow(yi: number): string {
 
 function fmtMoney(v: number): string {
   return `¥ ${v.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`;
+}
+
+function getLotSize(tsCode: string): number {
+  // 科创板 688 为 200 股/手，其余为 100 股/手
+  return tsCode.startsWith('688') ? 200 : 100;
+}
+
+interface LotInfo {
+  lots: number;
+  amount: number;
+}
+
+function calcLots(rec: Recommendation, capital: number): LotInfo | null {
+  if (!rec.close || rec.close <= 0) return null;
+  const lotSize = getLotSize(rec.ts_code);
+  const perStockBudget = capital / 3;
+  const perLotCost = lotSize * rec.close;
+  const lots = Math.floor(perStockBudget / perLotCost);
+  if (lots < 1) return null;
+  return { lots, amount: lots * perLotCost };
 }
 
 // 交易记录表格列定义
@@ -108,6 +129,9 @@ export default function StrategyTracker() {
   // ── Top 10 资金流 ──
   const [trendCache, setTrendCache] = useState<Record<string, StockTrend>>({});
   const [trendsLoading, setTrendsLoading] = useState(false);
+
+  // ── K 线弹窗 ──
+  const [klineStock, setKlineStock] = useState<{ ts_code: string; name: string } | null>(null);
 
   // ── 模拟盘状态 ──
   const [initialCapital, setInitialCapital] = useState<number>(500000);
@@ -500,7 +524,13 @@ export default function StrategyTracker() {
                           <Tag color={idx < 3 ? 'red' : 'default'} style={{ margin: 0 }}>
                             #{idx + 1}
                           </Tag>
-                          <Text strong style={{ fontSize: 12 }}>{rec.name}</Text>
+                          <Text
+                            strong
+                            style={{ fontSize: 12, cursor: 'pointer' }}
+                            onClick={() => setKlineStock({ ts_code: rec.ts_code, name: rec.name })}
+                          >
+                            {rec.name}
+                          </Text>
                         </Space>
                       }
                     >
@@ -547,7 +577,9 @@ export default function StrategyTracker() {
               {top3.length === 0 ? (
                 <Empty description="暂无推荐" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               ) : (
-                top3.map((rec, idx) => (
+                top3.map((rec, idx) => {
+                    const lotInfo = calcLots(rec, initialCapital);
+                    return (
                   <Card key={rec.ts_code} size="small"
                     style={{ marginBottom: 8 }} styles={{ body: { padding: 10 } }}>
                     <Space>
@@ -563,14 +595,26 @@ export default function StrategyTracker() {
                         </div>
                         <div style={{ marginTop: 4 }}>
                           <Text style={{ fontSize: 12, color: '#888' }}>评分: {rec.score}</Text>
+                          {rec.close > 0 && (
+                            <Text style={{ fontSize: 12, color: '#888', marginLeft: 12 }}>
+                              收盘: ¥{rec.close.toFixed(2)}
+                            </Text>
+                          )}
                         </div>
+                        {lotInfo && (
+                          <div style={{ marginTop: 2 }}>
+                            <Text style={{ fontSize: 12, color: '#1677ff' }}>
+                              {lotInfo.lots} 手 · {fmtMoney(lotInfo.amount)}
+                            </Text>
+                          </div>
+                        )}
                         <Text style={{ fontSize: 11, color: '#999' }} ellipsis={{ tooltip: true }}>
                           {rec.signal}
                         </Text>
                       </div>
                     </Space>
                   </Card>
-                ))
+                )})
               )}
             </Card>
 
@@ -731,6 +775,12 @@ export default function StrategyTracker() {
           </Col>
         </Row>
       </Spin>
+      <StockKLineModal
+        ts_code={klineStock?.ts_code ?? ''}
+        name={klineStock?.name}
+        open={!!klineStock}
+        onClose={() => setKlineStock(null)}
+      />
     </div>
   );
 }
