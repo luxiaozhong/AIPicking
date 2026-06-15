@@ -453,15 +453,24 @@ async def execute_paper_trade(
     if missing_old:
         raise HTTPException(400, f"T+1 ({T_plus_1}) 缺少旧股开盘价: {missing_old}")
 
-    # ── Step 7: 计算可用现金 ──
+    # ── Step 7: 计算可用现金 & 持仓 diff ──
     all_trades = await _get_all_trades(db, user_id, data.strategy_id)
     cash = config.initial_capital + sum(t.net_amount for t in all_trades)
     cash_before = round(cash, 2)
 
     trades_to_insert: List[PaperTrade] = []
 
-    # ── Step 8: 卖出全部持仓 ──
-    for h in current_holdings:
+    # 持仓对比：退出（old - new）、保留（old ∩ new）、新进（new - old）
+    old_codes_set = {h["ts_code"] for h in current_holdings}
+    new_codes_set = {r["ts_code"] for r in top3}
+    exit_holdings = [h for h in current_holdings if h["ts_code"] not in new_codes_set]
+    keep_codes = old_codes_set & new_codes_set
+    enter_recs = [r for r in top3 if r["ts_code"] not in old_codes_set]
+
+    kept_names = [h["stock_name"] for h in current_holdings if h["ts_code"] in keep_codes]
+
+    # ── Step 8: 只卖出退出的持仓 ──
+    for h in exit_holdings:
         price = open_prices[h["ts_code"]]
         gross = round(h["shares"] * price, 2)
         commission = round(gross * SELL_COMMISSION_RATE, 2)
@@ -485,55 +494,53 @@ async def execute_paper_trade(
             net_amount=net,
         ))
 
-    sell_count = len(current_holdings)
+    sell_count = len(exit_holdings)
 
-    # ── Step 9: 等权买入 Top 3 ──
-    per_stock_budget = cash / 3.0
+    # ── Step 9: 等权买入新进推荐 ──
     buy_count = 0
+    if enter_recs:
+        per_stock_budget = cash / len(enter_recs)
+        for rec in enter_recs:
+            code = rec["ts_code"]
+            price = open_prices[code]
+            if price <= 0:
+                continue
 
-    for rec in top3:
-        code = rec["ts_code"]
-        price = open_prices[code]
-        if price <= 0:
-            continue
+            lot = _lot_size(code)
+            raw_shares = int(per_stock_budget / (price * (1 + BUY_COMMISSION_RATE)))
+            shares = (raw_shares // lot) * lot
 
-        # shares = floor(budget / (price * (1 + commission_rate)))
-        lot = _lot_size(code)
-        raw_shares = int(per_stock_budget / (price * (1 + BUY_COMMISSION_RATE)))
-        shares = (raw_shares // lot) * lot
+            if shares < lot:
+                continue  # 不够买一手，跳过
 
-        if shares < lot:
-            continue  # 不够买一手，跳过
+            gross = round(shares * price, 2)
+            commission = round(gross * BUY_COMMISSION_RATE, 2)
+            net = round(-(gross + commission), 2)  # 现金流出
+            cash += net
 
-        gross = round(shares * price, 2)
-        commission = round(gross * BUY_COMMISSION_RATE, 2)
-        net = round(-(gross + commission), 2)  # 现金流出
-        cash += net
-
-        trades_to_insert.append(PaperTrade(
-            user_id=user_id,
-            strategy_id=data.strategy_id,
-            action="buy",
-            exec_date=T_plus_1,
-            rec_date=T,
-            ts_code=code,
-            stock_name=rec.get("name", code),
-            shares=shares,
-            price=price,
-            amount=gross,
-            commission=commission,
-            stamp_duty=0.0,
-            net_amount=net,
-        ))
-        buy_count += 1
+            trades_to_insert.append(PaperTrade(
+                user_id=user_id,
+                strategy_id=data.strategy_id,
+                action="buy",
+                exec_date=T_plus_1,
+                rec_date=T,
+                ts_code=code,
+                stock_name=rec.get("name", code),
+                shares=shares,
+                price=price,
+                amount=gross,
+                commission=commission,
+                stamp_duty=0.0,
+                net_amount=net,
+            ))
+            buy_count += 1
 
     # ── Step 10: 校验 & 保存 ──
-    if not trades_to_insert:
+    if not trades_to_insert and not keep_codes:
         raise HTTPException(400, "无有效交易生成，请检查推荐和资金")
 
-    buy_ts = [t for t in trades_to_insert if t.action == "buy"]
-    if not buy_ts and sell_count > 0:
-        raise HTTPException(400, "卖出成功但所有新股资金不足（不够买一手），请检查资金")
+    if enter_recs and buy_count == 0 and sell_count == 0 and not keep_codes:
+        raise HTTPException(400, "新推荐股票资金不足（不够买一手），请检查资金")
 
     db.add_all(trades_to_insert)
     await db.commit()
@@ -582,6 +589,8 @@ async def execute_paper_trade(
             "holdings_after": len(final_holdings),
             "sell_count": sell_count,
             "buy_count": buy_count,
+            "keep_count": len(keep_codes),
+            "kept": kept_names,
             "total_buy_amount": round(total_buy_amount, 2),
             "total_sell_amount": round(total_sell_amount, 2),
             "total_commission": round(total_commission, 2),
