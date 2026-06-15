@@ -731,6 +731,16 @@ def main():
         logging.error(f"Invalid date format: {date_str}. Use YYYY-MM-DD.")
         sys.exit(1)
 
+    # Reject weekends — A-share market closed, no fund flow data generated
+    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    if target_date.isoweekday() >= 6:  # Saturday=6, Sunday=7
+        logging.error(
+            f"{date_str} is a weekend (%s), A-share market closed — "
+            "no fund flow data available. Refusing to sync.",
+            target_date.strftime("%A"),
+        )
+        sys.exit(1)
+
     # 1. Ensure table exists
     try:
         ensure_table()
