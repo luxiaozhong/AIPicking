@@ -328,8 +328,9 @@ def parse_markdown_table(output: str) -> list[dict]:
         stripped = line.strip()
         if not stripped.startswith("|"):
             continue
-        # Skip separator lines (|---|---|...)
-        if stripped.startswith("|---"):
+        # Skip separator lines (| --- | --- |)
+        cleaned = stripped.replace("|", "").replace("-", "").replace(" ", "")
+        if not cleaned:
             continue
 
         cells = [c.strip() for c in stripped.strip().strip("|").split("|")]
