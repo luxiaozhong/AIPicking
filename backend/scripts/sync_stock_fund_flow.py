@@ -25,9 +25,13 @@ Usage:
     venv/bin/python scripts/sync_stock_fund_flow.py --pg-url postgresql://...
 
 Cron:
-    # 盘后同步（16:30）
-    30 16 * * 1-5 cd /opt/AIpicking/backend && \\
-        venv/bin/python scripts/sync_stock_fund_flow.py --date $(date -v-1d +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+    # 上午收盘后预同步（11:30）— 盘后 sync_all.py 会覆盖为最终数据
+    30 11 * * 1-5 cd /opt/AIpicking/backend && \\
+        venv/bin/python scripts/sync_stock_fund_flow.py --date $(date +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+    # 午后预同步（14:15）— 盘后 sync_all.py 会覆盖为最终数据
+    15 14 * * 1-5 cd /opt/AIpicking/backend && \\
+        venv/bin/python scripts/sync_stock_fund_flow.py --date $(date +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+    # 盘后最终同步（17:30，通过 sync_all.py 统一调度，自动覆盖上述数据）
 """
 
 from __future__ import annotations

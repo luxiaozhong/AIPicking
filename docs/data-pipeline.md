@@ -6,7 +6,13 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Crontab (服务器) — 仅一条                          │
+│                    Crontab (服务器)                                  │
+│                                                                     │
+│  11:30 ── sync_stock_fund_flow.py  ──► daily_stock_fund_flow        │
+│            (预同步，盘后覆盖)                                         │
+│                                                                     │
+│  14:15 ── sync_stock_fund_flow.py  ──► daily_stock_fund_flow        │
+│            (预同步，盘后覆盖)                                         │
 │                                                                     │
 │  16:15 ── sync_all.py                                              │
 │            │                                                        │
@@ -19,7 +25,10 @@
 │            │                                daily_hot_themes         │
 │            │                                daily_northbound_flow    │
 │            │                                daily_sector_flow        │
-│            └─ 6. sync_report.py         ──► 数据同步日报（通知）      │
+│            ├─ 6. sync_stock_fund_flow.py───► daily_stock_fund_flow   │
+│            │                                (覆盖盘中预同步数据)       │
+│            ├─ 7. sync_market_temperature.py──► daily_market_temperature │
+│            └─ 8. sync_report.py         ──► 数据同步日报（通知）      │
 │                                                                     │
 │  (未配置 cron，仅手动)                                               │
 │         sync_financials.py       ──► financial_reports（每季度一次）  │
@@ -28,14 +37,44 @@
 
 ## Crontab 配置（服务器上）
 
-所有同步任务由 `sync_all.py` 统一调度，cron 只需一条：
-
 ```cron
-# AIpicking 每日数据同步总调度（每个工作日 16:15）
-15 16 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
+# === 盘后总调度（每个工作日 17:30）===
+30 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
+
+# === 个股资金流盘中预同步（幂等，盘后 sync_all.py 会覆盖为最终数据）===
+30 11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_stock_fund_flow.py --date $(date +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+15 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_stock_fund_flow.py --date $(date +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+
+# === 盘中板块同步（每30分钟）===
+35,5 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
+5,35 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
+55 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
+
+# === 盘中个股日线更新（每30分钟，腾讯实时行情 qt.gtimg.cn，比板块同步晚2分钟）===
+37,7 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+7,37 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+57 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+
+# === 盘中指数日线更新（每30分钟，比个股日线晚1分钟）===
+38,8 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+8,38 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+58 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+
+# === 盘后回测（工作日 17:45）===
+45 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python TmpScriptsBackTest/run_daily_backtests.py -q >> /var/log/aipicking/daily_backtest.log 2>&1
+
+# === 龙虎榜早上回补（每天 8:30，含周六，覆盖周五漏掉的数据）===
+30 8 * * * cd /opt/AIpicking/backend && venv/bin/python scripts/sync_dragon_tiger.py --date $(date -d "yesterday" +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
 ```
 
-`sync_all.py` 内部按依赖顺序串行执行 6 个脚本，任意一步失败不会阻断后续任务，最终打印成功/失败汇总。
+`sync_all.py` 内部按依赖顺序串行执行 8 个脚本，任意一步失败不会阻断后续任务，最终打印成功/失败汇总。
+
+### 盘中更新说明
+
+- **板块资金流** (`sync_market_data.py --intraday`)：每 30 分钟拉取东财板块排名+资金流，轻量模式
+- **个股日线** (`update_daily.py --intraday`)：每 30 分钟拉取腾讯实时行情 (`qt.gtimg.cn`)，~5200 只 A 股，约 2-3 分钟完成
+- **指数日线** (`update_index_daily.py --intraday`)：每 30 分钟拉取 5 大指数实时行情，秒级完成
+- 三层任务错开 1-2 分钟执行，避免同时抢占网络/数据库资源
 
 ## 所有 Job 详解
 
@@ -175,5 +214,6 @@ venv/bin/python scripts/sync_financials.py --init             # 全量近 5 年
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-15 | 新增 11:30 / 14:15 两档个股资金流盘中预同步（幂等写入，盘后 sync_all 覆盖为最终数据） |
 | 2026-06-05 | 所有同步任务整合为 `sync_all.py` 总调度，cron 简化为一条（17:00） |
 | 2026-06-05 | `sync_valuation.py` 加入 cron，补充 `update_index_daily.py` 和 `sync_report.py` 文档 |
