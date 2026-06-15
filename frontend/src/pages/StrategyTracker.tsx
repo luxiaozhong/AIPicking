@@ -1,31 +1,34 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Card, Select, DatePicker, Row, Col, Form, InputNumber, Button,
-  Typography, Spin, Empty, Tag, message, Space, Descriptions, Statistic, Alert,
-  Tooltip,
+  Card, Select, DatePicker, Row, Col, InputNumber, Button, Table,
+  Typography, Spin, Empty, Tag, message, Space, Statistic, Alert, Tooltip,
+  Popconfirm, Modal,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, SaveOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import {
+  ReloadOutlined, InfoCircleOutlined, PlayCircleOutlined,
+  DeleteOutlined, ExclamationCircleOutlined,
+} from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import dayjs from 'dayjs';
 import { strategyService } from '@/services/strategyService';
 import { fundFlowService } from '@/services/fundFlowService';
 import strategyTrackerService from '@/services/strategyTrackerService';
+import paperTradeService from '@/services/paperTradeService';
 import type { StockTrend, StockTrendDay } from '@/services/fundFlowService';
 import type { Strategy } from '@/types/strategy';
+import type { Recommendation } from '@/services/strategyTrackerService';
 import type {
-  Recommendation, HoldingItem, NavPoint, HoldingsByDate,
-} from '@/services/strategyTrackerService';
+  PaperStatus, PaperHolding, PaperTradeRecord, ExecuteResult,
+} from '@/services/paperTradeService';
 
 const { Title, Text } = Typography;
 
-// A 股交易日：周一到周五（简化判断，精确判断由后端处理）
 function isWeekend(date: string): boolean {
   const d = dayjs(date);
   return d.day() === 0 || d.day() === 6;
 }
 
-// 5 日滚动求和
 function calcRolling5(days: StockTrendDay[]): number[] {
   const flows = days.map((d) => d.main_net_flow);
   const rolling: number[] = [];
@@ -38,7 +41,6 @@ function calcRolling5(days: StockTrendDay[]): number[] {
   return rolling;
 }
 
-// 金额格式化
 function fmtFlow(yi: number): string {
   const abs = Math.abs(yi);
   if (abs >= 1e8) return `${(yi / 1e8).toFixed(2)}万亿`;
@@ -47,34 +49,75 @@ function fmtFlow(yi: number): string {
   return `${yi.toFixed(0)}万`;
 }
 
+function fmtMoney(v: number): string {
+  return `¥ ${v.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`;
+}
+
+// 交易记录表格列定义
+const tradeColumns = [
+  {
+    title: '执行日', dataIndex: 'exec_date', key: 'exec_date', width: 100,
+  },
+  {
+    title: '操作', dataIndex: 'action', key: 'action', width: 60,
+    render: (a: string) => (
+      <Tag color={a === 'buy' ? 'red' : 'green'}>{a === 'buy' ? '买入' : '卖出'}</Tag>
+    ),
+  },
+  { title: '股票', dataIndex: 'stock_name', key: 'stock_name', width: 100 },
+  {
+    title: '股数', dataIndex: 'shares', key: 'shares', width: 80,
+    render: (v: number) => v.toLocaleString(),
+  },
+  {
+    title: '成交价', dataIndex: 'price', key: 'price', width: 80,
+    render: (v: number) => v.toFixed(2),
+  },
+  {
+    title: '成交金额', dataIndex: 'amount', key: 'amount', width: 110,
+    render: (v: number) => fmtMoney(v),
+  },
+  {
+    title: '手续费', dataIndex: 'commission', key: 'commission', width: 80,
+    render: (v: number) => v.toFixed(2),
+  },
+  {
+    title: '印花税', dataIndex: 'stamp_duty', key: 'stamp_duty', width: 80,
+    render: (v: number) => v > 0 ? v.toFixed(2) : '-',
+  },
+  {
+    title: '净额', dataIndex: 'net_amount', key: 'net_amount', width: 110,
+    render: (v: number) => (
+      <Text style={{ color: v >= 0 ? '#3f8600' : '#cf1322' }}>{fmtMoney(v)}</Text>
+    ),
+  },
+];
+
 export default function StrategyTracker() {
-  // ── 策略 & 日期状态 ──
+  // ── 策略 & 日期 ──
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [strategyId, setStrategyId] = useState<number | undefined>();
   const [selectedDate, setSelectedDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [loading, setLoading] = useState(false);
 
-  // ── 实际交易日（后端可能回退到最近交易日）──
+  // ── 推荐 ──
   const [tradeDate, setTradeDate] = useState<string>(selectedDate);
   const [cached, setCached] = useState(false);
-
-  // ── 推荐数据 ──
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
 
-  // ── Top 10 资金流趋势缓存 ──
+  // ── Top 10 资金流 ──
   const [trendCache, setTrendCache] = useState<Record<string, StockTrend>>({});
   const [trendsLoading, setTrendsLoading] = useState(false);
 
-  // ── 本金 & 持仓 & 净值 ──
+  // ── 模拟盘状态 ──
   const [initialCapital, setInitialCapital] = useState<number>(500000);
-  const [holdingsByDate, setHoldingsByDate] = useState<HoldingsByDate>({});
-  const [navData, setNavData] = useState<NavPoint[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<PaperStatus | null>(null);
+  const [navData, setNavData] = useState<{ date: string; cash: number; holdings_value: number; total_value: number }[]>([]);
+  const [trades, setTrades] = useState<PaperTradeRecord[]>([]);
+  const [tradesTotal, setTradesTotal] = useState(0);
+  const [tradesPage, setTradesPage] = useState(1);
+  const [executing, setExecuting] = useState(false);
 
-  // 持仓表单
-  const [form] = Form.useForm();
-
-  // ECharts ref
   const navChartRef = useRef<ReactECharts>(null);
 
   // ── 加载策略列表 ──
@@ -88,7 +131,7 @@ export default function StrategyTracker() {
     }).catch(() => {});
   }, []);
 
-  // ── 加载策略配置（本金）──
+  // ── 加载本金 ──
   useEffect(() => {
     if (!strategyId) return;
     strategyTrackerService.getConfig(strategyId).then((cfg) => {
@@ -96,15 +139,25 @@ export default function StrategyTracker() {
     }).catch(() => {});
   }, [strategyId]);
 
-  // ── 加载推荐 & 持仓 & NAV ──
+  // ── 本金变更 → 同步到后端 ──
+  const handleCapitalChange = (v: number | null) => {
+    const val = v ?? 500000;
+    setInitialCapital(val);
+    if (strategyId) {
+      paperTradeService.start(strategyId, val).catch(() => {});
+    }
+  };
+
+  // ── 加载数据 ──
   const loadData = useCallback(async (sid: number, date: string) => {
     setLoading(true);
     setCached(false);
     try {
-      const [recRes, holdingsRes, navRes] = await Promise.all([
+      const [recRes, statusRes, navRes, tradesRes] = await Promise.all([
         strategyTrackerService.getRecommendations(sid, date, false, 5, 10).catch(() => null),
-        strategyTrackerService.getHoldings(sid).catch(() => ({ items: {}, total_dates: 0 })),
-        strategyTrackerService.getNav(sid).catch(() => ({ nav: [], count: 0, initial_capital: 0 })),
+        paperTradeService.getStatus(sid).catch(() => null),
+        paperTradeService.getNav(sid).catch(() => null),
+        paperTradeService.getTrades(sid, 1, 20).catch(() => null),
       ]);
 
       if (recRes) {
@@ -115,11 +168,14 @@ export default function StrategyTracker() {
         setRecommendations([]);
         setTradeDate(date);
       }
-      setHoldingsByDate(holdingsRes.items || {});
-      setNavData(navRes.nav || []);
-      // 同步后端存储的本金到前端状态
-      if (navRes?.initial_capital) {
-        setInitialCapital(navRes.initial_capital);
+      setStatus(statusRes);
+      if (navRes) {
+        setNavData(navRes.nav || []);
+      }
+      if (tradesRes) {
+        setTrades(tradesRes.trades || []);
+        setTradesTotal(tradesRes.total);
+        setTradesPage(tradesRes.page);
       }
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -128,151 +184,126 @@ export default function StrategyTracker() {
     }
   }, []);
 
-  // 策略变化时重新加载（日期不变时也用缓存）
   useEffect(() => {
-    if (strategyId) {
-      loadData(strategyId, selectedDate);
-    }
+    if (strategyId) loadData(strategyId, selectedDate);
   }, [strategyId, selectedDate, loadData]);
 
-  // ── 强制刷新（忽略缓存）──
+  // ── 强制刷新 ──
   const handleForceRefresh = () => {
     if (!strategyId) return;
-    // 临时方案：直接调 getRecommendations 带 force_refresh
     setLoading(true);
     setCached(false);
     Promise.all([
       strategyTrackerService.getRecommendations(strategyId, selectedDate, true, 5, 10),
-      strategyTrackerService.getHoldings(strategyId),
-      strategyTrackerService.getNav(strategyId),
-    ]).then(([recRes, holdingsRes, navRes]) => {
+      paperTradeService.getStatus(strategyId),
+      paperTradeService.getNav(strategyId),
+      paperTradeService.getTrades(strategyId, 1, 20),
+    ]).then(([recRes, statusRes, navRes, tradesRes]) => {
       if (recRes) {
         setRecommendations(recRes.recommendations || []);
         setTradeDate(recRes.trade_date || selectedDate);
         setCached(recRes.cached);
       }
-      setHoldingsByDate(holdingsRes.items || {});
-      setNavData(navRes.nav || []);
-      if (navRes?.initial_capital) {
-        setInitialCapital(navRes.initial_capital);
+      setStatus(statusRes);
+      if (navRes) setNavData(navRes.nav || []);
+      if (tradesRes) {
+        setTrades(tradesRes.trades || []);
+        setTradesTotal(tradesRes.total);
+        setTradesPage(tradesRes.page);
       }
     }).catch(() => {}).finally(() => setLoading(false));
   };
 
-  // ── 加载 Top 10 资金流趋势 ──
+  // ── 执行调仓 ──
+  const handleExecute = () => {
+    if (!strategyId) return;
+    Modal.confirm({
+      title: '确认执行调仓',
+      icon: <ExclamationCircleOutlined />,
+      content: `将以 ${tradeDate || selectedDate} 的推荐结果，在 T+1 开盘价执行买卖。`,
+      okText: '确认执行',
+      cancelText: '取消',
+      onOk: async () => {
+        setExecuting(true);
+        try {
+          const result = await paperTradeService.execute(strategyId, selectedDate);
+          message.success(
+            `调仓完成！${result.summary.sell_count} 卖 ${result.summary.buy_count} 买，`
+            + `手续费 ¥${result.summary.total_commission.toFixed(2)}，`
+            + `印花税 ¥${result.summary.total_stamp_duty.toFixed(2)}`,
+            5,
+          );
+          await loadData(strategyId, selectedDate);
+        } catch (err: unknown) {
+          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+            || (err as Error)?.message
+            || '执行失败';
+          message.error(msg);
+        } finally {
+          setExecuting(false);
+        }
+      },
+    });
+  };
+
+  // ── 重置模拟盘 ──
+  const handleReset = async () => {
+    if (!strategyId) return;
+    try {
+      const res = await paperTradeService.reset(strategyId);
+      message.success(res.message);
+      await loadData(strategyId, selectedDate);
+    } catch {
+      message.error('重置失败');
+    }
+  };
+
+  // ── 交易分页 ──
+  const handleTradesPageChange = async (page: number) => {
+    if (!strategyId) return;
+    const res = await paperTradeService.getTrades(strategyId, page, 20);
+    setTrades(res.trades || []);
+    setTradesTotal(res.total);
+    setTradesPage(res.page);
+  };
+
+  // ── Top 10 资金流 ──
   useEffect(() => {
     if (recommendations.length === 0) return;
-
     const top10 = recommendations.slice(0, 10);
     const toFetch = top10.filter((r) => !trendCache[r.ts_code]);
-
     if (toFetch.length === 0) return;
-
     setTrendsLoading(true);
     Promise.all(
-      toFetch.map((r) =>
-        fundFlowService.getStockTrend(r.ts_code, 20).catch(() => null),
-      ),
+      toFetch.map((r) => fundFlowService.getStockTrend(r.ts_code, 20).catch(() => null)),
     ).then((results) => {
       const newCache = { ...trendCache };
       results.forEach((trend, i) => {
-        if (trend) {
-          newCache[toFetch[i].ts_code] = trend;
-        }
+        if (trend) newCache[toFetch[i].ts_code] = trend;
       });
       setTrendCache(newCache);
       setTrendsLoading(false);
     });
   }, [recommendations]);
 
-  // ── 日期变更 ──
   const handleDateChange = (date: dayjs.Dayjs | null) => {
     if (date) setSelectedDate(date.format('YYYY-MM-DD'));
   };
 
-  // ── Top 3 推荐 ──
   const top3 = recommendations.slice(0, 3);
 
-  // 日期偏移提示
   const dateOffsetMsg =
     selectedDate !== tradeDate
       ? `${selectedDate} 是${isWeekend(selectedDate) ? '周末' : '非交易日'}，已回退到最近交易日 ${tradeDate}`
       : null;
 
-  // ── 持仓表单填充 ──
-  const fillFormWithTop3 = () => {
-    form.setFieldsValue({
-      holdings: top3.map((r) => ({
-        ts_code: r.ts_code,
-        stock_name: r.name,
-        shares: 0,
-        buy_price: 0,
-      })),
-    });
-  };
+  // ── 是否已执行（当天推荐已调仓）──
+  const hasExecutedToday = status?.last_rec_date === tradeDate;
 
-  useEffect(() => {
-    if (top3.length > 0) {
-      fillFormWithTop3();
-    }
-  }, [recommendations]);
-
-  const loadExistingHoldings = () => {
-    const dayHoldings = holdingsByDate[selectedDate] || holdingsByDate[tradeDate];
-    if (dayHoldings && dayHoldings.length > 0) {
-      form.setFieldsValue({
-        holdings: dayHoldings.map((h) => ({
-          ts_code: h.ts_code,
-          stock_name: h.stock_name,
-          shares: h.shares,
-          buy_price: h.buy_price,
-        })),
-      });
-      message.info('已加载该日期的持仓记录');
-    } else if (top3.length > 0) {
-      fillFormWithTop3();
-      message.info('该日期无持仓记录，已填入推荐股票');
-    }
-  };
-
-  // ── 保存持仓 ──
-  const handleSaveHoldings = async () => {
-    if (!strategyId) return;
-    try {
-      const values = await form.validateFields();
-      const holdings: HoldingItem[] = (values.holdings || [])
-        .filter((h: HoldingItem) => h.ts_code)
-        .map((h: HoldingItem) => ({
-          ts_code: h.ts_code,
-          stock_name: h.stock_name || '',
-          shares: h.shares || 0,
-          buy_price: h.buy_price || 0,
-        }));
-
-      setSaving(true);
-      // 用实际交易日保存
-      const saveDate = tradeDate || selectedDate;
-      await strategyTrackerService.saveHoldings({
-        strategy_id: strategyId,
-        date: saveDate,
-        holdings,
-        initial_capital: initialCapital,
-      });
-      message.success(`持仓已保存 (${saveDate})`);
-      await loadData(strategyId, selectedDate);
-    } catch (err) {
-      if (err && typeof err === 'object' && 'errorFields' in err) return;
-      message.error('保存失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ── Mini 资金流 chart option ──
+  // ── Mini 资金流 chart ──
   const makeMiniOption = (trend: StockTrend) => {
     const dates = trend.days.map((d) => d.trade_date.slice(5));
     const rolling5 = calcRolling5(trend.days);
-
     return {
       grid: { top: 8, right: 6, bottom: 14, left: 6 },
       tooltip: {
@@ -285,10 +316,7 @@ export default function StrategyTracker() {
       xAxis: { type: 'category' as const, data: dates, show: false },
       yAxis: { type: 'value' as const, show: false },
       series: [{
-        type: 'line',
-        data: rolling5,
-        smooth: true,
-        symbol: 'none',
+        type: 'line', data: rolling5, smooth: true, symbol: 'none',
         lineStyle: { width: 1.5 },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -310,7 +338,6 @@ export default function StrategyTracker() {
           const v = p.data ?? 0;
           return `${p.seriesName}: ¥${v.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`;
         });
-        // 加一行收益率
         const totalP = params.find((p) => p.seriesName === '总净值');
         if (totalP && initialCapital > 0) {
           const pct = (((totalP.data ?? 0) - initialCapital) / initialCapital * 100).toFixed(2);
@@ -357,7 +384,7 @@ export default function StrategyTracker() {
     ],
   };
 
-  // ── 渲染 ──
+  // ── Render ──
   return (
     <div style={{ padding: '0 0 24px' }}>
       {/* 顶部工具栏 */}
@@ -374,10 +401,7 @@ export default function StrategyTracker() {
               filterOption={(input, option) =>
                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
               }
-              options={strategies.map((s) => ({
-                value: s.id,
-                label: s.name,
-              }))}
+              options={strategies.map((s) => ({ value: s.id, label: s.name }))}
             />
           </Col>
           <Col>
@@ -392,13 +416,13 @@ export default function StrategyTracker() {
           <Col>
             <Space size={4}>
               <Text strong>本金：</Text>
-              <Tooltip title="初始投入资金，用于计算现金 = 本金 - 持仓成本">
+              <Tooltip title="初始投入资金">
                 <InfoCircleOutlined style={{ color: '#999', fontSize: 12 }} />
               </Tooltip>
               <InputNumber
                 value={initialCapital}
-                onChange={(v) => setInitialCapital(v ?? 500000)}
-                min={0}
+                onChange={handleCapitalChange}
+                min={10000}
                 step={10000}
                 style={{ width: 140 }}
                 formatter={(value) => `¥ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
@@ -407,43 +431,58 @@ export default function StrategyTracker() {
             </Space>
           </Col>
           <Col>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleExecute}
+              loading={executing}
+              disabled={hasExecutedToday}
+            >
+              {hasExecutedToday ? '已执行' : '执行调仓'}
+            </Button>
+          </Col>
+          <Col>
             <Space size={8}>
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={handleForceRefresh}
-                loading={loading}
-              >
+              <Button icon={<ReloadOutlined />} onClick={handleForceRefresh} loading={loading}>
                 强制刷新
               </Button>
+              {status && status.trade_count > 0 && (
+                <Popconfirm
+                  title="确认清空所有模拟交易？本金不变。"
+                  onConfirm={handleReset}
+                  okText="确认"
+                  cancelText="取消"
+                >
+                  <Button icon={<DeleteOutlined />} danger size="small">
+                    重置
+                  </Button>
+                </Popconfirm>
+              )}
             </Space>
           </Col>
           <Col flex="auto">
             <Space size={8}>
-              {tradeDate && (
-                <Tag color="blue">实际数据: {tradeDate}</Tag>
-              )}
-              {cached && (
-                <Tag color="green">缓存</Tag>
+              {tradeDate && <Tag color="blue">实际数据: {tradeDate}</Tag>}
+              {cached && <Tag color="green">缓存</Tag>}
+              {status && status.trade_count > 0 && (
+                <Tag color="purple">
+                  模拟盘: {status.last_rec_date} → {status.last_exec_date}
+                </Tag>
               )}
             </Space>
           </Col>
         </Row>
         {dateOffsetMsg && (
-          <Alert
-            title={dateOffsetMsg}
-            type="info"
-            showIcon
-            style={{ marginTop: 8, padding: '4px 12px' }}
-          />
+          <Alert title={dateOffsetMsg} type="info" showIcon
+            style={{ marginTop: 8, padding: '4px 12px' }} />
         )}
       </Card>
 
       <Spin spinning={loading || trendsLoading} description="加载中...">
-        {/* Row 1: Top 10 资金流 mini charts */}
+        {/* Row 1: Top 10 资金流 */}
         <Card
           title={`策略 Top 10 — 近 20 日 5 日滚动主力净流入 (${tradeDate})`}
-          size="small"
-          style={{ marginBottom: 16 }}
+          size="small" style={{ marginBottom: 16 }}
         >
           {recommendations.length === 0 ? (
             <Empty description="暂无推荐数据" />
@@ -467,10 +506,7 @@ export default function StrategyTracker() {
                     >
                       {trend?.days?.length ? (
                         <>
-                          <ReactECharts
-                            option={makeMiniOption(trend)}
-                            style={{ height: 100 }}
-                          />
+                          <ReactECharts option={makeMiniOption(trend)} style={{ height: 100 }} />
                           <div style={{ textAlign: 'center', marginTop: 4 }}>
                             <Text style={{ fontSize: 11, color: '#888' }}>
                               {rec.score} · {rec.signal?.slice(0, 30)}
@@ -490,14 +526,14 @@ export default function StrategyTracker() {
           )}
         </Card>
 
-        {/* Row 2: 3 列布局 */}
+        {/* Row 2: 左列（推荐 + 持仓） + 右列（NAV + 交易记录） */}
         <Row gutter={16}>
-          {/* 左列: 日期选择 + Top 3 推荐 */}
+          {/* 左列 */}
           <Col span={6}>
+            {/* Top 3 推荐 */}
             <Card
               title={`推荐持仓 Top 3 (${tradeDate})`}
-              size="small"
-              style={{ marginBottom: 16 }}
+              size="small" style={{ marginBottom: 16 }}
               extra={
                 <DatePicker
                   value={dayjs(selectedDate)}
@@ -512,12 +548,8 @@ export default function StrategyTracker() {
                 <Empty description="暂无推荐" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               ) : (
                 top3.map((rec, idx) => (
-                  <Card
-                    key={rec.ts_code}
-                    size="small"
-                    style={{ marginBottom: 8 }}
-                    styles={{ body: { padding: 10 } }}
-                  >
+                  <Card key={rec.ts_code} size="small"
+                    style={{ marginBottom: 8 }} styles={{ body: { padding: 10 } }}>
                     <Space>
                       <Tag color={idx === 0 ? 'red' : idx === 1 ? 'orange' : 'blue'}>
                         #{idx + 1}
@@ -530,14 +562,9 @@ export default function StrategyTracker() {
                           </Text>
                         </div>
                         <div style={{ marginTop: 4 }}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>
-                            评分: {rec.score}
-                          </Text>
+                          <Text style={{ fontSize: 12, color: '#888' }}>评分: {rec.score}</Text>
                         </div>
-                        <Text
-                          style={{ fontSize: 11, color: '#999' }}
-                          ellipsis={{ tooltip: true }}
-                        >
+                        <Text style={{ fontSize: 11, color: '#999' }} ellipsis={{ tooltip: true }}>
                           {rec.signal}
                         </Text>
                       </div>
@@ -547,106 +574,97 @@ export default function StrategyTracker() {
               )}
             </Card>
 
-            {/* 持仓表单 */}
-            <Card
-              title="实际持仓"
-              size="small"
-              extra={
-                <Space size={4}>
-                  <Button size="small" onClick={loadExistingHoldings}>加载已有</Button>
-                  <Button size="small" onClick={fillFormWithTop3}>填入推荐</Button>
-                </Space>
-              }
-            >
-              <Form form={form} layout="vertical" size="small">
-                <Form.List name="holdings">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...rest }) => (
-                        <Card
-                          key={key}
-                          size="small"
-                          style={{ marginBottom: 8 }}
-                          styles={{ body: { padding: 8 } }}
-                          extra={
-                            <Button type="text" size="small" danger
-                              icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                          }
-                        >
-                          <Form.Item {...rest} name={[name, 'ts_code']} label="股票代码"
-                            rules={[{ required: true }]}>
-                            <Select showSearch
-                              filterOption={(input, option) =>
-                                (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
-                              }
-                              options={recommendations.map((r) => ({
-                                value: r.ts_code,
-                                label: `${r.ts_code} ${r.name}`,
-                              }))}
-                              placeholder="选择或输入"
-                            />
-                          </Form.Item>
-                          <Form.Item {...rest} name={[name, 'stock_name']} label="名称">
-                            <Select showSearch
-                              filterOption={(input, option) =>
-                                (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
-                              }
-                              options={recommendations.map((r) => ({
-                                value: r.name,
-                                label: r.name,
-                              }))}
-                              placeholder="股票名称"
-                            />
-                          </Form.Item>
-                          <Row gutter={8}>
-                            <Col span={12}>
-                              <Form.Item {...rest} name={[name, 'shares']} label="股数"
-                                rules={[{ required: true }]}>
-                                <InputNumber min={0} step={100} style={{ width: '100%' }} />
-                              </Form.Item>
-                            </Col>
-                            <Col span={12}>
-                              <Form.Item {...rest} name={[name, 'buy_price']} label="买入价"
-                                rules={[{ required: true }]}>
-                                <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
-                              </Form.Item>
-                            </Col>
-                          </Row>
-                        </Card>
-                      ))}
-                      <Button type="dashed"
-                        onClick={() => add({ ts_code: '', stock_name: '', shares: 0, buy_price: 0 })}
-                        block icon={<PlusOutlined />}>
-                        添加股票
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-                <Form.Item style={{ marginTop: 12, marginBottom: 0 }}>
-                  <Button type="primary" icon={<SaveOutlined />}
-                    onClick={handleSaveHoldings} loading={saving} block>
-                    保存持仓
-                  </Button>
-                </Form.Item>
-              </Form>
-            </Card>
-          </Col>
-
-          {/* 中间: NAV 图表 */}
-          <Col span={18}>
-            <Card title="账户净值变化" size="small" style={{ marginBottom: 16 }}>
-              {navData.length === 0 ? (
+            {/* 当前持仓（模拟盘） */}
+            <Card title="当前持仓" size="small" style={{ marginBottom: 16 }}>
+              {!status || status.trade_count === 0 ? (
                 <Empty
-                  description="暂无净值数据，请先保存持仓"
+                  description="尚未开始模拟交易，点击「执行调仓」开始"
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                 />
               ) : (
                 <>
-                  <ReactECharts
-                    ref={navChartRef}
-                    option={navOption}
-                    style={{ height: 320 }}
-                  />
+                  {status.holdings.map((h: PaperHolding) => (
+                    <Card key={h.ts_code} size="small"
+                      style={{ marginBottom: 8 }} styles={{ body: { padding: 10 } }}>
+                      <div>
+                        <Text strong>{h.stock_name}</Text>
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+                          {h.ts_code}
+                        </Text>
+                      </div>
+                      <Row style={{ marginTop: 4 }}>
+                        <Col span={12}>
+                          <Text style={{ fontSize: 11, color: '#888' }}>
+                            {h.shares.toLocaleString()} 股
+                          </Text>
+                        </Col>
+                        <Col span={12}>
+                          <Text style={{ fontSize: 11, color: '#888' }}>
+                            均价 ¥{h.avg_cost.toFixed(2)}
+                          </Text>
+                        </Col>
+                      </Row>
+                      <Row style={{ marginTop: 2 }}>
+                        <Col span={12}>
+                          <Text style={{ fontSize: 11, color: '#888' }}>
+                            市值 {fmtMoney(h.market_value)}
+                          </Text>
+                        </Col>
+                        <Col span={12}>
+                          <Text style={{
+                            fontSize: 11,
+                            color: h.unrealized_pnl >= 0 ? '#cf1322' : '#3f8600',
+                          }}>
+                            盈亏 {fmtMoney(h.unrealized_pnl)}
+                          </Text>
+                        </Col>
+                      </Row>
+                    </Card>
+                  ))}
+                  <Row gutter={12} style={{ marginTop: 12 }}>
+                    <Col span={12}>
+                      <Statistic title="可用现金" value={status.cash}
+                        precision={0} prefix="¥"
+                        valueStyle={{ fontSize: 14, color: '#52c41a' }} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="持仓市值" value={status.total_market_value}
+                        precision={0} prefix="¥"
+                        valueStyle={{ fontSize: 14 }} />
+                    </Col>
+                  </Row>
+                  <Row gutter={12} style={{ marginTop: 8 }}>
+                    <Col span={12}>
+                      <Statistic title="总净值" value={status.total_nav}
+                        precision={0} prefix="¥"
+                        valueStyle={{ fontSize: 14, color: '#cf1322' }} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="累计收益率" value={status.total_return_pct}
+                        suffix="%" precision={2}
+                        valueStyle={{
+                          fontSize: 14,
+                          color: status.total_return_pct >= 0 ? '#cf1322' : '#3f8600',
+                        }} />
+                    </Col>
+                  </Row>
+                </>
+              )}
+            </Card>
+          </Col>
+
+          {/* 右列 */}
+          <Col span={18}>
+            {/* NAV 图 */}
+            <Card title="账户净值变化" size="small" style={{ marginBottom: 16 }}>
+              {navData.length === 0 ? (
+                <Empty
+                  description={status && status.trade_count > 0 ? '暂无净值数据' : '请先执行调仓'}
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              ) : (
+                <>
+                  <ReactECharts ref={navChartRef} option={navOption} style={{ height: 320 }} />
                   <Row gutter={16} style={{ marginTop: 12 }} justify="center">
                     <Col>
                       <Statistic title="初始本金" value={initialCapital}
@@ -680,10 +698,34 @@ export default function StrategyTracker() {
                       })()}
                     </Col>
                     <Col>
-                      <Statistic title="数据天数" value={navData.length} valueStyle={{ fontSize: 16, color: '#999' }} />
+                      <Statistic title="数据天数" value={navData.length}
+                        valueStyle={{ fontSize: 16, color: '#999' }} />
                     </Col>
                   </Row>
                 </>
+              )}
+            </Card>
+
+            {/* 交易记录 Table */}
+            <Card title="交易记录" size="small">
+              {trades.length === 0 ? (
+                <Empty description="暂无交易记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              ) : (
+                <Table
+                  dataSource={trades}
+                  columns={tradeColumns}
+                  rowKey="id"
+                  size="small"
+                  scroll={{ x: 800 }}
+                  pagination={{
+                    current: tradesPage,
+                    total: tradesTotal,
+                    pageSize: 20,
+                    showSizeChanger: false,
+                    showTotal: (t) => `共 ${t} 笔`,
+                    onChange: handleTradesPageChange,
+                  }}
+                />
               )}
             </Card>
           </Col>

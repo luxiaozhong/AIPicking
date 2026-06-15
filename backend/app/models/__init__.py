@@ -22,6 +22,7 @@ from .rebalance import RebalanceReport
 from .user_holding import UserHolding
 from .strategy_daily_rec import StrategyDailyRec
 from .user_strategy_config import UserStrategyConfig
+from .paper_trade import PaperTrade
 
 # 设置关系
 Strategy.backtest_reports = relationship("BacktestReport", back_populates="strategy", cascade="all, delete-orphan")
@@ -56,3 +57,7 @@ UserStrategyConfig.owner = relationship("User", back_populates="strategy_configs
 UserStrategyConfig.strategy = relationship("Strategy", back_populates="user_configs")
 User.strategy_configs = relationship("UserStrategyConfig", back_populates="owner")
 Strategy.user_configs = relationship("UserStrategyConfig", back_populates="strategy")
+PaperTrade.owner = relationship("User", back_populates="paper_trades")
+PaperTrade.strategy = relationship("Strategy", back_populates="paper_trades")
+User.paper_trades = relationship("PaperTrade", back_populates="owner")
+Strategy.paper_trades = relationship("PaperTrade", back_populates="strategy")
