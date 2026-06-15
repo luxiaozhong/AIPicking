@@ -644,6 +644,17 @@ def sync(date_str: str, batch_size: int = BATCH_SIZE,
             if "ts_code" not in row and "secu_code" in row:
                 row["ts_code"] = npm_to_ts_code(row["secu_code"])
 
+        # Validate: API may return previous trading day's data for non-trading days
+        # (weekends, holidays). Check EndDate matches requested date.
+        sample_end_date = rows[0].get("end_date", "") if rows else ""
+        if sample_end_date and sample_end_date != date_str:
+            logging.warning(
+                f"Batch {batch_num}/{total_batches}: EndDate mismatch — "
+                f"requested {date_str}, API returned {sample_end_date}. "
+                f"Non-trading day, skipping."
+            )
+            continue
+
         # Save this batch immediately
         try:
             saved = save_batch(date_str, rows)
