@@ -3,11 +3,9 @@
 自动追踪策略推荐 → T+1 开盘价执行 → 每日净值计算。
 """
 
-import json
-import asyncio
 from datetime import datetime
 from collections import defaultdict
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
@@ -18,8 +16,6 @@ from ..database import get_db
 from ..middleware.auth import get_current_user
 from ..models.paper_trade import PaperTrade
 from ..models.user_strategy_config import UserStrategyConfig
-from ..models.strategy_daily_rec import StrategyDailyRec
-from ..models.strategy import Strategy
 from ..models.stock_tables import Daily
 
 router = APIRouter()
@@ -30,12 +26,6 @@ BUY_COMMISSION_RATE = 0.00015    # 万 1.5 买入手续费
 SELL_COMMISSION_RATE = 0.00015   # 万 1.5 卖出手续费
 STAMP_DUTY_RATE = 0.0005         # 万 5 印花税（仅卖出）
 
-def _lot_size(ts_code: str) -> int:
-    """获取每手股数：科创板(688) 为 200 股，其余为 100 股"""
-    if ts_code.startswith("688"):
-        return 200
-    return 100
-
 
 # ── Schemas ──────────────────────────────────────────────────
 
@@ -45,9 +35,24 @@ class StartRequest(BaseModel):
     initial_capital: float = 500000.0
 
 
+class SellItem(BaseModel):
+    ts_code: str
+    shares: int = 0           # 卖出数量，0 表示跳过
+
+
+class BuyItem(BaseModel):
+    ts_code: str
+    shares: int               # 买入数量，必须 >= 1 手
+    stock_name: str = ""      # 股票名称（前端从推荐中传入）
+
+
 class ExecuteRequest(BaseModel):
     strategy_id: int
-    date: Optional[str] = None  # YYYY-MM-DD，默认今天
+    date: Optional[str] = None          # 推荐日 YYYY-MM-DD
+    sells: List[SellItem] = []          # 要卖出的股票
+    buys: List[BuyItem] = []            # 要买入的股票
+    additional_capital: float = 0.0     # 前端计算好的追加本金
+    exec_date: Optional[str] = None     # 执行日 YYYY-MM-DD，盘中=今天
 
 
 class TradeOut(BaseModel):
@@ -97,10 +102,12 @@ class ExecuteSummary(BaseModel):
     holdings_after: int
     sell_count: int
     buy_count: int
+    keep_count: int                     # 未卖出也未买入的原持仓数
     total_buy_amount: float
     total_sell_amount: float
     total_commission: float
     total_stamp_duty: float
+    additional_capital_added: float     # 实际追加的本金
 
 
 class ExecuteResponse(BaseModel):
@@ -159,16 +166,35 @@ async def _find_nearest_trading_day(db: AsyncSession, date: str) -> Optional[str
     return row[0] if row else None
 
 
-async def _find_next_trading_day(db: AsyncSession, after_date: str) -> Optional[str]:
-    """找到 > after_date 的下一个交易日"""
-    result = await db.execute(
-        select(Daily.trade_date)
-        .where(Daily.trade_date > after_date)
-        .order_by(Daily.trade_date.asc())
-        .limit(1)
+async def _get_latest_close_prices(
+    db: AsyncSession, ts_codes: List[str], before_date: str
+) -> Dict[str, float]:
+    """获取每个 ts_code 在 before_date（含）之前的最新收盘价
+
+    使用子查询：按 ts_code 分组取 MAX(trade_date) <= before_date，
+    再 JOIN 回去取 close。
+    """
+    if not ts_codes:
+        return {}
+
+    subq = (
+        select(Daily.ts_code, func.max(Daily.trade_date).label("max_date"))
+        .where(Daily.trade_date <= before_date, Daily.ts_code.in_(ts_codes))
+        .group_by(Daily.ts_code)
+        .subquery()
     )
-    row = result.first()
-    return row[0] if row else None
+    rows = await db.execute(
+        select(Daily.ts_code, Daily.close).join(
+            subq,
+            (Daily.ts_code == subq.c.ts_code)
+            & (Daily.trade_date == subq.c.max_date),
+        )
+    )
+    return {
+        row.ts_code: float(row.close)
+        for row in rows
+        if row.close and float(row.close) > 0
+    }
 
 
 async def _get_config(db: AsyncSession, user_id: int, strategy_id: int) -> UserStrategyConfig:
@@ -344,135 +370,65 @@ async def execute_paper_trade(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """执行一次调仓
+    """执行一次调仓（灵活模式：支持逐只勾选 + 自定义手数 + 盘中执行）
 
-    1. 找到 T 日（≤ 请求日期的最近交易日）
-    2. 获取 T 日策略推荐 Top 3
-    3. 找到 T+1 日（> T 的下一个交易日）
-    4. 以 T+1 开盘价卖出全部持仓
-    5. 以 T+1 开盘价等权买入 Top 3
+    1. exec_date 默认今天，取最新收盘价
+    2. 按前端传入的 sells 列表卖出，支持部分卖出
+    3. 按前端传入的 buys 列表买入，支持自定义手数
+    4. 资金不足时自动追加本金
     """
     user_id = current_user.id
-    requested_date = data.date or _beijing_today()
+    exec_date = data.exec_date or _beijing_today()
 
-    # ── Step 1: 获取配置 ──
+    # ── 1. 获取配置 ──
     config = await _get_config(db, user_id, data.strategy_id)
 
-    # ── Step 2: 找 T 日 ──
-    T = await _find_nearest_trading_day(db, requested_date)
-    if not T:
-        raise HTTPException(400, "没有找到最近的交易日")
+    # ── 2. 收集涉及的 ts_code 并获取最新收盘价 ──
+    sell_codes = [s.ts_code for s in data.sells if s.shares > 0]
+    buy_codes = [b.ts_code for b in data.buys if b.shares > 0]
+    all_codes = list(set(sell_codes + buy_codes))
 
-    # ── Step 3: 找 T+1 日（含向前回溯）──
-    today_str = _beijing_today()
-    T_plus_1 = await _find_next_trading_day(db, T)
+    if not all_codes:
+        raise HTTPException(400, "没有指定任何卖出或买入操作")
 
-    if not T_plus_1 or T_plus_1 > today_str:
-        # T+1 不存在或尚未发生，向前回溯找最近一个有效的 T/T+1 对
-        original_T = T
-        prev_result = await db.execute(
-            select(Daily.trade_date)
-            .where(Daily.trade_date < T)
-            .order_by(Daily.trade_date.desc())
-        )
-        found = False
-        for (prev_T,) in prev_result:
-            next_day = await _find_next_trading_day(db, prev_T)
-            if next_day and next_day <= today_str:
-                T = prev_T
-                T_plus_1 = next_day
-                found = True
-                break
+    close_prices = await _get_latest_close_prices(db, all_codes, exec_date)
 
-        if not found:
-            if not T_plus_1:
-                raise HTTPException(
-                    400,
-                    f"未找到 {original_T} 之后的下一个交易日，请确认已同步最新数据",
-                )
-            else:
-                raise HTTPException(
-                    400,
-                    f"T+1 执行日 {T_plus_1} 尚未发生（今天是 {today_str}），无法执行",
-                )
+    missing = [c for c in all_codes if c not in close_prices]
+    if missing:
+        raise HTTPException(400, f"缺少最新收盘价: {missing}")
 
-    # ── Step 4: 防重复 ──
-    existing = await db.execute(
-        select(PaperTrade).where(
-            PaperTrade.user_id == user_id,
-            PaperTrade.strategy_id == data.strategy_id,
-            PaperTrade.rec_date == T,
-        ).limit(1)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(409, f"推荐日 {T} 已执行过调仓，请勿重复操作")
-
-    # ── Step 5: 获取 T 日推荐 ──
-    cutoff = T.replace("-", "")
-    rec_result = await db.execute(
-        select(StrategyDailyRec).where(
-            StrategyDailyRec.strategy_id == data.strategy_id,
-            StrategyDailyRec.cutoff_date == cutoff,
-        ).limit(1)
-    )
-    rec_row = rec_result.scalar_one_or_none()
-    if not rec_row:
-        raise HTTPException(400, f"日期 {T} 无策略推荐数据，请先刷新推荐")
-
-    try:
-        all_recs = json.loads(rec_row.recommendations)
-    except json.JSONDecodeError:
-        raise HTTPException(500, "推荐数据解析失败")
-
-    if not all_recs:
-        raise HTTPException(400, f"日期 {T} 策略未返回推荐")
-
-    top3 = all_recs[:3]
-
-    # ── Step 6: 获取 T+1 开盘价 ──
-    new_codes = [r["ts_code"] for r in top3]
-    current_holdings = await _compute_holdings(db, user_id, data.strategy_id)
-    old_codes = [h["ts_code"] for h in current_holdings]
-    all_codes = list(set(new_codes + old_codes))
-
-    open_result = await db.execute(
-        select(Daily.ts_code, Daily.open)
-        .where(Daily.trade_date == T_plus_1, Daily.ts_code.in_(all_codes))
-    )
-    open_prices = {}
-    for row in open_result:
-        val = float(row.open) if row.open else 0.0
-        if val > 0:
-            open_prices[row.ts_code] = val
-
-    # 校验价格完整性
-    missing_new = [c for c in new_codes if c not in open_prices]
-    missing_old = [c for c in old_codes if c not in open_prices]
-    if missing_new:
-        raise HTTPException(400, f"T+1 ({T_plus_1}) 缺少新股开盘价: {missing_new}")
-    if missing_old:
-        raise HTTPException(400, f"T+1 ({T_plus_1}) 缺少旧股开盘价: {missing_old}")
-
-    # ── Step 7: 计算可用现金 & 持仓 diff ──
+    # ── 3. 计算当前现金 ──
     all_trades = await _get_all_trades(db, user_id, data.strategy_id)
     cash = config.initial_capital + sum(t.net_amount for t in all_trades)
     cash_before = round(cash, 2)
 
+    # ── 4. 追加前端传入的本金 ──
+    additional_added = data.additional_capital
+    if additional_added > 0:
+        config.initial_capital += additional_added
+        cash += additional_added
+
+    # ── 5. 执行卖出 ──
     trades_to_insert: List[PaperTrade] = []
+    current_holdings = await _compute_holdings(db, user_id, data.strategy_id)
+    holdings_map = {h["ts_code"]: h for h in current_holdings}
+    sell_count = 0
 
-    # 持仓对比：退出（old - new）、保留（old ∩ new）、新进（new - old）
-    old_codes_set = {h["ts_code"] for h in current_holdings}
-    new_codes_set = {r["ts_code"] for r in top3}
-    exit_holdings = [h for h in current_holdings if h["ts_code"] not in new_codes_set]
-    keep_codes = old_codes_set & new_codes_set
-    enter_recs = [r for r in top3 if r["ts_code"] not in old_codes_set]
+    for s in data.sells:
+        if s.shares <= 0:
+            continue
+        h = holdings_map.get(s.ts_code)
+        if not h:
+            raise HTTPException(400, f"未持有 {s.ts_code}，无法卖出")
+        if s.shares > h["shares"]:
+            raise HTTPException(
+                400,
+                f"{s.ts_code} {h['stock_name']} 持仓 {h['shares']} 股，"
+                f"无法卖出 {s.shares} 股",
+            )
 
-    kept_names = [h["stock_name"] for h in current_holdings if h["ts_code"] in keep_codes]
-
-    # ── Step 8: 只卖出退出的持仓 ──
-    for h in exit_holdings:
-        price = open_prices[h["ts_code"]]
-        gross = round(h["shares"] * price, 2)
+        price = close_prices[s.ts_code]
+        gross = round(s.shares * price, 2)
         commission = round(gross * SELL_COMMISSION_RATE, 2)
         stamp = round(gross * STAMP_DUTY_RATE, 2)
         net = round(gross - commission - stamp, 2)
@@ -482,74 +438,71 @@ async def execute_paper_trade(
             user_id=user_id,
             strategy_id=data.strategy_id,
             action="sell",
-            exec_date=T_plus_1,
-            rec_date=T,
-            ts_code=h["ts_code"],
+            exec_date=exec_date,
+            rec_date=data.date or exec_date,
+            ts_code=s.ts_code,
             stock_name=h["stock_name"],
-            shares=h["shares"],
+            shares=s.shares,
             price=price,
             amount=gross,
             commission=commission,
             stamp_duty=stamp,
             net_amount=net,
         ))
+        sell_count += 1
 
-    sell_count = len(exit_holdings)
-
-    # ── Step 9: 等权买入新进推荐 ──
+    # ── 6. 执行买入 ──
     buy_count = 0
-    if enter_recs:
-        per_stock_budget = cash / len(enter_recs)
-        for rec in enter_recs:
-            code = rec["ts_code"]
-            price = open_prices[code]
-            if price <= 0:
-                continue
+    for b in data.buys:
+        if b.shares <= 0:
+            continue
+        price = close_prices[b.ts_code]
+        gross = round(b.shares * price, 2)
+        commission = round(gross * BUY_COMMISSION_RATE, 2)
+        total_cost = round(gross + commission, 2)
 
-            lot = _lot_size(code)
-            raw_shares = int(per_stock_budget / (price * (1 + BUY_COMMISSION_RATE)))
-            shares = (raw_shares // lot) * lot
+        # 资金不足：自动注入差額
+        if total_cost > cash:
+            shortfall = round(total_cost - cash, 2)
+            config.initial_capital += shortfall
+            cash += shortfall
+            additional_added = round(additional_added + shortfall, 2)
 
-            if shares < lot:
-                continue  # 不够买一手，跳过
+        net = -total_cost
+        cash += net
 
-            gross = round(shares * price, 2)
-            commission = round(gross * BUY_COMMISSION_RATE, 2)
-            net = round(-(gross + commission), 2)  # 现金流出
-            cash += net
+        # stock_name：优先用前端传入，回退到 ts_code
+        stock_name = b.stock_name or b.ts_code
 
-            trades_to_insert.append(PaperTrade(
-                user_id=user_id,
-                strategy_id=data.strategy_id,
-                action="buy",
-                exec_date=T_plus_1,
-                rec_date=T,
-                ts_code=code,
-                stock_name=rec.get("name", code),
-                shares=shares,
-                price=price,
-                amount=gross,
-                commission=commission,
-                stamp_duty=0.0,
-                net_amount=net,
-            ))
-            buy_count += 1
+        trades_to_insert.append(PaperTrade(
+            user_id=user_id,
+            strategy_id=data.strategy_id,
+            action="buy",
+            exec_date=exec_date,
+            rec_date=data.date or exec_date,
+            ts_code=b.ts_code,
+            stock_name=stock_name,
+            shares=b.shares,
+            price=price,
+            amount=gross,
+            commission=commission,
+            stamp_duty=0.0,
+            net_amount=net,
+        ))
+        buy_count += 1
 
-    # ── Step 10: 校验 & 保存 ──
-    if not trades_to_insert and not keep_codes:
-        raise HTTPException(400, "无有效交易生成，请检查推荐和资金")
+    # ── 7. 校验 ──
+    if not trades_to_insert:
+        raise HTTPException(400, "未生成任何有效交易")
 
-    if enter_recs and buy_count == 0 and sell_count == 0 and not keep_codes:
-        raise HTTPException(400, "新推荐股票资金不足（不够买一手），请检查资金")
-
+    # ── 8. 保存 ──
     db.add_all(trades_to_insert)
     await db.commit()
 
-    # 刷新获取 IDs
     for t in trades_to_insert:
         await db.refresh(t)
 
-    # ── Build response ──
+    # ── 9. 构建响应 ──
     sell_trades = [t for t in trades_to_insert if t.action == "sell"]
     buy_trades = [t for t in trades_to_insert if t.action == "buy"]
 
@@ -558,13 +511,18 @@ async def execute_paper_trade(
     total_commission = sum(t.commission for t in trades_to_insert)
     total_stamp_duty = sum(t.stamp_duty for t in trades_to_insert)
 
-    # 最新持仓数
     final_holdings = await _compute_holdings(db, user_id, data.strategy_id)
+
+    # keep_count = 未出现在 sells 中的原持仓数
+    sold_codes = {s.ts_code for s in data.sells if s.shares > 0}
+    keep_count = sum(
+        1 for h in current_holdings if h["ts_code"] not in sold_codes
+    )
 
     return {
         "executed": True,
-        "rec_date": T,
-        "exec_date": T_plus_1,
+        "rec_date": data.date or exec_date,
+        "exec_date": exec_date,
         "trades": [
             {
                 "id": t.id,
@@ -589,12 +547,12 @@ async def execute_paper_trade(
             "holdings_after": len(final_holdings),
             "sell_count": sell_count,
             "buy_count": buy_count,
-            "keep_count": len(keep_codes),
-            "kept": kept_names,
+            "keep_count": keep_count,
             "total_buy_amount": round(total_buy_amount, 2),
             "total_sell_amount": round(total_sell_amount, 2),
             "total_commission": round(total_commission, 2),
             "total_stamp_duty": round(total_stamp_duty, 2),
+            "additional_capital_added": round(additional_added, 2),
         },
     }
 
