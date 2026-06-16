@@ -438,6 +438,148 @@ def ensure_table():
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# Intraday snapshot table — for bar chart race replay
+# ═════════════════════════════════════════════════════════════════════════
+
+_CREATE_SNAPSHOT_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS intraday_fund_snapshot (
+    id              BIGSERIAL PRIMARY KEY,
+    trade_date      VARCHAR(10) NOT NULL,
+    snapshot_time   TIMESTAMPTZ NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai'),
+    ts_code         VARCHAR(20) NOT NULL,
+    main_net_flow   DOUBLE PRECISION,
+    jumbo_net_flow  DOUBLE PRECISION,
+    block_net_flow  DOUBLE PRECISION,
+    main_net_flow_5d DOUBLE PRECISION
+);
+
+CREATE INDEX IF NOT EXISTS idx_ifs_date_time
+    ON intraday_fund_snapshot (trade_date, snapshot_time);
+CREATE INDEX IF NOT EXISTS idx_ifs_code
+    ON intraday_fund_snapshot (ts_code);
+"""
+
+_SNAPSHOT_INSERT = """
+INSERT INTO intraday_fund_snapshot
+    (trade_date, snapshot_time, ts_code, main_net_flow, jumbo_net_flow, block_net_flow, main_net_flow_5d)
+VALUES (%s, %s, %s, %s, %s, %s, %s)
+"""
+
+
+def ensure_snapshot_table():
+    """Create the intraday_fund_snapshot table if it doesn't exist, or migrate."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_CREATE_SNAPSHOT_TABLE_SQL)
+            # Migration: add main_net_flow_5d column if missing (pre-existing table)
+            cur.execute(
+                "ALTER TABLE intraday_fund_snapshot "
+                "ADD COLUMN IF NOT EXISTS main_net_flow_5d DOUBLE PRECISION"
+            )
+        conn.commit()
+        logging.info("Table intraday_fund_snapshot ensured")
+    finally:
+        conn.close()
+
+
+def _compute_real_5d_flows(date_str: str, ts_codes: list[str]) -> dict[str, float]:
+    """Compute the real 5-day rolling sum of main_net_flow for each stock.
+
+    Queries daily_stock_fund_flow for the last 5 trading days (including date_str)
+    and sums main_net_flow per stock.  Falls back to the API field for stocks with
+    insufficient history.
+    """
+    if not ts_codes:
+        return {}
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Find the 5 most recent trading days up to and including date_str
+            cur.execute(
+                """
+                SELECT DISTINCT trade_date
+                FROM daily_stock_fund_flow
+                WHERE trade_date <= %s
+                ORDER BY trade_date DESC
+                LIMIT 5
+                """,
+                (date_str,),
+            )
+            trading_dates = [r[0] for r in cur.fetchall()]
+            if not trading_dates:
+                return {}
+
+            # Sum main_net_flow for each ts_code over these 5 trading days
+            cur.execute(
+                """
+                SELECT ts_code, COALESCE(SUM(main_net_flow), 0) AS flow_5d
+                FROM daily_stock_fund_flow
+                WHERE ts_code = ANY(%s) AND trade_date = ANY(%s)
+                GROUP BY ts_code
+                """,
+                (ts_codes, trading_dates),
+            )
+            result = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+            logging.debug(
+                "Computed real 5d flows for %d/%d stocks over %s..%s",
+                len(result), len(ts_codes),
+                trading_dates[-1], trading_dates[0],
+            )
+            return result
+    finally:
+        conn.close()
+
+
+def save_snapshots(date_str: str, snapshot_rows: list[dict]) -> int:
+    """Save intraday snapshots for bar chart race replay.
+
+    Each row should have: ts_code, main_net_flow, jumbo_net_flow, block_net_flow.
+    The main_net_flow_5d is computed from the DB (real 5-day rolling sum),
+    not from the potentially inaccurate API field.
+
+    All rows share the same snapshot_time (now).
+    """
+    if not snapshot_rows:
+        return 0
+
+    # Compute real 5-day rolling sums from actual daily data
+    ts_codes = [r["ts_code"] for r in snapshot_rows if r.get("ts_code")]
+    real_5d = _compute_real_5d_flows(date_str, ts_codes)
+
+    snapshot_time = datetime.now()
+    tuples = [
+        (
+            date_str,
+            snapshot_time,
+            r["ts_code"],
+            r.get("main_net_flow"),
+            r.get("jumbo_net_flow"),
+            r.get("block_net_flow"),
+            real_5d.get(r["ts_code"]) if r.get("ts_code") in real_5d
+                else r.get("main_net_flow_5d"),  # fallback to API field
+        )
+        for r in snapshot_rows
+    ]
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(cur, _SNAPSHOT_INSERT, tuples)
+        conn.commit()
+        logging.info(
+            "Snapshots saved: %d rows at %s",
+            len(tuples),
+            snapshot_time.strftime("%H:%M:%S"),
+        )
+    finally:
+        conn.close()
+
+    return len(tuples)
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # Storage
 # ═════════════════════════════════════════════════════════════════════════
 
@@ -609,6 +751,7 @@ def sync(date_str: str, index_code: str, batch_size: int = BATCH_SIZE,
     fail_batches = 0
     total_saved = 0
     errors = []
+    snapshot_rows: list[dict] = []  # accumulate for intraday snapshot
 
     start_time = time.time()
 
@@ -664,6 +807,17 @@ def sync(date_str: str, index_code: str, batch_size: int = BATCH_SIZE,
             saved = save_batch(date_str, rows)
             total_saved += saved
             success_batches += 1
+            # Accumulate snapshot rows for intraday replay
+            for row in rows:
+                ts = row.get("ts_code", "")
+                if ts:
+                    snapshot_rows.append({
+                        "ts_code": ts,
+                        "main_net_flow": row.get("main_net_flow"),
+                        "jumbo_net_flow": row.get("jumbo_net_flow"),
+                        "block_net_flow": row.get("block_net_flow"),
+                        "main_net_flow_5d": row.get("main_net_flow_5d"),
+                    })
             first_stock = stocks_info[start] if start < len(stocks_info) else {"ts_code": "?"}
             last_stock = stocks_info[end - 1] if end - 1 < len(stocks_info) else {"ts_code": "?"}
             logging.info(
@@ -683,6 +837,14 @@ def sync(date_str: str, index_code: str, batch_size: int = BATCH_SIZE,
             time.sleep(delay)
 
     elapsed = time.time() - start_time
+
+    # 3. Save intraday snapshots for bar chart race replay
+    snapshot_count = 0
+    try:
+        snapshot_count = save_snapshots(date_str, snapshot_rows)
+    except Exception as e:
+        logging.error(f"Failed to save intraday snapshots: {e}")
+
     logging.info(
         f"Sync complete: {total_saved} rows saved in {elapsed:.0f}s "
         f"({success_batches}/{total_batches} batches OK, "
@@ -698,6 +860,7 @@ def sync(date_str: str, index_code: str, batch_size: int = BATCH_SIZE,
         "success_batches": success_batches,
         "fail_batches": fail_batches,
         "total_saved": total_saved,
+        "snapshots_saved": snapshot_count,
         "elapsed_s": round(elapsed, 1),
         "errors": errors,
     }
@@ -769,9 +932,10 @@ def main():
             )
             sys.exit(1)
 
-    # 1. Ensure table exists
+    # 1. Ensure tables exist
     try:
         ensure_table()
+        ensure_snapshot_table()
     except Exception as e:
         logging.error(f"Failed to ensure table: {e}")
         sys.exit(1)

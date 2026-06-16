@@ -154,6 +154,20 @@ export interface StockTrendDay {
   close_price: number;
 }
 
+export interface IntradaySnapshot {
+  snapshot_time: string;
+  main_net_flow: number;
+  jumbo_net_flow: number;
+  block_net_flow: number;
+  main_net_flow_5d: number;
+}
+
+export interface StockIntraday {
+  ts_code: string;
+  trade_date: string | null;
+  snapshots: IntradaySnapshot[];
+}
+
 export interface StockTrend {
   ts_code: string;
   stock_name: string;
@@ -231,6 +245,14 @@ export const fundFlowService = {
     const { data } = await api.get<{ code: number; data: BreadthHistoryItem[] }>(
       '/fund-flow/breadth-history',
       { params: { days } }
+    );
+    return data.data;
+  },
+
+  async getStockIntraday(tsCode: string, tradeDate?: string) {
+    const { data } = await api.get<{ code: number; data: StockIntraday }>(
+      `/fund-flow/stocks/${encodeURIComponent(tsCode)}/intraday`,
+      { params: { trade_date: tradeDate } }
     );
     return data.data;
   },

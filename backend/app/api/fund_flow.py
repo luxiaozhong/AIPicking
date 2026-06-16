@@ -128,3 +128,117 @@ async def get_available_dates(
     """有数据的交易日列表（日期选择器用）"""
     data = await FundFlowService.get_available_dates(db, days)
     return {"code": 0, "message": "ok", "data": data}
+
+
+# ═════════════════════════════════════════════════════════════════
+# 指数资金流看板 API（/index/... 必须定义在 /available-dates 之后，
+#     且 /index/indices 必须在 /index/{index_code} 之前）
+# ═════════════════════════════════════════════════════════════════
+
+@router.get("/stocks/{ts_code}/intraday")
+async def get_stock_intraday(
+    ts_code: str,
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """个股盘中资金流变化 — 当日各快照时间点主力净流入"""
+    data = await FundFlowService.get_stock_intraday(db, ts_code, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/ranking-trend")
+async def get_index_ranking_trend(
+    index_code: str,
+    days: int = Query(10, ge=5, le=60, description="回溯交易日数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数成分股 5日排名变化追踪 — 过去 N 日每只股票的排名变化"""
+    data = await FundFlowService.get_index_ranking_trend(db, index_code, days)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/history")
+async def get_index_history(
+    index_code: str,
+    days: int = Query(30, ge=5, le=365, description="查询天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数资金流历史 — 近 N 日成分股每日聚合"""
+    data = await FundFlowService.get_index_history(db, index_code, days)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/indices")
+async def get_index_indices(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """可用指数列表"""
+    data = await FundFlowService.get_index_indices(db)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/stocks")
+async def get_index_constituents_flow(
+    index_code: str,
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    sort: str = Query("main_net", description="排序: main_net, main_net_asc, jumbo, block, weight"),
+    limit: int = Query(100, ge=10, le=200, description="返回条数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数成分股资金流排名"""
+    data = await FundFlowService.get_index_constituents_flow(db, index_code, trade_date, sort, limit)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/trend")
+async def get_index_multi_stock_trend(
+    index_code: str,
+    days: int = Query(30, ge=5, le=365, description="查询天数"),
+    top_n: int = Query(5, ge=1, le=20, description="取前 N 只股票"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数成分股多股资金流趋势 — Top N 股票近 N 日对比"""
+    data = await FundFlowService.get_index_multi_stock_trend(db, index_code, days, top_n)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/industry")
+async def get_index_industry_summary(
+    index_code: str,
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数成分股行业资金流汇总"""
+    data = await FundFlowService.get_index_industry_summary(db, index_code, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/treemap")
+async def get_index_treemap(
+    index_code: str,
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数成分股 Treemap 数据 — 全部成分股资金流"""
+    data = await FundFlowService.get_index_treemap(db, index_code, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/index/{index_code}/snapshots")
+async def get_index_snapshots(
+    index_code: str,
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """指数成分股盘中快照 — Bar Chart Race 用"""
+    data = await FundFlowService.get_index_snapshots(db, index_code, trade_date)
+    return {"code": 0, "message": "ok", "data": data}
