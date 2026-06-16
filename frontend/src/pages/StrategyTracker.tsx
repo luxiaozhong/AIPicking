@@ -16,6 +16,7 @@ import { fundFlowService } from '@/services/fundFlowService';
 import strategyTrackerService from '@/services/strategyTrackerService';
 import paperTradeService from '@/services/paperTradeService';
 import StockKLineModal from '@/components/shared/StockKLineModal';
+import RebalanceModal from '@/components/RebalanceModal';
 import type { StockTrend, StockTrendDay } from '@/services/fundFlowService';
 import type { Strategy } from '@/types/strategy';
 import type { Recommendation } from '@/services/strategyTrackerService';
@@ -141,6 +142,7 @@ export default function StrategyTracker() {
   const [tradesTotal, setTradesTotal] = useState(0);
   const [tradesPage, setTradesPage] = useState(1);
   const [executing, setExecuting] = useState(false);
+  const [rebalanceOpen, setRebalanceOpen] = useState(false);
 
   const navChartRef = useRef<ReactECharts>(null);
 
@@ -241,56 +243,41 @@ export default function StrategyTracker() {
   // ── 执行调仓 ──
   const handleExecute = () => {
     if (!strategyId) return;
-    const heldCodes = new Set((status?.holdings || []).map(h => h.ts_code));
-    const newCodes = top3.map(r => r.ts_code);
-    const exits = (status?.holdings || []).filter(h => !newCodes.includes(h.ts_code));
-    const keeps = top3.filter(r => heldCodes.has(r.ts_code));
-    const enters = top3.filter(r => !heldCodes.has(r.ts_code));
+    setRebalanceOpen(true);
+  };
 
-    const diffLines: string[] = [];
-    if (exits.length > 0) diffLines.push(`卖出：${exits.map(h => h.stock_name).join('、')}`);
-    if (keeps.length > 0) diffLines.push(`保持：${keeps.map(r => r.name).join('、')}`);
-    if (enters.length > 0) diffLines.push(`新买：${enters.map(r => r.name).join('、')}`);
-    if (diffLines.length === 0) diffLines.push('持仓不变，无需调仓');
-
-    Modal.confirm({
-      title: '确认执行调仓',
-      icon: <ExclamationCircleOutlined />,
-      content: (
-        <div>
-          <p>将以 {tradeDate || selectedDate} 的推荐结果，在 T+1 开盘价执行：</p>
-          {diffLines.map((line, i) => (
-            <p key={i} style={{ margin: '4px 0', fontWeight: i === 1 ? 'normal' : 500 }}>
-              {line}
-            </p>
-          ))}
-        </div>
-      ),
-      okText: exits.length + enters.length > 0 ? '确认执行' : '无需操作',
-      cancelText: '取消',
-      onOk: async () => {
-        if (exits.length === 0 && enters.length === 0) return;
-        setExecuting(true);
-        try {
-          const result = await paperTradeService.execute(strategyId, selectedDate);
-          const parts = [`调仓完成！`];
-          if (result.summary.sell_count > 0) parts.push(`${result.summary.sell_count} 卖`);
-          if (result.summary.buy_count > 0) parts.push(`${result.summary.buy_count} 买`);
-          if (result.summary.keep_count > 0) parts.push(`${result.summary.keep_count} 保持`);
-          parts.push(`手续费 ¥${result.summary.total_commission.toFixed(2)}`);
-          parts.push(`印花税 ¥${result.summary.total_stamp_duty.toFixed(2)}`);
-          message.success(parts.join(' · '), 5);
-          await loadData(strategyId, selectedDate);
-        } catch (err: unknown) {
-          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-            || (err as Error)?.message
-            || '执行失败';
-          message.error(msg);
-        } finally {
-          setExecuting(false);
-        }
-      },
-    });
+  const handleRebalanceSubmit = async (payload: {
+    strategy_id: number;
+    date: string;
+    sells: { ts_code: string; shares: number }[];
+    buys: { ts_code: string; shares: number; stock_name?: string }[];
+    additional_capital: number;
+    exec_date: string;
+  }) => {
+    setExecuting(true);
+    try {
+      const result = await paperTradeService.execute(payload);
+      const parts = ['调仓完成！'];
+      if (result.summary.sell_count > 0) parts.push(`${result.summary.sell_count} 卖`);
+      if (result.summary.buy_count > 0) parts.push(`${result.summary.buy_count} 买`);
+      if (result.summary.keep_count > 0) parts.push(`${result.summary.keep_count} 保持`);
+      parts.push(`手续费 ¥${result.summary.total_commission.toFixed(2)}`);
+      parts.push(`印花税 ¥${result.summary.total_stamp_duty.toFixed(2)}`);
+      if (result.summary.additional_capital_added > 0) {
+        parts.push(`追加本金 ¥${result.summary.additional_capital_added.toFixed(2)}`);
+      }
+      message.success(parts.join(' · '), 5);
+      setRebalanceOpen(false);
+      await loadData(strategyId, selectedDate);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (err as Error)?.message ||
+        '执行失败';
+      message.error(msg);
+    } finally {
+      setExecuting(false);
+    }
   };
 
   // ── 重置模拟盘 ──
@@ -807,6 +794,18 @@ export default function StrategyTracker() {
         name={klineStock?.name}
         open={!!klineStock}
         onClose={() => setKlineStock(null)}
+      />
+      <RebalanceModal
+        open={rebalanceOpen}
+        strategyId={strategyId!}
+        top3={top3}
+        holdings={status?.holdings || []}
+        cash={status?.cash || 0}
+        totalValue={status?.total_nav || 0}
+        recDate={tradeDate || selectedDate}
+        loading={executing}
+        onClose={() => setRebalanceOpen(false)}
+        onSubmit={handleRebalanceSubmit}
       />
     </div>
   );
