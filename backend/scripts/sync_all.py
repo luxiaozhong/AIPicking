@@ -57,6 +57,11 @@ JOBS = [
         "log_key": "stock_fund_flow",
     },
     {
+        "script": "update_mainflow_index.py",
+        "desc": "主力资金50指数",
+        "log_key": "mainflow_index",
+    },
+    {
         "script": "sync_market_temperature.py",
         "desc": "市场温度计算",
         "log_key": "market_temperature",

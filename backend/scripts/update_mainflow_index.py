@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+"""
+主力资金50指数 — 每日盘后更新成分股
+
+从 daily_stock_fund_flow 表中聚合全市场 A 股最近 15 个交易日的
+main_net_flow（主力净流入）总和，排除 ST/*ST/次新股/北交所，
+取 Top 50 等权写入 index_constituents 表。
+
+依赖：sync_stock_fund_flow.py 必须先跑完（全市场资金流入 daily_stock_fund_flow）。
+
+Usage:
+    cd backend && source venv/bin/activate
+
+    # 默认：自动取最近交易日
+    python scripts/update_mainflow_index.py
+
+    # 指定日期
+    python scripts/update_mainflow_index.py --date 2026-06-16
+
+    # Dry-run：预览 Top 50 不写入
+    python scripts/update_mainflow_index.py --dry-run
+
+    # 自定义成分股数量
+    python scripts/update_mainflow_index.py --top 30
+
+Cron（通过 sync_all.py 统一调度，无需单独 cron）:
+    30 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import math
+import os
+import sys
+from datetime import date as date_type, datetime, timedelta
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse
+
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv
+
+# ── Load .env (dev) then .env.production (server override) ──────────────
+_ENV_DIR = Path(__file__).resolve().parent.parent  # backend/
+for _env_file in (".env", ".env.production"):
+    _path = _ENV_DIR / _env_file
+    if _path.exists():
+        load_dotenv(_path, override=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# PostgreSQL connection
+# ═════════════════════════════════════════════════════════════════════════
+
+def _parse_pg_url(url: str) -> dict:
+    url = url.replace("+asyncpg", "").replace("+psycopg2", "")
+    if "://" not in url:
+        url = f"postgresql://{url}"
+    r = urlparse(url)
+    return {
+        "host": r.hostname or "localhost",
+        "port": r.port or 5432,
+        "user": r.username or "aipicking",
+        "password": r.password or "",
+        "dbname": r.path.lstrip("/") or "aipicking",
+    }
+
+
+_default_db = os.getenv("DATABASE_URL", "")
+if not _default_db:
+    _user = os.getenv("DB_USER", "aipicking")
+    _pass = os.getenv("DB_PASSWORD", "")
+    _host = os.getenv("DB_HOST", "localhost")
+    _port = os.getenv("DB_PORT", "5432")
+    _name = os.getenv("DB_NAME", "aipicking")
+    _default_db = f"postgresql://{_user}:{_pass}@{_host}:{_port}/{_name}"
+_PG_PARAMS = _parse_pg_url(_default_db)
+
+
+def get_conn():
+    return psycopg2.connect(**_PG_PARAMS)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Constants
+# ═════════════════════════════════════════════════════════════════════════
+
+INDEX_CODE = "900001"
+INDEX_NAME = "主力资金50"
+FULL_NAME = "主力资金50指数"
+PUBLISHER = "自定义"
+DATA_SOURCE = "custom.main_flow_15d"
+DEFAULT_TOP_N = 50
+LOOKBACK_DAYS = 15          # 滚动交易日数
+MIN_LIST_DAYS = 60          # 上市最少自然日
+EQUAL_WEIGHT = 2.0          # 等权 2%
+
+# ── 节假日（与 update_daily.py 保持一致）─────────────────────────────
+HOLIDAYS = {
+    2024: {"0101", "0210", "0211", "0212", "0213", "0214", "0215", "0216", "0217",
+           "0404", "0405", "0406", "0501", "0502", "0503", "0504", "0505",
+           "0608", "0609", "0610", "0929", "0930", "1001", "1002", "1003",
+           "1004", "1005", "1006", "1007"},
+    2025: {"0101", "0128", "0129", "0130", "0131", "0203", "0204",
+           "0404", "0405", "0406", "0501", "0502", "0503", "0504", "0505",
+           "0531", "0601", "0602", "1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008"},
+    2026: {"0101", "0217", "0218", "0219", "0220", "0221", "0222", "0223",
+           "0405", "0406", "0407", "0501", "0502", "0503", "0504", "0505",
+           "0625", "0626", "0627", "0929", "0930", "1001", "1002", "1003", "1004", "1005", "1006", "1007"},
+}
+
+
+def is_trade_day(date_str: str) -> bool:
+    """判断是否为交易日，输入 YYYYMMDD 或 YYYY-MM-DD"""
+    date_str = date_str.replace("-", "")
+    d = datetime.strptime(date_str, "%Y%m%d")
+    if d.weekday() >= 5:
+        return False
+    mmdd = d.strftime("%m%d")
+    year = d.year
+    if year in HOLIDAYS and mmdd in HOLIDAYS[year]:
+        return False
+    return True
+
+
+def get_latest_trade_day() -> str:
+    """获取最近一个交易日（含今天），返回 YYYY-MM-DD"""
+    now = datetime.now()
+    # 盘后（>=16:00）算今天，否则算昨天
+    if now.hour < 16:
+        now = now - timedelta(days=1)
+    for _ in range(10):
+        ds = now.strftime("%Y%m%d")
+        if is_trade_day(ds):
+            return f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+        now -= timedelta(days=1)
+    raise RuntimeError("无法找到最近交易日")
+
+
+def get_lookback_trade_dates(conn, end_date: str, n: int = LOOKBACK_DAYS) -> list[str]:
+    """从 daily 表中取最近 N 个有日线数据的交易日（降序），返回 YYYY-MM-DD 列表。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT trade_date FROM daily
+            WHERE trade_date <= %s
+            ORDER BY trade_date DESC
+            LIMIT %s
+            """,
+            (end_date, n),
+        )
+        rows = cur.fetchall()
+    dates = [r[0] for r in rows]
+    logging.info("最近 %d 个交易日（截止 %s）: %s ... %s", len(dates), end_date,
+                 dates[0] if dates else "N/A", dates[-1] if dates else "N/A")
+    return dates
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Core logic
+# ═════════════════════════════════════════════════════════════════════════
+
+def compute_top_stocks(conn, trade_dates: list[str], top_n: int) -> list[dict]:
+    """
+    聚合最近 N 日主力净流入，返回 Top K 成分股列表。
+
+    排除规则：
+      - ST / *ST（stocks.name LIKE '%ST%'）
+      - 北交所（ts_code LIKE '%.BJ'）
+      - 上市 < 60 自然日
+
+    Returns:
+        [{ts_code, stock_name, flow_15d, weight}, ...]  按 flow_15d 降序
+    """
+    if not trade_dates:
+        logging.error("没有交易日数据，无法计算")
+        return []
+
+    min_list_date = (datetime.now() - timedelta(days=MIN_LIST_DAYS)).strftime("%Y%m%d")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                sff.ts_code,
+                s.name AS stock_name,
+                SUM(sff.main_net_flow) AS flow_15d
+            FROM daily_stock_fund_flow sff
+            JOIN stocks s ON s.ts_code = sff.ts_code
+            WHERE sff.trade_date = ANY(%s)
+              AND s.name NOT LIKE '%%ST%%'
+              AND sff.ts_code NOT LIKE '%%.BJ'
+              AND (s.list_date IS NULL OR s.list_date = '' OR s.list_date <= %s)
+            GROUP BY sff.ts_code, s.name
+            HAVING SUM(sff.main_net_flow) > 0
+            ORDER BY flow_15d DESC
+            LIMIT %s
+            """,
+            (trade_dates, min_list_date, top_n),
+        )
+        rows = cur.fetchall()
+
+    stocks = [
+        {
+            "ts_code": r[0],
+            "stock_name": r[1],
+            "flow_15d": float(r[2]),
+            "weight": EQUAL_WEIGHT,
+        }
+        for r in rows
+    ]
+
+    if len(stocks) < top_n:
+        logging.warning(
+            "符合条件的股票仅 %d 只（目标 %d）—— 全市场主力净流入>0 的不足",
+            len(stocks), top_n,
+        )
+    else:
+        logging.info("筛选出 %d 只成分股，主力净流入范围: %.2f亿 ~ %.2f亿",
+                     len(stocks),
+                     stocks[-1]["flow_15d"] / 1e8,
+                     stocks[0]["flow_15d"] / 1e8)
+
+    return stocks
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Database upsert
+# ═════════════════════════════════════════════════════════════════════════
+
+def upsert_index_info(conn, eff_date: str) -> None:
+    """幂等写入指数元数据到 index_info"""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO index_info (index_code, index_name, full_name, publisher,
+                                    constituent_count, data_source, last_sync_date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (index_code) DO UPDATE SET
+                constituent_count = EXCLUDED.constituent_count,
+                last_sync_date = EXCLUDED.last_sync_date,
+                updated_at = NOW() AT TIME ZONE 'Asia/Shanghai'
+            """,
+            (INDEX_CODE, INDEX_NAME, FULL_NAME, PUBLISHER,
+             DEFAULT_TOP_N, DATA_SOURCE, eff_date),
+        )
+    conn.commit()
+    logging.info("指数元数据已更新: %s (%s)", FULL_NAME, INDEX_CODE)
+
+
+def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
+    """幂等写入成分股到 index_constituents"""
+    if not stocks:
+        return 0
+
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_values(
+            cur,
+            """
+            INSERT INTO index_constituents (index_code, ts_code, stock_name,
+                                            industry, market_cap, weight, eff_date)
+            VALUES %s
+            ON CONFLICT (index_code, ts_code, eff_date) DO UPDATE SET
+                stock_name = EXCLUDED.stock_name,
+                weight     = EXCLUDED.weight,
+                updated_at = NOW() AT TIME ZONE 'Asia/Shanghai'
+            """,
+            [
+                (INDEX_CODE, s["ts_code"], s["stock_name"],
+                 "", None, s["weight"], eff_date)
+                for s in stocks
+            ],
+            template="(%s, %s, %s, %s, %s, %s, %s)",
+        )
+    conn.commit()
+    logging.info("已写入 %d 条成分股记录（eff_date=%s）", len(stocks), eff_date)
+    return len(stocks)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Verify
+# ═════════════════════════════════════════════════════════════════════════
+
+def verify(conn, eff_date: str) -> None:
+    """打印验证结果"""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT ts_code, stock_name, weight::numeric(10,2),
+                   ROUND(main_net_flow::numeric, 0) AS flow_wan
+            FROM (
+                SELECT ic.ts_code, ic.stock_name, ic.weight,
+                       SUM(sff.main_net_flow) AS main_net_flow
+                FROM index_constituents ic
+                JOIN daily_stock_fund_flow sff
+                  ON sff.ts_code = ic.ts_code
+                 AND sff.trade_date IN (
+                     SELECT DISTINCT trade_date FROM daily
+                     WHERE trade_date <= %s
+                     ORDER BY trade_date DESC
+                     LIMIT %s
+                 )
+                WHERE ic.index_code = %s AND ic.eff_date = %s
+                GROUP BY ic.ts_code, ic.stock_name, ic.weight
+                ORDER BY main_net_flow DESC
+            ) sub
+            """,
+            (eff_date, LOOKBACK_DAYS, INDEX_CODE, eff_date),
+        )
+        rows = cur.fetchall()
+    if rows:
+        logging.info("── 验证：Top 10 成分股 ──")
+        for i, (code, name, weight, flow_wan) in enumerate(rows[:10], 1):
+            logging.info("  %2d. %s %-8s 权重=%.1f%% 15日主力净流入=%s万",
+                         i, code, name, weight, f"{flow_wan:,.0f}" if flow_wan else "N/A")
+    logging.info("验证完成: %d 只成分股（eff_date=%s）", len(rows), eff_date)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Orchestrator
+# ═════════════════════════════════════════════════════════════════════════
+
+def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False) -> dict:
+    """主流程"""
+    conn = get_conn()
+    try:
+        # 1. 取最近 N 个交易日
+        trade_dates = get_lookback_trade_dates(conn, eff_date, LOOKBACK_DAYS)
+        if len(trade_dates) < 3:
+            logging.error("交易日数据不足（仅 %d 天），无法计算滚动 %d 日",
+                          len(trade_dates), LOOKBACK_DAYS)
+            return {"success": False, "error": "insufficient_trade_days"}
+
+        # 2. 计算 Top N
+        stocks = compute_top_stocks(conn, trade_dates, top_n)
+
+        if dry_run:
+            logging.info("[DRY RUN] 不写入数据库")
+            print("\n  排名 | 代码       | 名称       | 15日主力净流入(亿)")
+            print("  " + "-" * 55)
+            for i, s in enumerate(stocks, 1):
+                print(f"  {i:>4} | {s['ts_code']:<10} | {s['stock_name']:<8} | {s['flow_15d']/1e8:>10.2f}")
+            return {"success": True, "mode": "dry_run", "count": len(stocks)}
+
+        # 3. 写入
+        upsert_index_info(conn, eff_date)
+        upsert_constituents(conn, stocks, eff_date)
+
+        # 4. 验证
+        verify(conn, eff_date)
+
+        return {"success": True, "count": len(stocks), "eff_date": eff_date}
+
+    finally:
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# CLI
+# ═════════════════════════════════════════════════════════════════════════
+
+def main():
+    p = argparse.ArgumentParser(
+        description="主力资金50指数 — 每日盘后更新成分股")
+    p.add_argument("--date", default=None,
+                   help="生效日期 YYYY-MM-DD（默认: 盘后取最近交易日）")
+    p.add_argument("--top", type=int, default=DEFAULT_TOP_N,
+                   help=f"成分股数量（默认 {DEFAULT_TOP_N}）")
+    p.add_argument("--dry-run", action="store_true",
+                   help="仅预览 Top N，不写入数据库")
+    p.add_argument("--pg-url", default=None,
+                   help="PostgreSQL 连接 URL（默认: $DATABASE_URL）")
+    p.add_argument("--log-level", default="INFO",
+                   choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    args = p.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+    )
+
+    # Allow runtime override of PG connection
+    if args.pg_url:
+        global _PG_PARAMS
+        _PG_PARAMS = _parse_pg_url(args.pg_url)
+
+    # Determine effective date
+    if args.date:
+        eff_date = args.date.replace("-", "")
+        eff_date = f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
+    else:
+        eff_date = get_latest_trade_day()
+
+    logging.info("主力资金50指数更新 — eff_date=%s top=%d", eff_date, args.top)
+
+    result = run(eff_date=eff_date, top_n=args.top, dry_run=args.dry_run)
+
+    if result["success"]:
+        if result.get("mode") == "dry_run":
+            print(f"\n✅ [DRY RUN] 预览完成：{result['count']} 只")
+        else:
+            print(f"\n✅ 主力资金50 更新完成：{result['count']} 只成分股（{result['eff_date']}）")
+    else:
+        print(f"\n❌ 失败: {result.get('error', 'unknown')}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
