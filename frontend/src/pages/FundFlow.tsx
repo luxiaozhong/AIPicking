@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Card, Row, Col, Statistic, Spin, Empty, Alert, DatePicker, Segmented,
-  Table, Tag, Typography, Space, Select,
+  Table, Tag, Typography, Space, Select, Drawer,
 } from 'antd';
 import {
   RiseOutlined, FallOutlined, DollarOutlined, PieChartOutlined,
@@ -14,6 +14,7 @@ import type { StockFlowItem } from '@/services/fundFlowService';
 import { fundFlowService } from '@/services/fundFlowService';
 import type { ColumnsType } from 'antd/es/table';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
+import StockFundFlowDetail from '@/components/shared/StockFundFlowDetail';
 
 const { Title, Text } = Typography;
 
@@ -158,6 +159,22 @@ const FundFlow: React.FC = () => {
     setSearchedStock(null);
     setStockSearchValue('');
     store.setSelectedStock(null);
+  };
+
+  // Drawer 个股搜索（顶部）
+  const [drawerStock, setDrawerStock] = useState<string | null>(null);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+
+  const handleTopStockSelect = (tsCode: string) => {
+    if (!tsCode) return;
+    store.fetchStockTrend(tsCode, 30);
+    setDrawerStock(tsCode);
+    setDrawerVisible(true);
+  };
+
+  const handleCloseDrawer = () => {
+    setDrawerVisible(false);
+    setDrawerStock(null);
   };
 
   // 初始化
@@ -538,8 +555,42 @@ const FundFlow: React.FC = () => {
             placeholder="选择日期"
             allowClear
           />
+          <StockSearchLookup
+            value=""
+            onChange={() => {}}
+            onSelect={handleTopStockSelect}
+            placeholder="搜索个股资金流"
+            style={{ width: 200 }}
+          />
+          {drawerStock && (
+            <Tag closable onClose={handleCloseDrawer} color="blue">
+              已选: {drawerStock}
+            </Tag>
+          )}
         </Space>
       </div>
+
+      {/* ── 个股资金流 Drawer ── */}
+      <Drawer
+        title={
+          <Space>
+            <Tag color="blue">{drawerStock}</Tag>
+            <Text strong>{store.stockTrend?.stock_name || ''}</Text>
+          </Space>
+        }
+        open={drawerVisible}
+        onClose={handleCloseDrawer}
+        width={960}
+        destroyOnClose
+      >
+        {drawerStock && (
+          <StockFundFlowDetail
+            tsCode={drawerStock}
+            stockName={store.stockTrend?.stock_name}
+            onClose={handleCloseDrawer}
+          />
+        )}
+      </Drawer>
 
       {store.error && (
         <Alert message={store.error} type="error" closable onClose={store.clearError} style={{ marginBottom: 16 }} />
@@ -764,127 +815,10 @@ const FundFlow: React.FC = () => {
       </div>
 
       {/* ── 个股搜索详情面板 ── */}
-      {searchedStock && (
-        <Card
-          size="small"
-          style={{ marginBottom: 12 }}
-          title={
-            <Space>
-              <Tag color="blue">{searchedStock}</Tag>
-              <Text strong>{store.stockTrend?.stock_name || ''}</Text>
-            </Space>
-          }
-          extra={
-            <Tag
-              closable
-              onClose={handleClearStock}
-              style={{ cursor: 'pointer' }}
-            >
-              关闭
-            </Tag>
-          }
-        >
-          {store.loading.stockTrend ? (
-            <Spin style={{ display: 'block', padding: 20 }} />
-          ) : store.stockTrend && store.stockTrend.days.length > 0 ? (
-            (() => {
-              const latest = store.stockTrend.days[store.stockTrend.days.length - 1];
-              return (
-                <>
-                  {/* 指标卡片 */}
-                  <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-                    <Col xs={12} sm={6} md={3}>
-                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>主力净流入</Text>
-                        <br />
-                        <Text strong style={{ fontSize: 16, color: posColor(latest.main_net_flow) }}>
-                          {fmtYiShort(latest.main_net_flow / 1e8)}
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>超大单</Text>
-                        <br />
-                        <Text strong style={{ fontSize: 16, color: posColor(latest.jumbo_net_flow) }}>
-                          {fmtYiShort(latest.jumbo_net_flow / 1e8)}
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>大单</Text>
-                        <br />
-                        <Text strong style={{ fontSize: 16, color: posColor(latest.block_net_flow) }}>
-                          {fmtYiShort(latest.block_net_flow / 1e8)}
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>中单 / 小单</Text>
-                        <br />
-                        <Text strong style={{ fontSize: 14, color: posColor(latest.mid_net_flow) }}>
-                          {fmtYiShort(latest.mid_net_flow / 1e8)}
-                        </Text>
-                        <Text style={{ fontSize: 12, marginLeft: 8, color: posColor(latest.small_net_flow) }}>
-                          {fmtYiShort(latest.small_net_flow / 1e8)}
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>5日 / 10日 / 20日累计</Text>
-                        <br />
-                        <Text strong style={{ fontSize: 14, color: posColor(latest.main_net_flow_5d) }}>
-                          {fmtYiShort(latest.main_net_flow_5d / 1e8)}
-                        </Text>
-                        <Text style={{ fontSize: 12, marginLeft: 8, color: posColor(latest.main_net_flow_10d) }}>
-                          {fmtYiShort(latest.main_net_flow_10d / 1e8)}
-                        </Text>
-                        <Text style={{ fontSize: 12, marginLeft: 8, color: posColor(latest.main_net_flow_20d) }}>
-                          {fmtYiShort(latest.main_net_flow_20d / 1e8)}
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>收盘价</Text>
-                        <br />
-                        <Text strong style={{ fontSize: 16 }}>
-                          {latest.close_price?.toFixed(2) || '-'}
-                        </Text>
-                      </Card>
-                    </Col>
-                  </Row>
-
-                  {/* 趋势图表 */}
-                  <Row gutter={16}>
-                    <Col span={12}>
-                      <Card size="small" title="四类订单净流入（超大/大/中/小）">
-                        <ReactECharts
-                          option={buildOrderFlowChart(store.stockTrend.days)}
-                          style={{ height: 250 }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={12}>
-                      <Card size="small" title="多日累计趋势">
-                        <ReactECharts
-                          option={buildCumTrendChart(store.stockTrend.days)}
-                          style={{ height: 250 }}
-                        />
-                      </Card>
-                    </Col>
-                  </Row>
-                </>
-              );
-            })()
-          ) : (
-            <Empty description="暂无该股票资金流数据" />
-          )}
-        </Card>
-      )}
+      <StockFundFlowDetail
+        tsCode={searchedStock}
+        onClose={handleClearStock}
+      />
 
       <Card size="small">
         {loading.stockRanking ? (
