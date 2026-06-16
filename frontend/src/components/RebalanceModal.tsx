@@ -1,11 +1,13 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   Modal, Switch, Table, InputNumber, Space,
-  Typography, Tag, Divider,
+  Typography, Tag, Divider, AutoComplete, Button,
 } from 'antd';
+import { PlusOutlined, CloseOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Recommendation } from '@/services/strategyTrackerService';
 import type { PaperHolding } from '@/services/paperTradeService';
+import { stockService } from '@/services/stockService';
 
 const { Text } = Typography;
 
@@ -18,6 +20,7 @@ interface SellRow {
   holding_shares: number;
   sell_shares: number;
   checked: boolean;
+  isTop3: boolean;  // true = in top3, unchecked by default（keep）
 }
 
 interface BuyRow {
@@ -27,6 +30,7 @@ interface BuyRow {
   suggested_shares: number;
   buy_shares: number;
   checked: boolean;
+  isCustom: boolean;  // true = manually added
 }
 
 interface RebalanceModalProps {
@@ -60,6 +64,10 @@ function roundToLot(shares: number, tsCode: string): number {
   return Math.floor(shares / lot) * lot;
 }
 
+function generateKey(): string {
+  return `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 // ── Component ──
 
 export default function RebalanceModal({
@@ -78,7 +86,12 @@ export default function RebalanceModal({
   const [sellEnabled, setSellEnabled] = useState(true);
   const [buyEnabled, setBuyEnabled] = useState(true);
 
-  // Build fallback close price map from holdings and top3
+  // Custom buy: search state
+  const [buySearchValue, setBuySearchValue] = useState('');
+  const [buySearchOptions, setBuySearchOptions] = useState<{ value: string; label: string; item: { ts_code: string; name: string } }[]>([]);
+  const [showBuySearch, setShowBuySearch] = useState(false);
+
+  // Build fallback close price map
   const fallbackCloseMap = useMemo(() => {
     const map: Record<string, number> = {};
     holdings.forEach((h) => {
@@ -90,19 +103,21 @@ export default function RebalanceModal({
     return map;
   }, [holdings, top3]);
 
-  // Sell rows: holdings NOT in top3
+  // Sell rows: ALL holdings, top3 ones default unchecked
   const initialSellRows: SellRow[] = useMemo(() => {
     const topCodes = new Set(top3.map((r) => r.ts_code));
-    return holdings
-      .filter((h) => !topCodes.has(h.ts_code))
-      .map((h) => ({
+    return holdings.map((h) => {
+      const inTop3 = topCodes.has(h.ts_code);
+      return {
         key: `sell-${h.ts_code}`,
         ts_code: h.ts_code,
         stock_name: h.stock_name,
         holding_shares: h.shares,
-        sell_shares: h.shares, // default: sell all
-        checked: true,
-      }));
+        sell_shares: h.shares,
+        checked: !inTop3,  // unchecked if in top3 (keep by default)
+        isTop3: inTop3,
+      };
+    });
   }, [holdings, top3]);
 
   const [sellData, setSellData] = useState<SellRow[]>([]);
@@ -125,29 +140,85 @@ export default function RebalanceModal({
           suggested_shares: Math.max(suggested, minLot),
           buy_shares: Math.max(suggested, minLot),
           checked: true,
+          isCustom: false,
         };
       });
   }, [top3, holdings, fallbackCloseMap, totalValue]);
 
   const [buyData, setBuyData] = useState<BuyRow[]>([]);
+  const [customBuyRows, setCustomBuyRows] = useState<BuyRow[]>([]);
 
-  // Reset data when modal opens or dependencies change
+  // Merge and deduplicate buy data
+  const mergedBuyData = useMemo(() => {
+    const customCodes = new Set(customBuyRows.map((r) => r.ts_code));
+    // Remove custom codes from initial to avoid duplicates
+    const filtered = buyData.filter((r) => !customCodes.has(r.ts_code));
+    return [...filtered, ...customBuyRows];
+  }, [buyData, customBuyRows]);
+
+  // Reset data when modal opens
   const [prevOpen, setPrevOpen] = useState(false);
   if (open && !prevOpen) {
     setPrevOpen(true);
-    // Sync initial data when opening
     setSellData(initialSellRows);
     setBuyData(initialBuyRows);
+    setCustomBuyRows([]);
+    setShowBuySearch(false);
+    setBuySearchValue('');
   } else if (!open && prevOpen) {
     setPrevOpen(false);
   }
 
-  // Also sync when initial data changes while open
-  const initialSellRef = useMemo(() => initialSellRows, [open]);
-  const initialBuyRef = useMemo(() => initialBuyRows, [open]);
-  if (open && (initialSellRef !== initialSellRows || initialBuyRef !== initialBuyRows)) {
-    // Only sync sell data if the list structure changed (new stocks to sell)
-  }
+  // Stock search handler
+  const handleBuySearch = useCallback(async (value: string) => {
+    setBuySearchValue(value);
+    if (!value || value.length < 1) {
+      setBuySearchOptions([]);
+      return;
+    }
+    try {
+      const items = await stockService.search(value, 8);
+      setBuySearchOptions(
+        items.map((item) => ({
+          value: `${item.ts_code} ${item.name}`,
+          label: `${item.ts_code} ${item.name}`,
+          item: { ts_code: item.ts_code, name: item.name },
+        }))
+      );
+    } catch {
+      setBuySearchOptions([]);
+    }
+  }, []);
+
+  // Add custom buy from search
+  const handleAddCustomBuy = useCallback((stock: { ts_code: string; name: string }) => {
+    // Check if already in buy list
+    if (mergedBuyData.some((r) => r.ts_code === stock.ts_code)) return;
+
+    const close = fallbackCloseMap[stock.ts_code] || 0;
+    const budget = totalValue / 3;
+    const rawShares = close > 0 ? budget / close : 0;
+    const suggested = roundToLot(Math.floor(rawShares), stock.ts_code);
+    const minLot = getLotSize(stock.ts_code);
+
+    const newRow: BuyRow = {
+      key: generateKey(),
+      ts_code: stock.ts_code,
+      stock_name: stock.name,
+      suggested_shares: Math.max(suggested, minLot),
+      buy_shares: Math.max(suggested, minLot),
+      checked: true,
+      isCustom: true,
+    };
+    setCustomBuyRows((prev) => [...prev, newRow]);
+    setShowBuySearch(false);
+    setBuySearchValue('');
+  }, [mergedBuyData, fallbackCloseMap, totalValue]);
+
+  // Remove custom buy row
+  const handleRemoveCustomBuy = useCallback((key: string) => {
+    setCustomBuyRows((prev) => prev.filter((r) => r.key !== key));
+  }, []);
 
   // Capital calculation
   const calcResult = useMemo(() => {
@@ -166,7 +237,7 @@ export default function RebalanceModal({
 
     // Buy required
     let buyRequired = 0;
-    const checkedBuys = buyEnabled ? buyData.filter((b) => b.checked) : [];
+    const checkedBuys = buyEnabled ? mergedBuyData.filter((b) => b.checked) : [];
     for (const b of checkedBuys) {
       const price = fallbackCloseMap[b.ts_code] || 0;
       const gross = b.buy_shares * price;
@@ -185,7 +256,7 @@ export default function RebalanceModal({
       shortfall: Math.round(shortfall * 100) / 100,
       hasShortfall: shortfall > 0.01,
     };
-  }, [sellData, buyData, sellEnabled, buyEnabled, cash, fallbackCloseMap]);
+  }, [sellData, mergedBuyData, sellEnabled, buyEnabled, cash, fallbackCloseMap]);
 
   // Submit handler
   const handleOk = useCallback(async () => {
@@ -197,7 +268,7 @@ export default function RebalanceModal({
       : [];
 
     const buys = buyEnabled
-      ? buyData.filter((b) => b.checked && b.buy_shares > 0).map((b) => ({
+      ? mergedBuyData.filter((b) => b.checked && b.buy_shares > 0).map((b) => ({
           ts_code: b.ts_code,
           shares: b.buy_shares,
           stock_name: b.stock_name,
@@ -214,12 +285,16 @@ export default function RebalanceModal({
       additional_capital: calcResult.shortfall,
       exec_date: today,
     });
-  }, [sellEnabled, buyEnabled, sellData, buyData, strategyId, recDate, calcResult.shortfall, onSubmit]);
+  }, [sellEnabled, buyEnabled, sellData, mergedBuyData, strategyId, recDate, calcResult.shortfall, onSubmit]);
 
   // Determine if submit should be disabled
   const hasAnySell = sellEnabled && sellData.some((s) => s.checked && s.sell_shares > 0);
-  const hasAnyBuy = buyEnabled && buyData.some((b) => b.checked && b.buy_shares > 0);
+  const hasAnyBuy = buyEnabled && mergedBuyData.some((b) => b.checked && b.buy_shares > 0);
   const hasAnyAction = hasAnySell || hasAnyBuy;
+
+  // Count of top3 holdings (keep by default)
+  const keepCount = initialSellRows.filter((s) => s.isTop3).length;
+  const exitCount = initialSellRows.filter((s) => !s.isTop3).length;
 
   // Sell table columns
   const sellColumns: ColumnsType<SellRow> = [
@@ -240,7 +315,17 @@ export default function RebalanceModal({
         />
       ),
     },
-    { title: '名称', dataIndex: 'stock_name', width: 100 },
+    {
+      title: '名称', dataIndex: 'stock_name', width: 100,
+      render: (v: string, record: SellRow) => (
+        <Space size={4}>
+          {v}
+          {record.isTop3 && (
+            <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>策略持有</Tag>
+          )}
+        </Space>
+      ),
+    },
     {
       title: '代码', dataIndex: 'ts_code', width: 100,
       render: (v: string) => <Text type="secondary">{v}</Text>,
@@ -283,16 +368,34 @@ export default function RebalanceModal({
           checked={record.checked}
           disabled={!buyEnabled}
           onChange={(e) => {
-            setBuyData((prev) =>
-              prev.map((r) =>
-                r.key === record.key ? { ...r, checked: e.target.checked } : r
-              )
-            );
+            if (record.isCustom) {
+              setCustomBuyRows((prev) =>
+                prev.map((r) =>
+                  r.key === record.key ? { ...r, checked: e.target.checked } : r
+                )
+              );
+            } else {
+              setBuyData((prev) =>
+                prev.map((r) =>
+                  r.key === record.key ? { ...r, checked: e.target.checked } : r
+                )
+              );
+            }
           }}
         />
       ),
     },
-    { title: '名称', dataIndex: 'stock_name', width: 100 },
+    {
+      title: '名称', dataIndex: 'stock_name', width: 100,
+      render: (v: string, record: BuyRow) => (
+        <Space size={4}>
+          {v}
+          {record.isCustom && (
+            <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>自定义</Tag>
+          )}
+        </Space>
+      ),
+    },
     {
       title: '代码', dataIndex: 'ts_code', width: 100,
       render: (v: string) => <Text type="secondary">{v}</Text>,
@@ -311,28 +414,41 @@ export default function RebalanceModal({
           disabled={!buyEnabled || !record.checked}
           style={{ width: '100%' }}
           onChange={(val) => {
-            setBuyData((prev) =>
-              prev.map((r) =>
-                r.key === record.key ? { ...r, buy_shares: val ?? 0 } : r
-              )
-            );
+            if (record.isCustom) {
+              setCustomBuyRows((prev) =>
+                prev.map((r) =>
+                  r.key === record.key ? { ...r, buy_shares: val ?? 0 } : r
+                )
+              );
+            } else {
+              setBuyData((prev) =>
+                prev.map((r) =>
+                  r.key === record.key ? { ...r, buy_shares: val ?? 0 } : r
+                )
+              );
+            }
           }}
         />
       ),
     },
+    {
+      title: '', dataIndex: 'actions', width: 30,
+      render: (_: unknown, record: BuyRow) =>
+        record.isCustom ? (
+          <Button
+            type="text" size="small" danger
+            icon={<CloseOutlined />}
+            onClick={() => handleRemoveCustomBuy(record.key)}
+          />
+        ) : null,
+    },
   ];
-
-  // Keep items: holdings that ARE in top3
-  const keepItems = useMemo(() => {
-    const topCodes = new Set(top3.map((r) => r.ts_code));
-    return holdings.filter((h) => topCodes.has(h.ts_code));
-  }, [holdings, top3]);
 
   return (
     <Modal
       title="执行调仓"
       open={open}
-      width={720}
+      width={740}
       confirmLoading={loading}
       onOk={handleOk}
       onCancel={onClose}
@@ -359,22 +475,19 @@ export default function RebalanceModal({
           <Switch checked={buyEnabled} onChange={setBuyEnabled} size="small" />
         </Space>
 
-        {/* Keep list */}
-        {keepItems.length > 0 && (
+        {/* Strategy keep hint */}
+        {keepCount > 0 && (
           <div>
-            <Text type="secondary">📌 保持（不变）：</Text>
-            {keepItems.map((h) => (
-              <Tag key={h.ts_code} color="default" style={{ marginLeft: 4 }}>
-                {h.stock_name}（{h.shares.toLocaleString()} 股）
-              </Tag>
-            ))}
+            <Text type="secondary">
+              💡 策略推荐继续持有 {keepCount} 只（蓝色「策略持有」标签），如需卖出请手动勾选
+            </Text>
           </div>
         )}
 
         {/* Sell section */}
         {initialSellRows.length > 0 && (
           <div>
-            <Text strong>📤 卖出（{initialSellRows.length} 只）</Text>
+            <Text strong>📤 卖出（全部 {initialSellRows.length} 只持仓，默认卖出 {exitCount} 只）</Text>
             <Table
               size="small"
               rowKey="key"
@@ -385,26 +498,56 @@ export default function RebalanceModal({
             />
           </div>
         )}
-        {initialSellRows.length === 0 && sellEnabled && (
-          <Text type="secondary">📤 无需要卖出的股票</Text>
+        {initialSellRows.length === 0 && (
+          <Text type="secondary">📤 无持仓</Text>
         )}
 
         {/* Buy section */}
-        {initialBuyRows.length > 0 && (
+        {(initialBuyRows.length > 0 || mergedBuyData.length > 0) && (
           <div>
-            <Text strong>📥 买入（{initialBuyRows.length} 只）</Text>
+            <Text strong>📥 买入（{mergedBuyData.length} 只）</Text>
             <Table
               size="small"
               rowKey="key"
               columns={buyColumns}
-              dataSource={buyData}
+              dataSource={mergedBuyData}
               pagination={false}
               style={{ marginTop: 4 }}
             />
           </div>
         )}
-        {initialBuyRows.length === 0 && buyEnabled && (
-          <Text type="secondary">📥 无需要买入的股票</Text>
+        {mergedBuyData.length === 0 && buyEnabled && (
+          <Text type="secondary">📥 无待买入股票</Text>
+        )}
+
+        {/* Add custom buy */}
+        {buyEnabled && (
+          <div>
+            {!showBuySearch ? (
+              <Button
+                type="dashed" size="small" icon={<PlusOutlined />}
+                onClick={() => setShowBuySearch(true)}
+              >
+                添加买入
+              </Button>
+            ) : (
+              <Space>
+                <AutoComplete
+                  value={buySearchValue}
+                  options={buySearchOptions}
+                  onSearch={handleBuySearch}
+                  onSelect={(_, option) => handleAddCustomBuy(option.item)}
+                  placeholder="输入代码或名称搜索…"
+                  style={{ width: 260 }}
+                  allowClear
+                  onClear={() => { setBuySearchValue(''); setShowBuySearch(false); }}
+                />
+                <Button size="small" onClick={() => { setShowBuySearch(false); setBuySearchValue(''); }}>
+                  取消
+                </Button>
+              </Space>
+            )}
+          </div>
         )}
 
         {/* Capital status bar */}
