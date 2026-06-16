@@ -75,10 +75,20 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
   const totalFrames = frames.length;
   const modeLabel = raceMode === '5d' ? '5日累计主力净流入' : '今日主力净流入';
 
-  // Reset frame index on mode change
+  // Jump to latest frame when snapshots data changes (initial load / polling)
+  useEffect(() => {
+    if (totalFrames > 0) {
+      stopPlayback();
+      setCurrentFrame(totalFrames - 1);
+    }
+  }, [snapshots]);
+
+  // Jump to latest frame on mode change
   useEffect(() => {
     stopPlayback();
-    setCurrentFrame(0);
+    if (totalFrames > 0) {
+      setCurrentFrame(totalFrames - 1);
+    }
   }, [raceMode]);
 
   // Stop playback when we run past last frame
@@ -107,10 +117,8 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
     if (frames.length === 0) return;
     stopPlayback();
 
-    // If at end, restart from beginning
-    if (currentFrame >= totalFrames - 1) {
-      setCurrentFrame(0);
-    }
+    // Always start from the earliest snapshot
+    setCurrentFrame(0);
 
     timerRef.current = setInterval(() => {
       setCurrentFrame((prev) => {
@@ -123,7 +131,7 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
       });
     }, 800);
     setPlaying(true);
-  }, [frames.length, currentFrame, totalFrames, stopPlayback]);
+  }, [frames.length, totalFrames, stopPlayback]);
 
   const handleTogglePlay = () => {
     if (playing) {
@@ -135,7 +143,7 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
 
   const handleReset = () => {
     stopPlayback();
-    setCurrentFrame(0);
+    setCurrentFrame(totalFrames - 1);
   };
 
   const option = useMemo(() => {

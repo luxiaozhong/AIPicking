@@ -81,7 +81,7 @@ function buildOrderFlowChart(days: Array<{
   return {
     tooltip: { trigger: 'axis' as const },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    grid: { left: 60, right: 20, top: 10, bottom: 75 },
     xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
     yAxis: { type: 'value' as const, name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
     series: [
@@ -114,23 +114,26 @@ function buildCumTrendChart(days: Array<{ trade_date: string; main_net_flow_5d: 
   return {
     tooltip: { trigger: 'axis' as const },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    grid: { left: 60, right: 20, top: 10, bottom: 75 },
     xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
     yAxis: { type: 'value' as const, name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
     series: [
       {
         name: '5日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
         data: days.map((d) => d.main_net_flow_5d),
+        itemStyle: { color: '#fa8c16' },
         lineStyle: { color: '#fa8c16', width: 1.5 },
       },
       {
         name: '10日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
         data: days.map((d) => d.main_net_flow_10d),
+        itemStyle: { color: '#1677ff' },
         lineStyle: { color: '#1677ff', width: 1.5 },
       },
       {
         name: '20日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
         data: days.map((d) => d.main_net_flow_20d),
+        itemStyle: { color: '#722ed1' },
         lineStyle: { color: '#722ed1', width: 1.5 },
       },
     ],
@@ -209,7 +212,7 @@ const FundFlow: React.FC = () => {
         },
       },
       legend: { bottom: 0, textStyle: { fontSize: 11 } },
-      grid: { left: 60, right: 20, top: 10, bottom: 35 },
+      grid: { left: 60, right: 20, top: 10, bottom: 75 },
       xAxis: {
         type: 'category',
         data: pivoted.dates,
@@ -252,7 +255,7 @@ const FundFlow: React.FC = () => {
         formatter: (params: any) =>
           `${params[0]?.axisValue}<br/>主力净流入为正: ${params[0]?.value}%`,
       },
-      grid: { left: 50, right: 20, top: 10, bottom: 35 },
+      grid: { left: 50, right: 20, top: 10, bottom: 75 },
       xAxis: {
         type: 'category',
         data: dates,

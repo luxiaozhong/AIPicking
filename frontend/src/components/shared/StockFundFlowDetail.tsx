@@ -23,7 +23,7 @@ function buildOrderFlowChart(days: StockTrendDay[]) {
   return {
     tooltip: { trigger: 'axis' as const },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    grid: { left: 60, right: 20, top: 10, bottom: 75 },
     xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
     yAxis: { type: 'value' as const, axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
     series: [
@@ -40,13 +40,13 @@ function buildCumTrendChart(days: StockTrendDay[]) {
   return {
     tooltip: { trigger: 'axis' as const },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    grid: { left: 60, right: 20, top: 10, bottom: 75 },
     xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
     yAxis: { type: 'value' as const, axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
     series: [
-      { name: '5日累计', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_net_flow_5d), lineStyle: { color: '#fa8c16', width: 1.5 } },
-      { name: '10日累计', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_net_flow_10d), lineStyle: { color: '#1677ff', width: 1.5 } },
-      { name: '20日累计', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_net_flow_20d), lineStyle: { color: '#722ed1', width: 1.5 } },
+      { name: '5日累计', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_net_flow_5d), itemStyle: { color: '#fa8c16' }, lineStyle: { color: '#fa8c16', width: 1.5 } },
+      { name: '10日累计', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_net_flow_10d), itemStyle: { color: '#1677ff' }, lineStyle: { color: '#1677ff', width: 1.5 } },
+      { name: '20日累计', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_net_flow_20d), itemStyle: { color: '#722ed1' }, lineStyle: { color: '#722ed1', width: 1.5 } },
     ],
   };
 }
@@ -56,7 +56,7 @@ function buildMainFlowTrendChart(days: StockTrendDay[]) {
   return {
     tooltip: { trigger: 'axis' as const },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 35 },
+    grid: { left: 60, right: 20, top: 10, bottom: 75 },
     xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
     yAxis: { type: 'value' as const, axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' }, splitLine: { lineStyle: { type: 'dashed', color: '#eee' } } },
     series: [
@@ -64,8 +64,8 @@ function buildMainFlowTrendChart(days: StockTrendDay[]) {
         name: '主力净流入', type: 'bar' as const,
         data: days.map((d) => ({ value: d.main_net_flow, itemStyle: { color: d.main_net_flow >= 0 ? RED_COLOR : GREEN_COLOR } })),
       },
-      { name: '主力流入', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_in_flow), lineStyle: { color: RED_COLOR, width: 1, type: 'dashed' as const } },
-      { name: '主力流出', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_out_flow), lineStyle: { color: GREEN_COLOR, width: 1, type: 'dashed' as const } },
+      { name: '主力流入', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_in_flow), itemStyle: { color: RED_COLOR }, lineStyle: { color: RED_COLOR, width: 1, type: 'dashed' as const } },
+      { name: '主力流出', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_out_flow), itemStyle: { color: GREEN_COLOR }, lineStyle: { color: GREEN_COLOR, width: 1, type: 'dashed' as const } },
     ],
   };
 }
