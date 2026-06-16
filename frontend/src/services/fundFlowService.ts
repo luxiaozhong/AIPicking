@@ -168,9 +168,15 @@ export interface StockIntraday {
   snapshots: IntradaySnapshot[];
 }
 
+export interface IndexInfo {
+  index_code: string;
+  index_name: string;
+}
+
 export interface StockTrend {
   ts_code: string;
   stock_name: string;
+  indices: IndexInfo[];
   days: StockTrendDay[];
 }
 

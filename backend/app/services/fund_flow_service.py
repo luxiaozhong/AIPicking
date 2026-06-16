@@ -618,6 +618,41 @@ class FundFlowService:
         name_result = await db.execute(name_stmt)
         name = name_result.scalar() or ""
 
+        # 获取个股所属指数名称
+        pure_code = ts_code.split(".")[0] if "." in ts_code else ts_code
+        ic = IndexConstituent.__table__
+        ii = IndexInfo.__table__
+
+        # index_constituents.ts_code 格式不统一（有的带后缀如 600498.SH，有的不带）
+        # 同时匹配两种格式
+        code_match = or_(ic.c.ts_code == pure_code, ic.c.ts_code == ts_code)
+
+        # 子查询：每个指数最新生效日期
+        latest_eff = (
+            select(
+                ic.c.index_code,
+                func.max(ic.c.eff_date).label("max_eff"),
+            )
+            .where(code_match)
+            .group_by(ic.c.index_code)
+        ).alias("latest_eff")
+
+        index_stmt = (
+            select(ii.c.index_code, ii.c.index_name)
+            .select_from(
+                ic.join(ii, ii.c.index_code == ic.c.index_code).join(
+                    latest_eff,
+                    (latest_eff.c.index_code == ic.c.index_code)
+                    & (latest_eff.c.max_eff == ic.c.eff_date),
+                )
+            )
+            .where(code_match)
+            .distinct()
+            .order_by(ii.c.index_name)
+        )
+        index_result = await db.execute(index_stmt)
+        indices = [{"index_code": r.index_code, "index_name": r.index_name} for r in index_result.all()]
+
         # Collect daily main_net_flow for rolling window computation
         daily_flows = [(r["trade_date"], float(r["main_net_flow"] or 0)) for r in rows]
         date_to_flow = dict(daily_flows)
@@ -630,6 +665,7 @@ class FundFlowService:
         return {
             "ts_code": ts_code,
             "stock_name": name,
+            "indices": indices,
             "days": [
                 {
                     "trade_date": FundFlowService._normalize_date(r["trade_date"]),

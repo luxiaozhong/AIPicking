@@ -136,6 +136,11 @@ const StockFundFlowDetail: React.FC<StockFundFlowDetailProps> = ({
           >
             {displayName}
           </a>
+          {data?.indices && data.indices.length > 0 && (
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              · {data.indices.map((idx) => idx.index_name).join(', ')}
+            </Text>
+          )}
         </Space>
       }
       open={open}
