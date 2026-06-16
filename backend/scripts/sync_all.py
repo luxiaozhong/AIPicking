@@ -24,6 +24,11 @@ from typing import Optional, Tuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 PYTHON = str(Path(__file__).resolve().parent.parent / "venv" / "bin" / "python")
 
+# sync_report.py 读取的日线日志
+_UPDATE_DAILY_LOG = SCRIPT_DIR.parent.parent / "logs" / "update_daily.log"
+# 服务器路径（cron 环境）
+_SERVER_LOG = Path("/var/log/aipicking/update_daily.log")
+
 # 按依赖顺序排列：日线 → 指数 → 龙虎榜 → 估值 → 市场信号 → 日报
 JOBS = [
     {
@@ -99,6 +104,20 @@ def run_job(script: str, date_arg: Optional[str]) -> Tuple[bool, float]:
         return True, elapsed
 
 
+def _write_report_marker():
+    """向 update_daily.log 写入日期标记，确保 sync_report.py 能找到最新同步日期。"""
+    today = datetime.now().strftime("%Y%m%d")
+    marker = f"📅 盘后更新今天({today})"
+    for log_path in (_SERVER_LOG, _UPDATE_DAILY_LOG):
+        try:
+            if log_path.parent.exists():
+                with open(log_path, "a") as f:
+                    f.write(f"{marker}  # sync_all\n")
+                break
+        except (OSError, PermissionError):
+            continue
+
+
 def main():
     parser = argparse.ArgumentParser(description="每日数据同步总调度")
     parser.add_argument("--date", type=str, help="指定日期 YYYY-MM-DD 或 YYYYMMDD")
@@ -153,6 +172,9 @@ def main():
     print(f"\n{'='*60}")
     print(f"  完成: {total_ok} 成功, {total_fail} 失败, 总耗时 {total_elapsed:.1f}s")
     print(f"{'='*60}")
+
+    # 在 update_daily.log 写入日期标记，确保 sync_report.py 能识别最新同步日期
+    _write_report_marker()
 
     sys.exit(0 if total_fail == 0 else 1)
 
