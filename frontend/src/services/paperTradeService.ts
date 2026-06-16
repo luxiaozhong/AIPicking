@@ -50,11 +50,11 @@ export interface ExecuteSummary {
   sell_count: number;
   buy_count: number;
   keep_count: number;
-  kept: string[];
   total_buy_amount: number;
   total_sell_amount: number;
   total_commission: number;
   total_stamp_duty: number;
+  additional_capital_added: number;
 }
 
 export interface ExecuteResult {
@@ -115,15 +115,16 @@ export const paperTradeService = {
     return response.data;
   },
 
-  /** 执行一次调仓 */
-  async execute(
-    strategyId: number,
-    date?: string,
-  ): Promise<ExecuteResult> {
-    const response = await api.post<ExecuteResult>(`${BASE}/execute`, {
-      strategy_id: strategyId,
-      date,
-    });
+  /** 执行一次调仓（灵活模式） */
+  async execute(payload: {
+    strategy_id: number;
+    date?: string;
+    sells: { ts_code: string; shares: number }[];
+    buys: { ts_code: string; shares: number; stock_name?: string }[];
+    additional_capital?: number;
+    exec_date?: string;
+  }): Promise<ExecuteResult> {
+    const response = await api.post<ExecuteResult>(`${BASE}/execute`, payload);
     return response.data;
   },
 
