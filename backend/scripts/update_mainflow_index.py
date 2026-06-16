@@ -129,9 +129,6 @@ def is_trade_day(date_str: str) -> bool:
 def get_latest_trade_day() -> str:
     """获取最近一个交易日（含今天），返回 YYYY-MM-DD"""
     now = datetime.now()
-    # 盘后（>=16:00）算今天，否则算昨天
-    if now.hour < 16:
-        now = now - timedelta(days=1)
     for _ in range(10):
         ds = now.strftime("%Y%m%d")
         if is_trade_day(ds):

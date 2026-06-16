@@ -735,12 +735,7 @@ def main():
 
     date_str = args.date
     if date_str is None:
-        now = datetime.now()
-        if now.hour >= 16:
-            target = now
-        else:
-            target = now - timedelta(days=1)
-        date_str = target.strftime("%Y-%m-%d")
+        date_str = datetime.now().strftime("%Y-%m-%d")
 
     # Validate date format
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
