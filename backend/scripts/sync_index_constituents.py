@@ -41,7 +41,12 @@ logging.basicConfig(
 log = logging.getLogger("sync_index_constituents")
 
 # ── 指数注册表 — 已知指数元数据 ─────────────────────────────────────
+# data_source 取值:
+#   akshare.index_detail_cni         — 国证指数（有权重/行业/市值）
+#   akshare.index_stock_cons_weight_csindex — 中证指数（有权重，无行业/市值）
+#   akshare.index_stock_cons         — 深证指数（无权重/行业/市值，仅名单）
 KNOWN_INDICES: Dict[str, Dict[str, Any]] = {
+    # ── 国证 ──
     "980080": {
         "index_name": "成长100",
         "full_name": "国证成长100",
@@ -55,6 +60,43 @@ KNOWN_INDICES: Dict[str, Dict[str, Any]] = {
         "publisher": "国证",
         "constituent_count": 100,
         "data_source": "akshare.index_detail_cni",
+    },
+    # ── 中证 ──
+    "931643": {
+        "index_name": "科创创业50",
+        "full_name": "中证科创创业50",
+        "publisher": "中证",
+        "constituent_count": 50,
+        "data_source": "akshare.index_stock_cons_weight_csindex",
+    },
+    "950180": {
+        "index_name": "科创AI",
+        "full_name": "上证科创板人工智能",
+        "publisher": "中证",
+        "constituent_count": 30,
+        "data_source": "akshare.index_stock_cons_weight_csindex",
+    },
+    # ── 深证 ──
+    "399673": {
+        "index_name": "创业板50",
+        "full_name": "深证创业板50",
+        "publisher": "深证",
+        "constituent_count": 50,
+        "data_source": "akshare.index_stock_cons",
+    },
+    "399667": {
+        "index_name": "创业板成长",
+        "full_name": "深证创业板成长",
+        "publisher": "深证",
+        "constituent_count": 50,
+        "data_source": "akshare.index_stock_cons",
+    },
+    "399750": {
+        "index_name": "深主板50",
+        "full_name": "深证主板50",
+        "publisher": "深证",
+        "constituent_count": 50,
+        "data_source": "akshare.index_stock_cons",
     },
 }
 
@@ -163,6 +205,79 @@ def fetch_constituents(index_code: str) -> list[dict]:
     return records
 
 
+def fetch_constituents_csi(index_code: str) -> list[dict]:
+    """从 akshare / 中证官网拉取成分股（含权重）"""
+    import akshare as ak
+
+    log.info(f"正在从 中证 获取 {index_code} 成分股权重...")
+    try:
+        df = ak.index_stock_cons_weight_csindex(symbol=index_code)
+    except ValueError:
+        # 回退：直接请求 Excel（兼容 akshare 列数不匹配问题）
+        import requests
+        from io import BytesIO
+
+        url = (
+            f"https://oss-ch.csindex.com.cn/static/html/csindex/"
+            f"public/uploads/file/autofile/closeweight/{index_code}closeweight.xls"
+        )
+        r = requests.get(url, timeout=30)
+        df_raw = pd.read_excel(BytesIO(r.content))  # type: ignore[name-defined]
+        # 只取前 10 列（标准股票指数列）
+        df = df_raw.iloc[:, :10]
+        df.columns = [
+            "日期", "指数代码", "指数名称", "指数英文名称",
+            "成分券代码", "成分券名称", "成分券英文名称",
+            "交易所", "交易所英文名称", "权重",
+        ]
+
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "eff_date": _csi_fmt_date(row["日期"]),
+            "ts_code": str(row["成分券代码"]).zfill(6),
+            "stock_name": str(row["成分券名称"]),
+            "industry": str(row.get("所属行业", "")),
+            "market_cap": None,  # 中证 API 无市值
+            "weight": float(row["权重"]) if row["权重"] else None,
+        })
+
+    records.sort(key=lambda r: r["weight"] or 0, reverse=True)
+    log.info(f"获取到 {len(records)} 只成分股（eff_date={records[0]['eff_date'] if records else 'N/A'}）")
+    return records
+
+
+def _csi_fmt_date(val) -> str:
+    """中证日期可能是 date / int 20260529 / str '2026-05-29'"""
+    import datetime as _dt
+    if isinstance(val, _dt.date):
+        return val.strftime("%Y-%m-%d")
+    s = str(val).replace("-", "").strip()
+    return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+
+
+def fetch_constituents_sz(index_code: str) -> list[dict]:
+    """从 akshare 拉取深证指数成分股（仅名单，无权重/行业/市值）"""
+    import akshare as ak
+
+    log.info(f"正在从 深证 获取 {index_code} 成分股...")
+    df = ak.index_stock_cons(symbol=index_code)
+
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "eff_date": str(row["纳入日期"]),
+            "ts_code": str(row["品种代码"]).zfill(6),
+            "stock_name": str(row["品种名称"]),
+            "industry": "",
+            "market_cap": None,
+            "weight": None,
+        })
+
+    log.info(f"获取到 {len(records)} 只成分股（eff_date={records[0]['eff_date'] if records else 'N/A'}）")
+    return records
+
+
 def upsert_index_info(conn, index_code: str) -> str:
     """写入指数元数据，返回今天的日期字符串"""
     info = KNOWN_INDICES.get(index_code)
@@ -263,10 +378,11 @@ def verify(conn, index_code: str, expected: int = 100) -> None:
             return
 
         for eff_date, cnt, total_weight, null_weight in rows:
+            tw_str = f"{total_weight:.2f}%" if total_weight is not None else "N/A（深证无权重）"
             log.info(
                 f"验证: eff_date={eff_date} | "
                 f"成分股={cnt}/{expected} | "
-                f"权重合计={total_weight:.2f}% | "
+                f"权重合计={tw_str} | "
                 f"缺失权重={null_weight}"
             )
 
@@ -295,8 +411,16 @@ def main():
 
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
-    # 1. 拉取数据
-    records = fetch_constituents(args.index)
+    # 1. 根据数据源拉取数据
+    info = KNOWN_INDICES.get(args.index, {})
+    source = info.get("data_source", "akshare.index_detail_cni")
+
+    if source == "akshare.index_stock_cons_weight_csindex":
+        records = fetch_constituents_csi(args.index)
+    elif source == "akshare.index_stock_cons":
+        records = fetch_constituents_sz(args.index)
+    else:
+        records = fetch_constituents(args.index)
 
     if args.dry_run:
         log.info("[DRY RUN] 不写入数据库")

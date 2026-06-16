@@ -92,28 +92,215 @@ BUILTIN_STRATEGIES = [
         "description": "成长100 + 资金流选股：以国证成长100成分股为股票池，按过去M日主力资金净流入排序，推荐前N只",
         "file_path": "app/strategies/examples/grow_with_money.py",
         "tags": "指数成分股,资金流,成长100,主力净流入",
+        "params_schema": json.dumps({
+            "index_code": {
+                "type": "string",
+                "default": "980080",
+                "label": "指数代码",
+                "description": "国证成长100=980080",
+            },
+            "N": {
+                "type": "int",
+                "default": 5,
+                "label": "推荐数量 N",
+                "description": "选取资金流前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
     },
     {
         "name": "grow_with_money_v1",
         "description": "成长100 + 资金流/市值选股：以国证成长100成分股为股票池，按过去M日主力资金净流入/总市值比率排序，推荐前N只",
         "file_path": "app/strategies/examples/grow_with_money_v1.py",
         "tags": "指数成分股,资金流,成长100,资金效率,市值比率",
+        "params_schema": json.dumps({
+            "index_code": {
+                "type": "string",
+                "default": "980080",
+                "label": "指数代码",
+                "description": "国证成长100=980080",
+            },
+            "N": {
+                "type": "int",
+                "default": 3,
+                "label": "推荐数量 N",
+                "description": "选取资金流/市值比率前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
+    },
+    {
+        "name": "grow_with_money_sh",
+        "description": "上证个股 + 资金流选股：以上证个股（600/601/603/605开头）为股票池，按过去M日主力资金净流入排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money_sh.py",
+        "tags": "资金流,上证,主力净流入",
+        "params_schema": json.dumps({
+            "N": {
+                "type": "int",
+                "default": 5,
+                "label": "推荐数量 N",
+                "description": "选取资金流前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
+    },
+    {
+        "name": "grow_with_money_hz",
+        "description": "深证个股 + 资金流选股：以深证个股（000/001/002/003开头）为股票池，按过去M日主力资金净流入排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money_hz.py",
+        "tags": "资金流,深证,主力净流入",
+        "params_schema": json.dumps({
+            "N": {
+                "type": "int",
+                "default": 5,
+                "label": "推荐数量 N",
+                "description": "选取资金流前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
+    },
+    {
+        "name": "grow_with_money_cy",
+        "description": "创业板个股 + 资金流选股：以创业板个股（300/301开头）为股票池，按过去M日主力资金净流入排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money_cy.py",
+        "tags": "资金流,创业板,主力净流入",
+        "params_schema": json.dumps({
+            "N": {
+                "type": "int",
+                "default": 5,
+                "label": "推荐数量 N",
+                "description": "选取资金流前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
+    },
+    {
+        "name": "grow_with_money_kc",
+        "description": "科创板个股 + 资金流选股：以科创板个股（688开头）为股票池，按过去M日主力资金净流入排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money_kc.py",
+        "tags": "资金流,科创板,主力净流入",
+        "params_schema": json.dumps({
+            "N": {
+                "type": "int",
+                "default": 5,
+                "label": "推荐数量 N",
+                "description": "选取资金流前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
+    },
+    {
+        "name": "grow_with_money_all",
+        "description": "全A股 + 资金流选股：以全部A股为股票池，按过去M日主力资金净流入排序，推荐前N只",
+        "file_path": "app/strategies/examples/grow_with_money_all.py",
+        "tags": "资金流,全A股,主力净流入",
+        "params_schema": json.dumps({
+            "N": {
+                "type": "int",
+                "default": 5,
+                "label": "推荐数量 N",
+                "description": "选取资金流前 N 名",
+                "min": 1,
+                "max": 20,
+            },
+            "M": {
+                "type": "int",
+                "default": 5,
+                "label": "回顾天数 M",
+                "description": "过去 M 个交易日的资金流累计",
+                "min": 3,
+                "max": 60,
+            },
+        }, ensure_ascii=False),
     },
 ]
 
 
 async def seed_strategies(db: AsyncSession, admin_user_id: int = 1) -> int:
-    """预置策略（按 name 去重，已存在则跳过）。返回新创建的策略数。"""
+    """预置策略（按 name 去重，已存在则更新 params_schema 等字段）。返回新创建的策略数。"""
     created = 0
     for s in BUILTIN_STRATEGIES:
         result = await db.execute(select(Strategy).where(Strategy.name == s["name"]))
-        if result.scalar_one_or_none():
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # 更新已有策略的 params_schema、description 等字段
+            updated = False
+            if s.get("params_schema") and existing.params_schema != s["params_schema"]:
+                existing.params_schema = s["params_schema"]
+                updated = True
+            if s.get("description") and existing.description != s["description"]:
+                existing.description = s["description"]
+                updated = True
+            if s.get("file_path") and existing.file_path != s["file_path"]:
+                existing.file_path = s["file_path"]
+                updated = True
+            if s.get("tags") and existing.tags != s["tags"]:
+                existing.tags = s["tags"]
+                updated = True
+            if updated:
+                db.add(existing)
             continue
 
         strategy = Strategy(
             name=s["name"],
             description=s["description"],
             file_path=s["file_path"],
+            params_schema=s.get("params_schema"),
             tags=s.get("tags"),
             status="active",
             version=1,
