@@ -118,8 +118,8 @@ const ConstituentTreemap: React.FC<Props> = ({ data, loading, onStockClick }) =>
     };
   }, [data]);
 
-  const onEvents = useMemo(() => {
-    if (!onStockClick) return {};
+  const onEvents: Record<string, Function> | undefined = useMemo(() => {
+    if (!onStockClick) return undefined;
     return {
       click: (params: any) => {
         if (params.data && params.data.ts_code) {
