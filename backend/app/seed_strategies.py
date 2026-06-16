@@ -292,6 +292,9 @@ async def seed_strategies(db: AsyncSession, admin_user_id: int = 1) -> int:
             if s.get("tags") and existing.tags != s["tags"]:
                 existing.tags = s["tags"]
                 updated = True
+            if not existing.is_published:
+                existing.is_published = True
+                updated = True
             if updated:
                 db.add(existing)
             continue
@@ -306,6 +309,7 @@ async def seed_strategies(db: AsyncSession, admin_user_id: int = 1) -> int:
             version=1,
             factor_config=s.get("factor_config"),
             user_id=admin_user_id,
+            is_published=True,
         )
         db.add(strategy)
         created += 1
