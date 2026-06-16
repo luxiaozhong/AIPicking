@@ -8,6 +8,9 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Crontab (服务器)                                  │
 │                                                                     │
+│   9:00 ── sync_northbound.py     ──► daily_northbound_flow          │
+│           （独立 cron，提前同步北向资金）                              │
+│                                                                     │
 │  11:30 ── sync_stock_fund_flow.py  ──► daily_stock_fund_flow        │
 │            (预同步，盘后覆盖)                                         │
 │                                                                     │
@@ -38,6 +41,9 @@
 ## Crontab 配置（服务器上）
 
 ```cron
+# === 北向资金独立同步（每个交易日 9:00）===
+0 9 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_northbound.py >> /var/log/aipicking/northbound.log 2>&1
+
 # === 盘后总调度（每个工作日 17:30）===
 30 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
 
@@ -78,7 +84,27 @@
 
 ## 所有 Job 详解
 
-### 1. `update_daily.py` — 日线数据
+### 0. `sync_northbound.py` — 北向资金独立同步（独立 cron）
+
+| 维度 | 详情 |
+|------|------|
+| **执行时间** | 每个交易日 9:00 |
+| **数据库** | PostgreSQL |
+| **写入表** | `daily_northbound_flow`（深股通净买入额、买入额、卖出额） |
+| **数据源** | 东财 datacenter RPT_MUTUAL_DEAL_HISTORY（MUTUAL_TYPE="002"） |
+| **日志** | `/var/log/aipicking/northbound.log` |
+| **幂等性** | `ON CONFLICT (trade_date) DO UPDATE` |
+
+**设计意图：** 盘中同步管线（sync_market_data.py）在 18:30 才跑，北向资金数据实际在次日早上即可获取。独立 cron 在每天 9 点开盘前拉取昨天的深股通数据，确保用户在开盘前就能在系统中看到最新北向资金流向。
+
+> 沪股通（MUTUAL_TYPE="001"）自 2024-08-16 起不再披露净买额，当前仅深股通数据可用。
+
+**运行模式：**
+- **默认**：同步昨天的数据
+- `--date YYYY-MM-DD`：指定日期
+- `--dry-run`：仅预览不写入
+
+### 1. `update_daily.py` — 日线数据 + 市值
 
 | 维度 | 详情 |
 |------|------|
@@ -162,6 +188,9 @@
 # 登录服务器
 ssh root@101.35.254.125
 
+# 北向资金同步日志
+tail -f /var/log/aipicking/northbound.log
+
 # 总调度日志（sync_all.py 输出）
 tail -f /var/log/aipicking/sync_all.log
 
@@ -182,6 +211,8 @@ venv/bin/python scripts/sync_all.py --dry-run                 # 仅预览
 venv/bin/python scripts/sync_all.py --skip valuation report   # 跳过某些任务
 
 # 单独执行某个脚本
+venv/bin/python scripts/sync_northbound.py                    # 北向资金（默认昨天）
+venv/bin/python scripts/sync_northbound.py --date 2026-06-06  # 北向资金（指定日期）
 venv/bin/python scripts/update_daily.py                       # 日线更新
 venv/bin/python scripts/sync_dragon_tiger.py                  # 龙虎榜
 venv/bin/python scripts/sync_valuation.py                     # 估值（增量）
@@ -215,5 +246,6 @@ venv/bin/python scripts/sync_financials.py --init             # 全量近 5 年
 | 日期 | 变更 |
 |------|------|
 | 2026-06-15 | 新增 11:30 / 14:15 两档个股资金流盘中预同步（幂等写入，盘后 sync_all 覆盖为最终数据） |
+| 2026-06-09 | 新增 `sync_northbound.py` 独立 cron（每天 9:00），提前同步北向资金数据 |
 | 2026-06-05 | 所有同步任务整合为 `sync_all.py` 总调度，cron 简化为一条（17:00） |
 | 2026-06-05 | `sync_valuation.py` 加入 cron，补充 `update_index_daily.py` 和 `sync_report.py` 文档 |
