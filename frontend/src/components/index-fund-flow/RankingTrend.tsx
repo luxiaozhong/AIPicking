@@ -102,6 +102,18 @@ const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
       ),
     },
     {
+      title: '15日累计',
+      dataIndex: 'current_flow_15d',
+      width: 95,
+      align: 'right',
+      sorter: (a, b) => b.current_flow_15d - a.current_flow_15d,
+      render: (v: number) => (
+        <Text style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>
+          {(v / 1e8).toFixed(2)}亿
+        </Text>
+      ),
+    },
+    {
       title: `排名轨迹（${data?.items?.[0]?.dates?.length || 0}日）`,
       dataIndex: 'ranks',
       width: 100,

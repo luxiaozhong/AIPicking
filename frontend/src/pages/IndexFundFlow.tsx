@@ -45,7 +45,7 @@ const IndexFundFlow: React.FC = () => {
     if (!store.selectedIndexCode) return;
     setRankingTrendLoading(true);
     try {
-      const data = await indexFundFlowService.getRankingTrend(store.selectedIndexCode, 10);
+      const data = await indexFundFlowService.getRankingTrend(store.selectedIndexCode, 15);
       setRankingTrend(data);
     } catch {
       setRankingTrend(null);

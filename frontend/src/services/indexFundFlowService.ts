@@ -96,10 +96,12 @@ export interface RankingTrendItem {
   dates: string[];
   ranks: number[];
   flows5d: number[];
+  flows15d: number[];
   flows: number[];
   improvement: number;
   current_rank: number;
   current_flow_5d: number;
+  current_flow_15d: number;
   current_flow: number;
 }
 

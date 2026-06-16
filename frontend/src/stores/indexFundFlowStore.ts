@@ -90,6 +90,12 @@ export const useIndexFundFlowStore = create<IndexFundFlowState>((set, get) => ({
   setSelectedIndexCode: (code) => {
     set({ selectedIndexCode: code, error: null });
     if (code) {
+      // Persist to URL param and localStorage
+      const params = new URLSearchParams(window.location.search);
+      params.set('index', code);
+      window.history.replaceState(null, '', `?${params.toString()}`);
+      localStorage.setItem('indexFundFlow_selectedIndex', code);
+
       const state = get();
       get().fetchAllData(state.selectedDate);
     }
@@ -126,9 +132,15 @@ export const useIndexFundFlowStore = create<IndexFundFlowState>((set, get) => ({
     try {
       const data = await indexFundFlowService.getIndices();
       set({ indices: data, loading: { ...get().loading, indices: false } });
-      // Auto-select first index if none selected
+      // Auto-select from URL param → localStorage → default 980080
       if (!get().selectedIndexCode && data.length > 0) {
-        const defaultIdx = data.find((d) => d.index_code === '980080') || data[0];
+        const params = new URLSearchParams(window.location.search);
+        const urlIndex = params.get('index');
+        const savedIndex = localStorage.getItem('indexFundFlow_selectedIndex');
+        const preferred = urlIndex || savedIndex;
+        const defaultIdx = (preferred && data.find((d) => d.index_code === preferred))
+          || data.find((d) => d.index_code === '980080')
+          || data[0];
         get().setSelectedIndexCode(defaultIdx.index_code);
       }
     } catch (e: any) {
@@ -247,11 +259,8 @@ export const useIndexFundFlowStore = create<IndexFundFlowState>((set, get) => ({
     const state = get();
     if (state.pollIntervalId) return; // already polling
 
-    // Only poll during market hours
-    if (!isInMarketHours()) {
-      console.log('Not in market hours, polling skipped');
-      return;
-    }
+    // Fetch immediately on start
+    get().fetchSnapshots(get().selectedDate);
 
     const id = setInterval(() => {
       if (isInMarketHours()) {

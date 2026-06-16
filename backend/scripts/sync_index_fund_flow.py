@@ -183,7 +183,7 @@ def load_index_stocks(index_code: str):
                 SELECT ic.ts_code AS raw_code, ic.stock_name,
                        s.ts_code AS full_ts_code
                 FROM index_constituents ic
-                LEFT JOIN stocks s ON s.ts_code LIKE ic.ts_code || '.%%'
+                LEFT JOIN stocks s ON (s.ts_code LIKE ic.ts_code || '.%%' OR s.ts_code = ic.ts_code)
                 WHERE ic.index_code = %s
                   AND ic.eff_date = (
                       SELECT MAX(eff_date) FROM index_constituents

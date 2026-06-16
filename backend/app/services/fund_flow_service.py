@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
-from sqlalchemy import select, func, case, text
+from sqlalchemy import select, func, case, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.stock_tables import DailyStockFundFlow, Stock
@@ -768,13 +768,13 @@ class FundFlowService:
         if not latest_eff:
             return {"items": []}
 
-        # Extend cutoff by 5 extra days for the rolling window warm-up
-        cutoff = (date.today() - timedelta(days=days + 15)).strftime("%Y-%m-%d")
+        # Extend cutoff by 20 extra days for the 15d rolling window warm-up
+        cutoff = (date.today() - timedelta(days=days + 25)).strftime("%Y-%m-%d")
 
         # Get all constituent stock codes
         code_stmt = (
             select(s.c.ts_code, s.c.name.label("stock_name"))
-            .select_from(ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%"))))
+            .select_from(ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code)))
             .where(ic.c.index_code == index_code, ic.c.eff_date == latest_eff)
         )
         code_result = await db.execute(code_stmt)
@@ -802,34 +802,38 @@ class FundFlowService:
 
         sorted_all_dates = sorted(all_dates)
 
-        # Compute rolling 5-day sum for each stock on each date
-        stock_5d: dict[str, list[tuple]] = defaultdict(list)  # ts_code -> [(date, flow5d, flow_today)]
+        # Compute rolling 5-day and 15-day sums for each stock on each date
+        stock_roll: dict[str, list[tuple]] = defaultdict(list)  # ts_code -> [(date, flow5d, flow15d, flow_today)]
         for ts, _ in stocks:
             flow_by_date = stock_flows.get(ts, {})
             for i, dt in enumerate(sorted_all_dates):
                 today_flow = flow_by_date.get(dt, 0)
                 # Sum the last 5 dates (including current)
-                window = sorted_all_dates[max(0, i - 4): i + 1]
-                flow5d = sum(flow_by_date.get(d, 0) for d in window)
-                stock_5d[ts].append((dt, flow5d, today_flow))
+                win5 = sorted_all_dates[max(0, i - 4): i + 1]
+                flow5d = sum(flow_by_date.get(d, 0) for d in win5)
+                # Sum the last 15 dates (including current)
+                win15 = sorted_all_dates[max(0, i - 14): i + 1]
+                flow15d = sum(flow_by_date.get(d, 0) for d in win15)
+                stock_roll[ts].append((dt, flow5d, flow15d, today_flow))
 
         # For each date, rank stocks by computed 5d flow
         stock_ranks: dict[str, dict] = {}
         for ts, name in stocks:
-            stock_ranks[ts] = {"stock_name": name, "dates": [], "ranks": [], "flows5d": [], "flows": []}
+            stock_ranks[ts] = {"stock_name": name, "dates": [], "ranks": [], "flows5d": [], "flows15d": [], "flows": []}
 
         for idx, dt in enumerate(sorted_all_dates):
-            # Only rank starting from 5th date (when rolling window is full)
-            if idx < 4:
+            # Only rank starting from 15th date (when 15d rolling window is full)
+            if idx < 14:
                 continue
-            day_items = [(ts, stock_5d[ts][idx][1], stock_5d[ts][idx][2])
-                        for ts, _ in stocks if idx < len(stock_5d[ts])]
+            day_items = [(ts, stock_roll[ts][idx][1], stock_roll[ts][idx][2], stock_roll[ts][idx][3])
+                        for ts, _ in stocks if idx < len(stock_roll[ts])]
             day_items.sort(key=lambda x: x[1], reverse=True)  # sort by 5d flow desc
-            for rank_i, (ts, flow5d, flow_today) in enumerate(day_items):
+            for rank_i, (ts, flow5d, flow15d, flow_today) in enumerate(day_items):
                 if ts in stock_ranks:
                     stock_ranks[ts]["dates"].append(dt)
                     stock_ranks[ts]["ranks"].append(rank_i + 1)
                     stock_ranks[ts]["flows5d"].append(flow5d)
+                    stock_ranks[ts]["flows15d"].append(flow15d)
                     stock_ranks[ts]["flows"].append(flow_today)
 
         # Build result
@@ -845,10 +849,12 @@ class FundFlowService:
                 "dates": data["dates"],
                 "ranks": data["ranks"],
                 "flows5d": data["flows5d"],
+                "flows15d": data["flows15d"],
                 "flows": data["flows"],
                 "improvement": first_rank - last_rank,
                 "current_rank": last_rank,
                 "current_flow_5d": data["flows5d"][-1] if data["flows5d"] else 0,
+                "current_flow_15d": data["flows15d"][-1] if data["flows15d"] else 0,
                 "current_flow": data["flows"][-1] if data["flows"] else 0,
             })
 
@@ -888,7 +894,7 @@ class FundFlowService:
                 func.count().label("total_count"),
             )
             .select_from(
-                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
@@ -999,7 +1005,7 @@ class FundFlowService:
                 f.c.close_price,
             )
             .select_from(
-                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
@@ -1079,7 +1085,7 @@ class FundFlowService:
                 s.c.name.label("stock_name"),
             )
             .select_from(
-                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
@@ -1178,7 +1184,7 @@ class FundFlowService:
                 func.count().label("total_count"),
             )
             .select_from(
-                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
@@ -1243,7 +1249,7 @@ class FundFlowService:
                 f.c.small_net_flow,
             )
             .select_from(
-                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
@@ -1308,7 +1314,7 @@ class FundFlowService:
             FROM intraday_fund_snapshot sn
             JOIN stocks s2 ON sn.ts_code = s2.ts_code
             JOIN index_constituents ic2
-                ON s2.ts_code LIKE ic2.ts_code || '.%'
+                ON (s2.ts_code LIKE ic2.ts_code || '.%' OR s2.ts_code = ic2.ts_code)
                 AND ic2.index_code = :index_code
                 AND ic2.eff_date = :eff_date
             WHERE sn.trade_date = :trade_date

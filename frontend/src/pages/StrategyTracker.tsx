@@ -331,8 +331,7 @@ export default function StrategyTracker() {
       ? `${selectedDate} 是${isWeekend(selectedDate) ? '周末' : '非交易日'}，已回退到最近交易日 ${tradeDate}`
       : null;
 
-  // ── 是否已执行（当天推荐已调仓）──
-  const hasExecutedToday = status?.last_rec_date === tradeDate;
+  // ── 调仓不限次数，允许盘中多次执行 ──
 
   // ── Mini 资金流 chart ──
   const makeMiniOption = (trend: StockTrend) => {
@@ -470,9 +469,8 @@ export default function StrategyTracker() {
               icon={<PlayCircleOutlined />}
               onClick={handleExecute}
               loading={executing}
-              disabled={hasExecutedToday}
             >
-              {hasExecutedToday ? '已执行' : '执行调仓'}
+              执行调仓
             </Button>
           </Col>
           <Col>
