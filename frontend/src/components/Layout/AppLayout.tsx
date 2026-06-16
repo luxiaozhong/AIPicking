@@ -13,6 +13,7 @@ import {
   QuestionCircleOutlined,
   FireOutlined,
   DollarOutlined,
+  FundViewOutlined,
   StockOutlined,
   AimOutlined,
 } from '@ant-design/icons';
@@ -56,6 +57,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       key: '/fund-flow',
       icon: <DollarOutlined />,
       label: '资金流向',
+    },
+    {
+      key: '/index-fund-flow',
+      icon: <FundViewOutlined />,
+      label: '指数资金流',
     },
     {
       key: '/strategy-tracker',
@@ -105,6 +111,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     if (location.pathname.startsWith('/strategies')) return '/strategies';
     if (location.pathname.startsWith('/education')) return '/education';
     if (location.pathname.startsWith('/market-heat')) return '/market-heat';
+    if (location.pathname.startsWith('/index-fund-flow')) return '/index-fund-flow';
     if (location.pathname.startsWith('/fund-flow')) return '/fund-flow';
     if (location.pathname.startsWith('/strategy-tracker')) return '/strategy-tracker';
     if (location.pathname.startsWith('/index-macd')) return '/index-macd';

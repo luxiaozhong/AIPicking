@@ -13,6 +13,7 @@ from sqlalchemy import select, func, case, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.stock_tables import DailyStockFundFlow, Stock
+from ..models.index_tables import IndexInfo, IndexConstituent
 
 
 # ── 四大指数板块分类（来自 market_heat_service.py BOARD_DEFINITIONS）──
@@ -44,6 +45,74 @@ class FundFlowService:
     # ═══════════════════════════════════════════════════════════════
     # 工具方法
     # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def _compute_rolling_sums(
+        db: AsyncSession,
+        ts_codes: list[str],
+        target_dates: list[str],
+        windows: list[int] = [5, 10, 20],
+    ) -> dict[str, dict[str, float]]:
+        """Self-compute rolling N-day main_net_flow sums for given stocks/dates.
+
+        Returns {ts_code: {date: {'5d': float, '10d': float, '20d': float}}}
+        """
+        if not ts_codes or not target_dates:
+            return {}
+
+        f = DailyStockFundFlow.__table__
+
+        # Get all available trade dates for these stocks (up to max window before earliest target)
+        max_window = max(windows)
+        earliest_target = min(target_dates)
+
+        all_dates_stmt = (
+            select(f.c.trade_date)
+            .where(f.c.ts_code.in_(ts_codes), f.c.trade_date <= max(target_dates))
+            .distinct()
+            .order_by(f.c.trade_date.asc())
+        )
+        date_result = await db.execute(all_dates_stmt)
+        all_sorted_dates = [r[0] for r in date_result.all()]
+
+        # Get all daily flows for the extended period
+        cutoff_idx = max(0, len(all_sorted_dates) - len(target_dates) - max_window - 5)
+        relevant_dates = all_sorted_dates[cutoff_idx:]
+
+        flow_stmt = (
+            select(f.c.trade_date, f.c.ts_code, f.c.main_net_flow)
+            .where(
+                f.c.ts_code.in_(ts_codes),
+                f.c.trade_date.in_(relevant_dates),
+            )
+            .order_by(f.c.trade_date.asc())
+        )
+        flow_result = await db.execute(flow_stmt)
+
+        # Build per-stock lookup: ts_code -> {date: flow}
+        from collections import defaultdict
+        flows: dict[str, dict[str, float]] = defaultdict(dict)
+        for r in flow_result.mappings().all():
+            flows[r["ts_code"]][r["trade_date"]] = float(r["main_net_flow"] or 0)
+
+        # Compute rolling sums for each target date
+        result: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        date_to_idx = {d: i for i, d in enumerate(all_sorted_dates)}
+
+        for ts in ts_codes:
+            stock_flows = flows.get(ts, {})
+            for target in target_dates:
+                if target not in date_to_idx:
+                    continue
+                target_idx = date_to_idx[target]
+                for w in windows:
+                    start_idx = max(0, target_idx - w + 1)
+                    window_dates = all_sorted_dates[start_idx:target_idx + 1]
+                    total = sum(stock_flows.get(d, 0) for d in window_dates)
+                    key = f'{w}d'
+                    result[ts][f"{target}|{key}"] = total
+
+        return dict(result)
 
     @staticmethod
     async def _get_latest_date(db: AsyncSession) -> str:
@@ -477,9 +546,6 @@ class FundFlowService:
                 f.c.main_out_flow,
                 f.c.retail_in_flow,
                 f.c.retail_out_flow,
-                f.c.main_net_flow_5d,
-                f.c.main_net_flow_10d,
-                f.c.main_net_flow_20d,
                 f.c.main_inflow_circ_rate,
                 f.c.main_inflow_rank,
                 f.c.close_price,
@@ -490,8 +556,16 @@ class FundFlowService:
             .limit(limit)
         )
         result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        # Compute real 5d/10d/20d rolling sums
+        ts_codes = [r["ts_code"] for r in rows]
+        rolling = await FundFlowService._compute_rolling_sums(db, ts_codes, [d])
+
         items = []
-        for r in result.mappings().all():
+        for r in rows:
+            ts = r["ts_code"]
+            r5 = rolling.get(ts, {})
             items.append({
                 "ts_code": r["ts_code"],
                 "stock_name": r["stock_name"] or "",
@@ -505,9 +579,9 @@ class FundFlowService:
                 "main_out_flow": float(r["main_out_flow"] or 0),
                 "retail_in_flow": float(r["retail_in_flow"] or 0),
                 "retail_out_flow": float(r["retail_out_flow"] or 0),
-                "main_net_flow_5d": float(r["main_net_flow_5d"] or 0),
-                "main_net_flow_10d": float(r["main_net_flow_10d"] or 0),
-                "main_net_flow_20d": float(r["main_net_flow_20d"] or 0),
+                "main_net_flow_5d": r5.get(f"{d}|5d", 0),
+                "main_net_flow_10d": r5.get(f"{d}|10d", 0),
+                "main_net_flow_20d": r5.get(f"{d}|20d", 0),
                 "main_inflow_circ_rate": float(r["main_inflow_circ_rate"] or 0),
                 "main_inflow_rank": r["main_inflow_rank"],
                 "close_price": float(r["close_price"] or 0),
@@ -524,9 +598,9 @@ class FundFlowService:
         ts_code: str,
         days: int = 30,
     ) -> dict:
-        """单只股票近 N 日资金流趋势"""
+        """单只股票近 N 日资金流趋势（5d/10d/20d 自算）"""
         tbl = DailyStockFundFlow.__table__
-        cutoff = (date.today() - timedelta(days=days + 5)).strftime("%Y-%m-%d")
+        cutoff = (date.today() - timedelta(days=days + 25)).strftime("%Y-%m-%d")
 
         stmt = (
             select(tbl)
@@ -544,6 +618,15 @@ class FundFlowService:
         name_result = await db.execute(name_stmt)
         name = name_result.scalar() or ""
 
+        # Collect daily main_net_flow for rolling window computation
+        daily_flows = [(r["trade_date"], float(r["main_net_flow"] or 0)) for r in rows]
+        date_to_flow = dict(daily_flows)
+        all_dates = [d for d, _ in daily_flows]
+
+        def rolling_sum(idx: int, window: int) -> float:
+            start = max(0, idx - window + 1)
+            return sum(date_to_flow.get(all_dates[i], 0) for i in range(start, idx + 1))
+
         return {
             "ts_code": ts_code,
             "stock_name": name,
@@ -559,12 +642,12 @@ class FundFlowService:
                     "main_out_flow": float(r["main_out_flow"] or 0),
                     "retail_in_flow": float(r["retail_in_flow"] or 0),
                     "retail_out_flow": float(r["retail_out_flow"] or 0),
-                    "main_net_flow_5d": float(r["main_net_flow_5d"] or 0),
-                    "main_net_flow_10d": float(r["main_net_flow_10d"] or 0),
-                    "main_net_flow_20d": float(r["main_net_flow_20d"] or 0),
+                    "main_net_flow_5d": rolling_sum(i, 5),
+                    "main_net_flow_10d": rolling_sum(i, 10),
+                    "main_net_flow_20d": rolling_sum(i, 20),
                     "close_price": float(r["close_price"] or 0),
                 }
-                for r in rows
+                for i, r in enumerate(rows)
             ],
         }
 
@@ -622,3 +705,640 @@ class FundFlowService:
         )
         result = await db.execute(stmt)
         return [FundFlowService._normalize_date(r["trade_date"]) for r in result.mappings().all()]
+
+    # ═══════════════════════════════════════════════════════════════
+    # 11. 个股盘中资金流变化
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_stock_intraday(
+        db: AsyncSession,
+        ts_code: str,
+        trade_date: Optional[str] = None,
+    ) -> dict:
+        """单只股票当日盘中资金流快照（intraday_fund_snapshot）"""
+        d = trade_date or await FundFlowService._get_latest_date(db)
+        if not d:
+            return {"ts_code": ts_code, "trade_date": None, "snapshots": []}
+
+        sql = text(
+            """
+            SELECT snapshot_time, main_net_flow, jumbo_net_flow, block_net_flow,
+                   main_net_flow_5d
+            FROM intraday_fund_snapshot
+            WHERE ts_code = :ts_code AND trade_date = :trade_date
+            ORDER BY snapshot_time ASC
+            """
+        )
+        result = await db.execute(sql, {"ts_code": ts_code, "trade_date": d})
+        snapshots = [
+            {
+                "snapshot_time": str(r["snapshot_time"]),
+                "main_net_flow": float(r["main_net_flow"] or 0),
+                "jumbo_net_flow": float(r["jumbo_net_flow"] or 0),
+                "block_net_flow": float(r["block_net_flow"] or 0),
+                "main_net_flow_5d": float(r["main_net_flow_5d"] or 0),
+            }
+            for r in result.mappings().all()
+        ]
+        return {"ts_code": ts_code, "trade_date": d, "snapshots": snapshots}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 12. 指数成分股 5日排名变化追踪
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_ranking_trend(
+        db: AsyncSession,
+        index_code: str,
+        days: int = 10,
+    ) -> dict:
+        """过去 N 个交易日每只成分股的 5日累计排名变化
+        用每日 main_net_flow 自算滚动 5 日累计，不依赖数据源字段
+        """
+        from collections import defaultdict
+
+        ic = IndexConstituent.__table__
+        s = Stock.__table__
+        f = DailyStockFundFlow.__table__
+
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"items": []}
+
+        # Extend cutoff by 5 extra days for the rolling window warm-up
+        cutoff = (date.today() - timedelta(days=days + 15)).strftime("%Y-%m-%d")
+
+        # Get all constituent stock codes
+        code_stmt = (
+            select(s.c.ts_code, s.c.name.label("stock_name"))
+            .select_from(ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%"))))
+            .where(ic.c.index_code == index_code, ic.c.eff_date == latest_eff)
+        )
+        code_result = await db.execute(code_stmt)
+        stocks = [(r["ts_code"], r["stock_name"] or "") for r in code_result.mappings().all()]
+        ts_codes = [ts for ts, _ in stocks]
+
+        # Get daily main_net_flow (raw, not the 5d field which may be inaccurate)
+        flow_stmt = (
+            select(f.c.trade_date, f.c.ts_code, f.c.main_net_flow)
+            .where(
+                f.c.ts_code.in_(ts_codes),
+                f.c.trade_date >= cutoff,
+            )
+            .order_by(f.c.trade_date.asc())
+        )
+        flow_result = await db.execute(flow_stmt)
+
+        # Group flows by (stock, date)
+        stock_flows: dict[str, dict[str, float]] = defaultdict(dict)
+        all_dates: set[str] = set()
+        for r in flow_result.mappings().all():
+            dt = r["trade_date"]
+            stock_flows[r["ts_code"]][dt] = float(r["main_net_flow"] or 0)
+            all_dates.add(dt)
+
+        sorted_all_dates = sorted(all_dates)
+
+        # Compute rolling 5-day sum for each stock on each date
+        stock_5d: dict[str, list[tuple]] = defaultdict(list)  # ts_code -> [(date, flow5d, flow_today)]
+        for ts, _ in stocks:
+            flow_by_date = stock_flows.get(ts, {})
+            for i, dt in enumerate(sorted_all_dates):
+                today_flow = flow_by_date.get(dt, 0)
+                # Sum the last 5 dates (including current)
+                window = sorted_all_dates[max(0, i - 4): i + 1]
+                flow5d = sum(flow_by_date.get(d, 0) for d in window)
+                stock_5d[ts].append((dt, flow5d, today_flow))
+
+        # For each date, rank stocks by computed 5d flow
+        stock_ranks: dict[str, dict] = {}
+        for ts, name in stocks:
+            stock_ranks[ts] = {"stock_name": name, "dates": [], "ranks": [], "flows5d": [], "flows": []}
+
+        for idx, dt in enumerate(sorted_all_dates):
+            # Only rank starting from 5th date (when rolling window is full)
+            if idx < 4:
+                continue
+            day_items = [(ts, stock_5d[ts][idx][1], stock_5d[ts][idx][2])
+                        for ts, _ in stocks if idx < len(stock_5d[ts])]
+            day_items.sort(key=lambda x: x[1], reverse=True)  # sort by 5d flow desc
+            for rank_i, (ts, flow5d, flow_today) in enumerate(day_items):
+                if ts in stock_ranks:
+                    stock_ranks[ts]["dates"].append(dt)
+                    stock_ranks[ts]["ranks"].append(rank_i + 1)
+                    stock_ranks[ts]["flows5d"].append(flow5d)
+                    stock_ranks[ts]["flows"].append(flow_today)
+
+        # Build result
+        items = []
+        for ts, data in stock_ranks.items():
+            if len(data["ranks"]) < 2:
+                continue
+            first_rank = data["ranks"][0]
+            last_rank = data["ranks"][-1]
+            items.append({
+                "ts_code": ts,
+                "stock_name": data["stock_name"],
+                "dates": data["dates"],
+                "ranks": data["ranks"],
+                "flows5d": data["flows5d"],
+                "flows": data["flows"],
+                "improvement": first_rank - last_rank,
+                "current_rank": last_rank,
+                "current_flow_5d": data["flows5d"][-1] if data["flows5d"] else 0,
+                "current_flow": data["flows"][-1] if data["flows"] else 0,
+            })
+
+        items.sort(key=lambda x: x["improvement"], reverse=True)
+        return {"items": items}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 13. 指数历史聚合
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_history(
+        db: AsyncSession,
+        index_code: str,
+        days: int = 30,
+    ) -> dict:
+        """指数成分股近 N 日每日资金流合计（主力/超大单/大单 + 广度）"""
+        ic = IndexConstituent.__table__
+        s = Stock.__table__
+        f = DailyStockFundFlow.__table__
+
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"items": []}
+
+        cutoff = (date.today() - timedelta(days=days + 5)).strftime("%Y-%m-%d")
+
+        stmt = (
+            select(
+                f.c.trade_date,
+                func.coalesce(func.sum(f.c.main_net_flow) / 1e8, 0).label("main_net_yi"),
+                func.coalesce(func.sum(f.c.jumbo_net_flow) / 1e8, 0).label("jumbo_net_yi"),
+                func.coalesce(func.sum(f.c.block_net_flow) / 1e8, 0).label("block_net_yi"),
+                func.coalesce(func.count().filter(f.c.main_net_flow > 0), 0).label("positive_count"),
+                func.count().label("total_count"),
+            )
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                .join(f, f.c.ts_code == s.c.ts_code)
+            )
+            .where(
+                ic.c.index_code == index_code,
+                ic.c.eff_date == latest_eff,
+                f.c.trade_date >= cutoff,
+            )
+            .group_by(f.c.trade_date)
+            .order_by(f.c.trade_date.asc())
+        )
+        result = await db.execute(stmt)
+        items = []
+        for r in result.mappings().all():
+            total = r["total_count"] or 1
+            items.append({
+                "trade_date": FundFlowService._normalize_date(r["trade_date"]),
+                "main_net_yi": round(float(r["main_net_yi"]), 2),
+                "jumbo_net_yi": round(float(r["jumbo_net_yi"]), 2),
+                "block_net_yi": round(float(r["block_net_yi"]), 2),
+                "positive_pct": round(float(r["positive_count"] or 0) / total * 100, 1),
+                "stock_count": total,
+            })
+        return {"items": items}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 13. 指数列表
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_indices(db: AsyncSession) -> list[dict]:
+        """返回可用的指数列表（从 index_info 表）"""
+        tbl = IndexInfo.__table__
+        stmt = select(
+            tbl.c.index_code,
+            tbl.c.index_name,
+            tbl.c.full_name,
+            tbl.c.publisher,
+            tbl.c.constituent_count,
+        ).order_by(tbl.c.index_code)
+        result = await db.execute(stmt)
+        return [
+            {
+                "index_code": r["index_code"],
+                "index_name": r["index_name"],
+                "full_name": r["full_name"] or "",
+                "publisher": r["publisher"] or "",
+                "constituent_count": r["constituent_count"] or 0,
+            }
+            for r in result.mappings().all()
+        ]
+
+    # ═══════════════════════════════════════════════════════════════
+    # 12. 指数成分股资金流排名
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_constituents_flow(
+        db: AsyncSession,
+        index_code: str,
+        trade_date: Optional[str] = None,
+        sort: str = "main_net",
+        limit: int = 100,
+    ) -> dict:
+        """指数成分股资金流排名 — JOIN index_constituents → stocks → daily_stock_fund_flow"""
+        d = trade_date or await FundFlowService._get_latest_date(db)
+        if not d:
+            return {"trade_date": None, "items": []}
+
+        f = DailyStockFundFlow.__table__
+        s = Stock.__table__
+        ic = IndexConstituent.__table__
+
+        # Determine sort column
+        sort_map = {
+            "main_net": f.c.main_net_flow.desc(),
+            "main_net_asc": f.c.main_net_flow.asc(),
+            "jumbo": f.c.jumbo_net_flow.desc(),
+            "block": f.c.block_net_flow.desc(),
+            "weight": ic.c.weight.desc().nulls_last(),
+        }
+        order_by = sort_map.get(sort, sort_map["main_net"])
+
+        # Get latest eff_date for this index
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+
+        if not latest_eff:
+            return {"trade_date": d, "items": []}
+
+        stmt = (
+            select(
+                f.c.ts_code,
+                s.c.name.label("stock_name"),
+                s.c.industry_l1.label("industry_name"),
+                ic.c.weight,
+                f.c.main_net_flow,
+                f.c.jumbo_net_flow,
+                f.c.block_net_flow,
+                f.c.mid_net_flow,
+                f.c.small_net_flow,
+                f.c.main_in_flow,
+                f.c.main_out_flow,
+                f.c.retail_in_flow,
+                f.c.retail_out_flow,
+                f.c.main_inflow_circ_rate,
+                f.c.main_inflow_rank,
+                f.c.close_price,
+            )
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                .join(f, f.c.ts_code == s.c.ts_code)
+            )
+            .where(
+                ic.c.index_code == index_code,
+                ic.c.eff_date == latest_eff,
+                f.c.trade_date == d,
+            )
+            .order_by(order_by)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        # Compute real 5d/10d/20d rolling sums
+        ts_codes = [r["ts_code"] for r in rows]
+        rolling = await FundFlowService._compute_rolling_sums(db, ts_codes, [d])
+
+        items = []
+        for r in rows:
+            ts = r["ts_code"]
+            r5 = rolling.get(ts, {})
+            items.append({
+                "ts_code": r["ts_code"],
+                "stock_name": r["stock_name"] or "",
+                "industry_name": r["industry_name"] or "",
+                "weight": float(r["weight"] or 0),
+                "main_net_flow": float(r["main_net_flow"] or 0),
+                "jumbo_net_flow": float(r["jumbo_net_flow"] or 0),
+                "block_net_flow": float(r["block_net_flow"] or 0),
+                "mid_net_flow": float(r["mid_net_flow"] or 0),
+                "small_net_flow": float(r["small_net_flow"] or 0),
+                "main_in_flow": float(r["main_in_flow"] or 0),
+                "main_out_flow": float(r["main_out_flow"] or 0),
+                "retail_in_flow": float(r["retail_in_flow"] or 0),
+                "retail_out_flow": float(r["retail_out_flow"] or 0),
+                "main_net_flow_5d": r5.get(f"{d}|5d", 0),
+                "main_net_flow_10d": r5.get(f"{d}|10d", 0),
+                "main_net_flow_20d": r5.get(f"{d}|20d", 0),
+                "main_inflow_circ_rate": float(r["main_inflow_circ_rate"] or 0),
+                "main_inflow_rank": r["main_inflow_rank"],
+                "close_price": float(r["close_price"] or 0),
+            })
+        return {"trade_date": FundFlowService._normalize_date(d), "items": items}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 13. 指数成分股多股资金流趋势（批量）
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_multi_stock_trend(
+        db: AsyncSession,
+        index_code: str,
+        days: int = 30,
+        top_n: int = 5,
+    ) -> dict:
+        """Top N 成分股的多日资金流趋势 — 先找 Top N，再批量查趋势"""
+        ic = IndexConstituent.__table__
+        s = Stock.__table__
+        f = DailyStockFundFlow.__table__
+
+        # Get latest eff_date
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"trade_date": "", "days": days, "stocks": []}
+
+        # Get latest trade_date
+        d = await FundFlowService._get_latest_date(db)
+        if not d:
+            return {"trade_date": "", "days": days, "stocks": []}
+
+        # Find top N constituents by main_net_flow (latest date)
+        top_stmt = (
+            select(
+                f.c.ts_code,
+                s.c.name.label("stock_name"),
+            )
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                .join(f, f.c.ts_code == s.c.ts_code)
+            )
+            .where(
+                ic.c.index_code == index_code,
+                ic.c.eff_date == latest_eff,
+                f.c.trade_date == d,
+            )
+            .order_by(f.c.main_net_flow.desc().nulls_last())
+            .limit(top_n)
+        )
+        top_result = await db.execute(top_stmt)
+        top_stocks = [(r["ts_code"], r["stock_name"] or "") for r in top_result.mappings().all()]
+        if not top_stocks:
+            return {"trade_date": FundFlowService._normalize_date(d), "days": days, "stocks": []}
+
+        ts_codes = [ts for ts, _ in top_stocks]
+        name_map = dict(top_stocks)
+
+        # Batch trend query
+        cutoff = (date.today() - timedelta(days=days + 5)).strftime("%Y-%m-%d")
+        trend_stmt = (
+            select(
+                f.c.ts_code,
+                f.c.trade_date,
+                f.c.main_net_flow,
+                f.c.jumbo_net_flow,
+                f.c.block_net_flow,
+                f.c.mid_net_flow,
+                f.c.small_net_flow,
+                f.c.close_price,
+            )
+            .where(
+                f.c.ts_code.in_(ts_codes),
+                f.c.trade_date >= cutoff,
+            )
+            .order_by(f.c.trade_date.asc())
+        )
+        trend_result = await db.execute(trend_stmt)
+
+        # Group by ts_code
+        stock_days: dict[str, list] = {ts: [] for ts in ts_codes}
+        for r in trend_result.mappings().all():
+            ts = r["ts_code"]
+            if ts in stock_days:
+                stock_days[ts].append({
+                    "trade_date": FundFlowService._normalize_date(r["trade_date"]),
+                    "main_net_flow": float(r["main_net_flow"] or 0),
+                    "jumbo_net_flow": float(r["jumbo_net_flow"] or 0),
+                    "block_net_flow": float(r["block_net_flow"] or 0),
+                    "mid_net_flow": float(r["mid_net_flow"] or 0),
+                    "small_net_flow": float(r["small_net_flow"] or 0),
+                    "close_price": float(r["close_price"] or 0),
+                })
+
+        return {
+            "trade_date": FundFlowService._normalize_date(d),
+            "days": days,
+            "stocks": [
+                {"ts_code": ts, "stock_name": name_map.get(ts, ""), "days": stock_days.get(ts, [])}
+                for ts in ts_codes
+            ],
+        }
+
+    # ═══════════════════════════════════════════════════════════════
+    # 14. 指数成分股行业资金流汇总
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_industry_summary(
+        db: AsyncSession,
+        index_code: str,
+        trade_date: Optional[str] = None,
+    ) -> dict:
+        """指数成分股按行业聚合资金流"""
+        d = trade_date or await FundFlowService._get_latest_date(db)
+        if not d:
+            return {"trade_date": None, "items": []}
+
+        ic = IndexConstituent.__table__
+        s = Stock.__table__
+        f = DailyStockFundFlow.__table__
+
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"trade_date": d, "items": []}
+
+        stmt = (
+            select(
+                s.c.industry_l1.label("industry_name"),
+                func.coalesce(func.sum(f.c.main_net_flow) / 1e8, 0).label("main_net_yi"),
+                func.coalesce(func.sum(f.c.jumbo_net_flow) / 1e8, 0).label("jumbo_net_yi"),
+                func.coalesce(func.sum(f.c.block_net_flow) / 1e8, 0).label("block_net_yi"),
+                func.count().filter(f.c.main_net_flow > 0).label("up_count"),
+                func.count().label("total_count"),
+            )
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                .join(f, f.c.ts_code == s.c.ts_code)
+            )
+            .where(
+                ic.c.index_code == index_code,
+                ic.c.eff_date == latest_eff,
+                f.c.trade_date == d,
+                s.c.industry_l1.isnot(None),
+                s.c.industry_l1 != "",
+            )
+            .group_by(s.c.industry_l1)
+            .order_by(func.sum(f.c.main_net_flow).desc())
+        )
+        result = await db.execute(stmt)
+        items = []
+        for r in result.mappings().all():
+            total = r["total_count"] or 1
+            items.append({
+                "industry_name": r["industry_name"],
+                "main_net_yi": round(float(r["main_net_yi"]), 2),
+                "jumbo_net_yi": round(float(r["jumbo_net_yi"]), 2),
+                "block_net_yi": round(float(r["block_net_yi"]), 2),
+                "positive_pct": round(float(r["up_count"] or 0) / total * 100, 1),
+                "stock_count": total,
+            })
+        return {"trade_date": FundFlowService._normalize_date(d), "items": items}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 15. 指数成分股 Treemap 数据（全部成分股，无 limit）
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_treemap(
+        db: AsyncSession,
+        index_code: str,
+        trade_date: Optional[str] = None,
+    ) -> dict:
+        """全部指数成分股资金流 — treemap 用，需完整覆盖"""
+        d = trade_date or await FundFlowService._get_latest_date(db)
+        if not d:
+            return {"trade_date": None, "items": []}
+
+        ic = IndexConstituent.__table__
+        s = Stock.__table__
+        f = DailyStockFundFlow.__table__
+
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"trade_date": d, "items": []}
+
+        stmt = (
+            select(
+                f.c.ts_code,
+                s.c.name.label("stock_name"),
+                s.c.industry_l1.label("industry_name"),
+                ic.c.weight,
+                f.c.main_net_flow,
+                f.c.jumbo_net_flow,
+                f.c.block_net_flow,
+                f.c.mid_net_flow,
+                f.c.small_net_flow,
+            )
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")))
+                .join(f, f.c.ts_code == s.c.ts_code)
+            )
+            .where(
+                ic.c.index_code == index_code,
+                ic.c.eff_date == latest_eff,
+                f.c.trade_date == d,
+            )
+            .order_by(f.c.main_net_flow.desc().nulls_last())
+        )
+        result = await db.execute(stmt)
+        items = []
+        for r in result.mappings().all():
+            items.append({
+                "ts_code": r["ts_code"],
+                "stock_name": r["stock_name"] or "",
+                "industry_name": r["industry_name"] or "",
+                "weight": float(r["weight"] or 0),
+                "main_net_flow": float(r["main_net_flow"] or 0),
+                "jumbo_net_flow": float(r["jumbo_net_flow"] or 0),
+                "block_net_flow": float(r["block_net_flow"] or 0),
+                "mid_net_flow": float(r["mid_net_flow"] or 0),
+                "small_net_flow": float(r["small_net_flow"] or 0),
+            })
+        return {"trade_date": FundFlowService._normalize_date(d), "items": items}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 16. 指数盘中快照（Bar Chart Race 用）
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_index_snapshots(
+        db: AsyncSession,
+        index_code: str,
+        trade_date: Optional[str] = None,
+    ) -> dict:
+        """查询 intraday_fund_snapshot，按 snapshot_time 分组返回"""
+        d = trade_date or await FundFlowService._get_latest_date(db)
+        if not d:
+            return {"trade_date": None, "snapshots": []}
+
+        ic = IndexConstituent.__table__
+        s = Stock.__table__
+
+        # Get latest eff_date
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"trade_date": d, "snapshots": []}
+
+        # Query snapshots joined with index_constituents to filter by index
+        sql = text(
+            """
+            SELECT
+                sn.snapshot_time,
+                sn.ts_code,
+                s2.name AS stock_name,
+                sn.main_net_flow,
+                sn.jumbo_net_flow,
+                sn.block_net_flow,
+                sn.main_net_flow_5d
+            FROM intraday_fund_snapshot sn
+            JOIN stocks s2 ON sn.ts_code = s2.ts_code
+            JOIN index_constituents ic2
+                ON s2.ts_code LIKE ic2.ts_code || '.%'
+                AND ic2.index_code = :index_code
+                AND ic2.eff_date = :eff_date
+            WHERE sn.trade_date = :trade_date
+            ORDER BY sn.snapshot_time ASC, sn.main_net_flow DESC
+            """
+        )
+        result = await db.execute(sql, {
+            "index_code": index_code,
+            "eff_date": latest_eff,
+            "trade_date": d,
+        })
+
+        # Group by snapshot_time
+        frames: dict[str, list] = {}
+        for r in result.mappings().all():
+            st = str(r["snapshot_time"])
+            if st not in frames:
+                frames[st] = []
+            frames[st].append({
+                "ts_code": r["ts_code"],
+                "stock_name": r["stock_name"] or "",
+                "main_net_flow": float(r["main_net_flow"] or 0),
+                "jumbo_net_flow": float(r["jumbo_net_flow"] or 0),
+                "block_net_flow": float(r["block_net_flow"] or 0),
+                "main_net_flow_5d": float(r["main_net_flow_5d"] or 0),
+            })
+
+        snapshots = [
+            {"snapshot_time": st, "stocks": stocks}
+            for st, stocks in frames.items()
+        ]
+
+        return {"trade_date": FundFlowService._normalize_date(d), "snapshots": snapshots}

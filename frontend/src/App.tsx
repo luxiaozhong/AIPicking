@@ -19,6 +19,7 @@ import RebalanceDetail from '@/pages/RebalanceDetail';
 import Dashboard from '@/pages/Dashboard';
 import MarketHeat from '@/pages/MarketHeat';
 import FundFlow from '@/pages/FundFlow';
+import IndexFundFlow from '@/pages/IndexFundFlow';
 import IndexMACD from '@/pages/IndexMACD';
 import StrategyTracker from '@/pages/StrategyTracker';
 import LoginPage from '@/pages/LoginPage';
@@ -78,6 +79,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <FundFlow />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/index-fund-flow"
+          element={
+            <ProtectedRoute>
+              <IndexFundFlow />
             </ProtectedRoute>
           }
         />
