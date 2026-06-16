@@ -164,12 +164,14 @@ const FundFlow: React.FC = () => {
   // Drawer 个股搜索（顶部）
   const [drawerStock, setDrawerStock] = useState<string | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [drawerSearchValue, setDrawerSearchValue] = useState('');
 
   const handleTopStockSelect = (tsCode: string) => {
     if (!tsCode) return;
     store.fetchStockTrend(tsCode, 30);
     setDrawerStock(tsCode);
     setDrawerVisible(true);
+    setDrawerSearchValue('');
   };
 
   const handleCloseDrawer = () => {
@@ -556,8 +558,8 @@ const FundFlow: React.FC = () => {
             allowClear
           />
           <StockSearchLookup
-            value=""
-            onChange={() => {}}
+            value={drawerSearchValue}
+            onChange={setDrawerSearchValue}
             onSelect={handleTopStockSelect}
             placeholder="搜索个股资金流"
             style={{ width: 200 }}

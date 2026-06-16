@@ -35,6 +35,7 @@ function fmtYi(v: number): string {
 const IndexFundFlow: React.FC = () => {
   const store = useIndexFundFlowStore();
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
+  const [stockSearchValue, setStockSearchValue] = useState('');
   const [kpiHistory, setKpiHistory] = useState<{ title: string; field: string; items: IndexHistoryItem[] } | null>(null);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [rankingTrend, setRankingTrend] = useState<RankingTrendData | null>(null);
@@ -295,9 +296,12 @@ const IndexFundFlow: React.FC = () => {
             style={{ width: 140 }}
           />
           <StockSearchLookup
-            value=""
-            onChange={() => {}}
-            onSelect={(code) => setSelectedStock(code)}
+            value={stockSearchValue}
+            onChange={setStockSearchValue}
+            onSelect={(code) => {
+              setSelectedStock(code);
+              setStockSearchValue('');
+            }}
             placeholder="搜索个股资金流"
             style={{ width: 200 }}
           />
