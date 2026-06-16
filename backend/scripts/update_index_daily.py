@@ -431,6 +431,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
                 dates.append(ds)
         start_date = min(dates)
         end_date   = max(dates)
+        print(f"📅 盘后更新今天({today_str})")
         print(f"🔄 强制更新模式：{start_date} ~ {end_date}")
         await run_history(start_date, end_date)
         return
@@ -440,6 +441,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
         if not today_is_trade:
             print(f"⚠️  今天({today_str})不是交易日，无法拉取实时数据")
             return
+        print(f"📅 盘后更新今天({today_str})")
         print(f"📡 强制盘中实时模式：{today_str}")
         await run_intraday(today_str)
         return
