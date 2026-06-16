@@ -566,6 +566,16 @@ def save_snapshots(date_str: str, snapshot_rows: list[dict]) -> int:
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            # 只保留当天数据，有旧数据才删（避免每次空跑 DELETE）
+            cur.execute(
+                "SELECT 1 FROM intraday_fund_snapshot WHERE trade_date != %s LIMIT 1",
+                (date_str,),
+            )
+            if cur.fetchone():
+                cur.execute(
+                    "DELETE FROM intraday_fund_snapshot WHERE trade_date != %s",
+                    (date_str,),
+                )
             psycopg2.extras.execute_batch(cur, _SNAPSHOT_INSERT, tuples)
         conn.commit()
         logging.info(
