@@ -7,7 +7,7 @@ import json
 import asyncio
 from datetime import datetime
 from collections import defaultdict
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
@@ -45,9 +45,24 @@ class StartRequest(BaseModel):
     initial_capital: float = 500000.0
 
 
+class SellItem(BaseModel):
+    ts_code: str
+    shares: int = 0           # 卖出数量，0 表示跳过
+
+
+class BuyItem(BaseModel):
+    ts_code: str
+    shares: int               # 买入数量，必须 >= 1 手
+    stock_name: str = ""      # 股票名称（前端从推荐中传入）
+
+
 class ExecuteRequest(BaseModel):
     strategy_id: int
-    date: Optional[str] = None  # YYYY-MM-DD，默认今天
+    date: Optional[str] = None          # 推荐日 YYYY-MM-DD
+    sells: List[SellItem] = []          # 要卖出的股票
+    buys: List[BuyItem] = []            # 要买入的股票
+    additional_capital: float = 0.0     # 前端计算好的追加本金
+    exec_date: Optional[str] = None     # 执行日 YYYY-MM-DD，盘中=今天
 
 
 class TradeOut(BaseModel):
@@ -97,10 +112,12 @@ class ExecuteSummary(BaseModel):
     holdings_after: int
     sell_count: int
     buy_count: int
+    keep_count: int                     # 未卖出也未买入的原持仓数
     total_buy_amount: float
     total_sell_amount: float
     total_commission: float
     total_stamp_duty: float
+    additional_capital_added: float     # 实际追加的本金
 
 
 class ExecuteResponse(BaseModel):
@@ -169,6 +186,37 @@ async def _find_next_trading_day(db: AsyncSession, after_date: str) -> Optional[
     )
     row = result.first()
     return row[0] if row else None
+
+
+async def _get_latest_close_prices(
+    db: AsyncSession, ts_codes: List[str], before_date: str
+) -> Dict[str, float]:
+    """获取每个 ts_code 在 before_date（含）之前的最新收盘价
+
+    使用子查询：按 ts_code 分组取 MAX(trade_date) <= before_date，
+    再 JOIN 回去取 close。
+    """
+    if not ts_codes:
+        return {}
+
+    subq = (
+        select(Daily.ts_code, func.max(Daily.trade_date).label("max_date"))
+        .where(Daily.trade_date <= before_date, Daily.ts_code.in_(ts_codes))
+        .group_by(Daily.ts_code)
+        .subquery()
+    )
+    rows = await db.execute(
+        select(Daily.ts_code, Daily.close).join(
+            subq,
+            (Daily.ts_code == subq.c.ts_code)
+            & (Daily.trade_date == subq.c.max_date),
+        )
+    )
+    return {
+        row.ts_code: float(row.close)
+        for row in rows
+        if row.close and float(row.close) > 0
+    }
 
 
 async def _get_config(db: AsyncSession, user_id: int, strategy_id: int) -> UserStrategyConfig:
