@@ -69,22 +69,41 @@ def parse_update_log(target_date=None):
     lines = text.splitlines()
 
     # 找所有 run 的边界
+    # 支持多种日期标记行：
+    #   📅 盘后更新今天(YYYYMMDD)        — update_index_daily.py / update_daily.py
+    #   ✅ 今天(YYYYMMDD)已有             — 数据完整跳过（旧格式）
+    #   ✅ 最近交易日(YYYYMMDD)已有        — 非交易日跳过（旧格式）
+    #   📅 今天(YYYYMMDD)无数据            — update_daily.py
+    #   📅 最近交易日(YYYYMMDD)无数据       — update_daily.py
+    RUN_HEADER_PATTERNS = [
+        re.compile(r"📅 盘后更新今天\((\d{8})\)"),
+        re.compile(r"✅ 今天\((\d{8})\)已有"),
+        re.compile(r"✅ 最近交易日\((\d{8})\)已有"),
+        re.compile(r"📅 今天\((\d{8})\)无数据"),
+        re.compile(r"📅 最近交易日\((\d{8})\)无数据"),
+    ]
+
     runs = []
     current_start = None
     current_date = None
 
     for i, line in enumerate(lines):
-        # 匹配 run 开始: "📅 盘后更新今天(YYYYMMDD)"
-        m = re.match(r"📅 盘后更新今天\((\d{8})\)", line)
-        if m:
-            if current_start is not None:
-                runs.append({
-                    "date": current_date,
-                    "start": current_start,
-                    "end": i,
-                })
-            current_start = i
-            current_date = m.group(1)
+        for pat in RUN_HEADER_PATTERNS:
+            m = pat.search(line)
+            if m:
+                new_date = m.group(1)
+                # 相同日期的连续行不新建 run（如 📅 + ✅ 同一天）
+                if current_date == new_date and current_start is not None:
+                    break
+                if current_start is not None:
+                    runs.append({
+                        "date": current_date,
+                        "start": current_start,
+                        "end": i,
+                    })
+                current_start = i
+                current_date = new_date
+                break
 
     # 最后一个 run
     if current_start is not None:
@@ -141,11 +160,13 @@ def parse_update_log(target_date=None):
     # 格式化日期
     display_date = f"{latest_date[:4]}-{latest_date[4:6]}-{latest_date[6:8]}"
 
+    warning_count = len(warnings)
     return {
         "date": display_date,
         "records": total_records,
         "details": details,
-        "warnings": warnings[-5:],  # 只保留最后 5 条
+        "warnings": warnings[-5:],  # 只保留最后 5 条详情
+        "warning_count": warning_count,  # 真实警告总数
         "errors": errors,
     }
 
@@ -282,7 +303,8 @@ def compose_html(daily, ingest):
         <tr><td>类型</td><td>{', '.join(daily['details'])}</td></tr>
         """
         if daily.get("warnings"):
-            daily_rows += f"""<tr><td>⚠️ 警告</td><td style="color:#e67e22">{len(daily['warnings'])} 条</td></tr>"""
+            wc = daily.get("warning_count", len(daily["warnings"]))
+            daily_rows += f"""<tr><td>⚠️ 警告</td><td style="color:#e67e22">{wc} 条</td></tr>"""
         if daily.get("errors"):
             daily_rows += f"""<tr><td>❌ 错误</td><td style="color:#e74c3c">{len(daily['errors'])} 条</td></tr>"""
 

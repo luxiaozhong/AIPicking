@@ -20,12 +20,17 @@
     venv/bin/python scripts/update_daily.py --date 2026-05-22          # 指定某天
     venv/bin/python scripts/update_daily.py --date today               # 今天（自动盘中/盘后）
     venv/bin/python scripts/update_daily.py --intraday                 # 强制盘中实时模式
+    venv/bin/python scripts/update_daily.py --intraday --index 980080  # 盘中只更新指定指数成分股
     venv/bin/python scripts/update_daily.py --pg-url postgresql://...  # 指定 PG 地址
 
-盘中 cron（每个交易日，跟随板块同步每30分钟，腾讯实时行情 qt.gtimg.cn）：
+盘中 cron（全市场，每30分钟，腾讯实时行情 qt.gtimg.cn）：
     37,7 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
     7,37 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
     57 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+
+盘中 cron（按指数过滤，每5分钟高频刷新关注股票，腾讯实时行情）：
+    */5 9-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday --index 980080 >> /var/log/aipicking/update_daily_index.log 2>&1
+    */5 9-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday --index 900001 >> /var/log/aipicking/update_daily_index.log 2>&1
 
 环境变量：
     DATABASE_URL — PostgreSQL 连接（默认解析出 psycopg2 可用 URL）
@@ -144,6 +149,25 @@ def _fmt_date(d: str) -> str:
 # 指数 ts_code（由 update_index_daily.py 处理，此处排除）
 _INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH", "000698.SH")
 
+def _infer_exchange(code: str) -> str:
+    """根据股票代码前缀推断交易所后缀。
+
+    600xxx/601xxx/603xxx/605xxx/9xxxxx → SH
+    000xxx/001xxx/002xxx/003xxx/300xxx → SZ
+    8xxxxx/4xxxxx → BJ
+    """
+    if len(code) != 6 or not code.isdigit():
+        return "SZ"  # fallback
+    prefix = int(code)
+    if 600000 <= prefix < 700000 or 900000 <= prefix < 1000000:
+        return "SH"
+    elif 0 <= prefix < 400000 or 200000 <= prefix < 300000:
+        return "SZ"
+    elif 800000 <= prefix < 900000 or 400000 <= prefix < 500000:
+        return "BJ"
+    return "SZ"
+
+
 def load_stocks():
     """从 PostgreSQL stocks 表读取股票列表（排除指数）"""
     conn = get_conn()
@@ -154,6 +178,50 @@ def load_stocks():
     rows = cur.fetchall()
     conn.close()
     return [{"ts_code": r[0], "symbol": r[1]} for r in rows]
+
+
+def load_index_stocks(index_code: str):
+    """从 index_constituents 表加载指定指数成分股，JOIN stocks 获取 symbol。
+
+    Returns:
+        list of dict: [{"ts_code": "600519.SH", "symbol": "sh600519"}, ...]
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ic.ts_code AS raw_code, ic.stock_name,
+                       s.symbol, s.ts_code AS full_ts_code
+                FROM index_constituents ic
+                LEFT JOIN stocks s ON (s.ts_code LIKE ic.ts_code || '.%%' OR s.ts_code = ic.ts_code)
+                WHERE ic.index_code = %s
+                  AND ic.eff_date = (
+                      SELECT MAX(eff_date) FROM index_constituents
+                      WHERE index_code = %s
+                  )
+                ORDER BY ic.weight DESC NULLS LAST
+                """,
+                (index_code, index_code),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    stocks = []
+    for raw_code, _name, symbol, full_ts_code in rows:
+        if full_ts_code and symbol:
+            stocks.append({"ts_code": full_ts_code, "symbol": symbol})
+        elif full_ts_code:
+            # 有 ts_code 但没有 symbol（stocks 表有但 symbol 为空）
+            stocks.append({"ts_code": full_ts_code, "symbol": full_ts_code.replace(".", "").lower()})
+        else:
+            # Fallback: 推断交易所
+            exchange = _infer_exchange(raw_code)
+            inferred = f"{raw_code}.{exchange}"
+            stocks.append({"ts_code": inferred, "symbol": raw_code.lower()})
+
+    return stocks
 
 
 def count_daily(trade_date: str) -> int:
@@ -412,7 +480,7 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
 
 
 # ── 主流程 ────────────────────────────────────────────────────────────────
-async def main(force=False, target_date=None, intraday=False, pg_url=None):
+async def main(force=False, target_date=None, intraday=False, pg_url=None, index=None):
     global _PG_PARAMS
     if pg_url:
         _PG_PARAMS = _parse_pg_url(pg_url)
@@ -427,7 +495,21 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
         return
     print(f"📊 数据库已有 {total} 只股票")
 
-    stocks = load_stocks()
+    if index:
+        stocks = load_index_stocks(index)
+        if not stocks:
+            print(f"❌ 指数 {index} 无成分股数据，请先同步 index_constituents 表")
+            return
+        # 获取指数名称
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT full_name FROM index_info WHERE index_code = %s", (index,))
+        row = cur.fetchone()
+        conn.close()
+        index_name = row[0] if row else index
+        print(f"🎯 指数过滤：{index_name} ({index})，共 {len(stocks)} 只成分股")
+    else:
+        stocks = load_stocks()
     now = datetime.now()
     today_str = now.strftime("%Y%m%d")
     today_is_trade = is_trade_day(today_str)
@@ -498,7 +580,11 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
     #    顺带检查昨天（最近交易日）是否有数据，没有则补
     # ────────────────────────────────────────────────────────────────────
     # 完整交易日至少应有 4500+ 只股票，盘中实时数据通常只有 ~3000 只
-    MIN_DAILY_COUNT = 4500
+    # 按指数过滤时按比例调整阈值（取成分股数量的 90%）
+    MIN_DAILY_COUNT = max(len(stocks) * 0.9, 4500) if not index else int(len(stocks) * 0.9)
+
+    # 始终输出日期标记行，确保 sync_report.py 能识别本次运行
+    print(f"📅 盘后更新今天({today_str})")
 
     if today_is_trade:
         if is_intraday_now():
@@ -540,6 +626,8 @@ if __name__ == "__main__":
                         help="指定日期（YYYY-MM-DD / YYYYMMDD / today）")
     parser.add_argument("--intraday", action="store_true",
                         help="强制使用实时接口拉取今天数据")
+    parser.add_argument("--index", type=str, default=None,
+                        help="按指数过滤成分股（如 980080, 900001），只更新该指数的股票")
     parser.add_argument("--pg-url", type=str, default=None,
                         help="PostgreSQL 连接 URL（默认: $DATABASE_URL）")
     args = parser.parse_args()
@@ -552,4 +640,4 @@ if __name__ == "__main__":
         else:
             target_date = d  # 统一传 YYYYMMDD
 
-    asyncio.run(main(force=args.force, target_date=target_date, intraday=args.intraday, pg_url=args.pg_url))
+    asyncio.run(main(force=args.force, target_date=target_date, intraday=args.intraday, pg_url=args.pg_url, index=args.index))

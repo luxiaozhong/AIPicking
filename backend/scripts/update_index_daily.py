@@ -320,8 +320,7 @@ async def fetch_realtime_quote_index(session, idx: dict, trade_date: str):
 
         record = (idx["ts_code"], trade_date,
                   open_p, high_p, low_p, price,
-                  vol, amount, price,
-                  None, None)
+                  vol, amount, price)
         return record
     except (ValueError, IndexError):
         return None
@@ -471,6 +470,9 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
         return
 
     # ── 4. 无参数默认模式 ──
+    # 始终输出日期标记行，确保 sync_report.py 能识别本次运行
+    print(f"📅 盘后更新今天({today_str})")
+
     if today_is_trade:
         if is_intraday_now():
             print(f"🕐 盘中模式（{today_str}），使用实时接口")
