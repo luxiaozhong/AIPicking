@@ -17,7 +17,7 @@ export default function StockSearchLookup({
   value,
   onChange,
   onSelect,
-  placeholder = '输入股票代码或名称搜索',
+  placeholder = '输入股票代码、名称或拼音首字母搜索',
   style,
 }: StockSearchLookupProps) {
   const [options, setOptions] = useState<{ value: string; label: React.ReactNode }[]>([]);

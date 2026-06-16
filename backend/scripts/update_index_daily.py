@@ -28,6 +28,7 @@ import argparse
 import asyncio
 import aiohttp
 import os
+import sys
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -44,6 +45,10 @@ for _env_file in (".env", ".env.production"):
     _path = _ENV_DIR / _env_file
     if _path.exists():
         load_dotenv(_path, override=True)
+
+# 确保 backend 在路径中，以便导入 pinyin_utils
+sys.path.insert(0, str(_ENV_DIR))
+from app.utils.pinyin_utils import get_pinyin_initials
 
 # ── 配置 ────────────────────────────────────────────────────────────────────
 
@@ -198,19 +203,21 @@ def ensure_stocks_entries():
     cur = conn.cursor()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for idx in INDICES:
+        initials = get_pinyin_initials(idx["name"])
         cur.execute("""
-            INSERT INTO stocks (ts_code, symbol, name, market, list_date,
+            INSERT INTO stocks (ts_code, symbol, name, market, list_date, pinyin_initials,
                                 industry_l1, industry_l2, industry_l3, region,
                                 concepts, total_shares, float_shares, update_time)
-            VALUES (%s, %s, %s, %s, %s, '', '', '', '', '', 0, 0, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, '', '', '', '', '', 0, 0, %s)
             ON CONFLICT (ts_code) DO UPDATE SET
                 name = EXCLUDED.name,
                 symbol = EXCLUDED.symbol,
                 market = EXCLUDED.market,
                 list_date = EXCLUDED.list_date,
+                pinyin_initials = EXCLUDED.pinyin_initials,
                 update_time = EXCLUDED.update_time
         """, (idx["ts_code"], idx["symbol"], idx["name"], idx["market"],
-              idx["list_date"], now_str))
+              idx["list_date"], initials, now_str))
     conn.commit()
     conn.close()
     print("✅ stocks 表指数记录已就绪（5 条）")

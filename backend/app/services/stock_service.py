@@ -13,7 +13,7 @@ class StockService:
         stmt = (
             select(Stock.ts_code, Stock.symbol, Stock.name, Stock.market)
             .where(
-                (Stock.ts_code.ilike(like_q)) | (Stock.name.ilike(like_q))
+                (Stock.ts_code.ilike(like_q)) | (Stock.name.ilike(like_q)) | (Stock.pinyin_initials.ilike(like_q))
             )
             .order_by(Stock.ts_code)
             .limit(limit)

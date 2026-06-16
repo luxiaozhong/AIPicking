@@ -28,6 +28,9 @@ mootdx>=0.10            # 通达信行情+财务（TCP 7709，不封IP）
 # 重试（DeepSeek API 调用）
 tenacity>=8.0
 
+# 拼音
+pypinyin>=0.51.0
+
 # 工具
 python-multipart==0.0.6
 python-dotenv==1.0.0

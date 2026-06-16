@@ -6,6 +6,7 @@
     cd backend && venv/bin/python scripts/add_kc100_index.py
 """
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,6 +16,10 @@ import psycopg2
 import psycopg2.extras
 import requests
 from dotenv import load_dotenv
+
+# 确保 backend 在路径中，以便导入 pinyin_utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from app.utils.pinyin_utils import get_pinyin_initials
 
 # 加载 .env
 _ENV_DIR = Path(__file__).resolve().parent.parent  # backend/
@@ -68,19 +73,21 @@ def insert_stock_entry():
     conn = get_conn()
     cur = conn.cursor()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    initials = get_pinyin_initials(KC100["name"])
     cur.execute("""
-        INSERT INTO stocks (ts_code, symbol, name, market, list_date,
+        INSERT INTO stocks (ts_code, symbol, name, market, list_date, pinyin_initials,
                             industry_l1, industry_l2, industry_l3, region,
                             concepts, total_shares, float_shares, update_time)
-        VALUES (%s, %s, %s, %s, %s, '', '', '', '', '', 0, 0, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, '', '', '', '', '', 0, 0, %s)
         ON CONFLICT (ts_code) DO UPDATE SET
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             market = EXCLUDED.market,
             list_date = EXCLUDED.list_date,
+            pinyin_initials = EXCLUDED.pinyin_initials,
             update_time = EXCLUDED.update_time
     """, (KC100["ts_code"], KC100["symbol"], KC100["name"], KC100["market"],
-          KC100["list_date"], now_str))
+          KC100["list_date"], initials, now_str))
     conn.commit()
     conn.close()
     print(f"✅ stocks 表已插入 {KC100['ts_code']} {KC100['name']}")

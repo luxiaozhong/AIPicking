@@ -23,6 +23,7 @@ class Stock(BaseModel):
     total_shares = Column(BigInteger, default=0)
     float_shares = Column(BigInteger, default=0)
     update_time = Column(String(30))
+    pinyin_initials = Column(String(50), default="", comment="拼音首字母，如 贵州茅台→gzmt")
 
 
 class Daily(BaseModel):
