@@ -296,6 +296,58 @@ async def _compute_holdings(
     return active
 
 
+async def _compute_closed_positions(
+    db: AsyncSession, user_id: int, strategy_id: int
+) -> List[dict]:
+    """从交易记录推导已清仓股票（累计买卖 → 净持仓为 0）"""
+    trades = await _get_all_trades(db, user_id, strategy_id)
+
+    # {ts_code: {stock_name, shares, total_buy_amount, total_sell_amount, ...}}
+    positions: dict = {}
+    for t in trades:
+        if t.ts_code not in positions:
+            positions[t.ts_code] = {
+                "ts_code": t.ts_code,
+                "stock_name": t.stock_name,
+                "shares": 0,
+                "total_buy_amount": 0.0,
+                "total_sell_amount": 0.0,
+                "buy_count": 0,
+                "sell_count": 0,
+                "first_buy_date": None,
+                "last_sell_date": None,
+            }
+        p = positions[t.ts_code]
+        p["stock_name"] = t.stock_name
+        if t.action == "buy":
+            p["shares"] += t.shares
+            p["total_buy_amount"] += t.amount + t.commission
+            p["buy_count"] += 1
+            if p["first_buy_date"] is None:
+                p["first_buy_date"] = t.exec_date
+        else:  # sell
+            p["shares"] -= t.shares
+            p["total_sell_amount"] += t.net_amount  # net_amount 已扣除手续费/印花税
+            p["sell_count"] += 1
+            p["last_sell_date"] = t.exec_date
+
+    # 只保留已完全清仓的（净持仓 = 0）
+    closed = [p for p in positions.values() if p["shares"] == 0]
+
+    for p in closed:
+        p["realized_pnl"] = round(p["total_sell_amount"] - p["total_buy_amount"], 2)
+        p["realized_pnl_pct"] = round(
+            p["realized_pnl"] / p["total_buy_amount"] * 100, 2
+        ) if p["total_buy_amount"] > 0 else 0.0
+        # 去掉内部追踪字段
+        del p["shares"]
+
+    # 按最后卖出日降序
+    closed.sort(key=lambda p: p["last_sell_date"] or "", reverse=True)
+
+    return closed
+
+
 # ── POST /start ──────────────────────────────────────────────
 
 
@@ -335,6 +387,9 @@ async def get_status(
     # 持仓
     holdings = await _compute_holdings(db, current_user.id, strategy_id)
 
+    # 已清仓股票
+    closed_positions = await _compute_closed_positions(db, current_user.id, strategy_id)
+
     total_market_value = sum(h["market_value"] for h in holdings)
     total_cost_basis = sum(h["cost_basis"] for h in holdings)
     total_nav = cash + total_market_value
@@ -351,6 +406,7 @@ async def get_status(
         "initial_capital": config.initial_capital,
         "cash": round(cash, 2),
         "holdings": holdings,
+        "closed_positions": closed_positions,
         "total_market_value": round(total_market_value, 2),
         "total_cost_basis": round(total_cost_basis, 2),
         "total_nav": round(total_nav, 2),

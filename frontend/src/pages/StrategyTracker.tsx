@@ -21,7 +21,7 @@ import type { StockTrend, StockTrendDay } from '@/services/fundFlowService';
 import type { Strategy } from '@/types/strategy';
 import type { Recommendation } from '@/services/strategyTrackerService';
 import type {
-  PaperStatus, PaperHolding, PaperTradeRecord, ExecuteResult,
+  PaperStatus, PaperHolding, ClosedPosition, PaperTradeRecord, ExecuteResult,
 } from '@/services/paperTradeService';
 
 const { Title, Text } = Typography;
@@ -707,6 +707,68 @@ export default function StrategyTracker() {
                 </>
               )}
             </Card>
+
+            {/* 已清仓股票 */}
+            {status && status.trade_count > 0 && (
+              <Card title="已清仓股票" size="small" style={{ marginBottom: 16 }}>
+                {status.closed_positions && status.closed_positions.length > 0 ? (
+                  <>
+                    {status.closed_positions.map((cp: ClosedPosition) => (
+                      <Card key={cp.ts_code} size="small"
+                        style={{ marginBottom: 8 }} styles={{ body: { padding: 10 } }}>
+                        <div>
+                          <Text strong>{cp.stock_name}</Text>
+                          <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+                            {cp.ts_code}
+                          </Text>
+                        </div>
+                        <Row style={{ marginTop: 4 }}>
+                          <Col span={12}>
+                            <Text style={{ fontSize: 11, color: '#888' }}>
+                              {cp.buy_count}买 {cp.sell_count}卖 · {cp.first_buy_date} → {cp.last_sell_date}
+                            </Text>
+                          </Col>
+                          <Col span={12}>
+                            <Text style={{
+                              fontSize: 11,
+                              color: cp.realized_pnl >= 0 ? '#cf1322' : '#3f8600',
+                            }}>
+                              盈亏 {fmtMoney(cp.realized_pnl)}（{cp.realized_pnl_pct >= 0 ? '+' : ''}{cp.realized_pnl_pct}%）
+                            </Text>
+                          </Col>
+                        </Row>
+                        <Row style={{ marginTop: 2 }}>
+                          <Col span={24}>
+                            <Text style={{ fontSize: 11, color: '#888' }}>
+                              买入成本 {fmtMoney(cp.total_buy_amount)} / 卖出收入 {fmtMoney(cp.total_sell_amount)}
+                            </Text>
+                          </Col>
+                        </Row>
+                      </Card>
+                    ))}
+                    <Row gutter={12} style={{ marginTop: 12 }}>
+                      <Col span={12}>
+                        <Statistic title="总已实现盈亏"
+                          value={status.closed_positions.reduce((sum, cp) => sum + cp.realized_pnl, 0)}
+                          precision={0} prefix="¥"
+                          valueStyle={{
+                            fontSize: 14,
+                            color: status.closed_positions.reduce((sum, cp) => sum + cp.realized_pnl, 0) >= 0 ? '#cf1322' : '#3f8600',
+                          }} />
+                      </Col>
+                      <Col span={12}>
+                        <Statistic title="清仓股票数"
+                          value={status.closed_positions.length}
+                          suffix="只"
+                          valueStyle={{ fontSize: 14 }} />
+                      </Col>
+                    </Row>
+                  </>
+                ) : (
+                  <Empty description="暂无已清仓股票" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                )}
+              </Card>
+            )}
           </Col>
 
           {/* 右列 */}
