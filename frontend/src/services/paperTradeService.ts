@@ -28,11 +28,25 @@ export interface PaperHolding {
   unrealized_pnl: number;
 }
 
+export interface ClosedPosition {
+  ts_code: string;
+  stock_name: string;
+  total_buy_amount: number;
+  total_sell_amount: number;
+  buy_count: number;
+  sell_count: number;
+  first_buy_date: string | null;
+  last_sell_date: string | null;
+  realized_pnl: number;
+  realized_pnl_pct: number;
+}
+
 export interface PaperStatus {
   strategy_id: number;
   initial_capital: number;
   cash: number;
   holdings: PaperHolding[];
+  closed_positions: ClosedPosition[];
   total_market_value: number;
   total_cost_basis: number;
   total_nav: number;
