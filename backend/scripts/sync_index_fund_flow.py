@@ -888,6 +888,91 @@ def sync(date_str: str, index_code: str, batch_size: int = BATCH_SIZE,
 # CLI
 # ═════════════════════════════════════════════════════════════════════════
 
+def sync_self(date_str: str, index_codes_str: str, batch_size: int = 50,
+              dry_run: bool = False) -> dict:
+    """Sync fund flow for market indices treated as single entities.
+
+    Unlike the normal constituent-based sync, this fetches each index itself
+    (e.g. sh000001 上证指数, sz399006 创业板指) as if it were a stock.
+    No constituent expansion, no intraday snapshots.
+
+    Args:
+        index_codes_str: Comma-separated index codes (e.g. "000001,399006,000688")
+    """
+    codes = [c.strip() for c in index_codes_str.split(",") if c.strip()]
+    if not codes:
+        return {"date": date_str, "total_saved": 0, "errors": ["No index codes"]}
+
+    # Convert to npm format — if already has sh/sz prefix, use directly
+    npm_codes = []
+    for c in codes:
+        if c.lower().startswith(("sh", "sz", "bj")):
+            npm_codes.append(c.lower())
+        else:
+            npm_codes.append(ts_code_to_npm(f"{c}.{_infer_exchange(c)}"))
+    logging.info("指数自身资金流同步: %d 个指数", len(codes))
+
+    if dry_run:
+        for nc in npm_codes:
+            logging.info("[DRY RUN] npx %s asfund %s --date %s", NPM_PACKAGE, nc, date_str)
+        return {"date": date_str, "total": len(codes), "total_saved": 0, "mode": "dry_run"}
+
+    # Batch into groups
+    total_batches = math.ceil(len(npm_codes) / batch_size)
+    all_rows = []
+    success_batches = 0
+    errors = []
+
+    for batch_idx in range(total_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, len(npm_codes))
+        batch = npm_codes[start:end]
+
+        rows = []
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                rows = run_npm_batch(batch, date_str)
+                if rows:
+                    break
+            except Exception as e:
+                logging.warning("Batch %d attempt %d failed: %s", batch_idx + 1, attempt + 1, e)
+            if attempt < MAX_RETRIES:
+                time.sleep(random.uniform(*RETRY_BACKOFF))
+
+        if not rows:
+            errors.append(f"Batch {batch_idx+1} failed after {MAX_RETRIES+1} attempts")
+            continue
+
+        # Validate end_date
+        sample_end_date = rows[0].get("end_date", "")
+        if sample_end_date and sample_end_date != date_str:
+            logging.warning("Batch %d EndDate mismatch — requested %s, got %s. Skipping.",
+                           batch_idx + 1, date_str, sample_end_date)
+            continue
+
+        # Convert npm_code → ts_code
+        for row in rows:
+            if "ts_code" not in row and "secu_code" in row:
+                row["ts_code"] = npm_to_ts_code(row["secu_code"])
+
+        all_rows.extend(rows)
+        success_batches += 1
+
+    # Save all at once
+    saved = save_batch(date_str, all_rows) if all_rows else 0
+    logging.info("Market indices fund flow: %d rows saved (%d/%d batches OK)",
+                saved, success_batches, total_batches)
+
+    return {
+        "date": date_str,
+        "total": len(codes),
+        "batches": total_batches,
+        "success_batches": success_batches,
+        "total_saved": saved,
+        "errors": errors,
+    }
+
+
 def main():
     p = argparse.ArgumentParser(
         description="指数成分股资金流向同步 — 腾讯自选股 via westock-data-clawhub")
@@ -899,6 +984,8 @@ def main():
                    help=f"每批股票数量（默认 {BATCH_SIZE}，指数成分股少可设 100）")
     p.add_argument("--dry-run", action="store_true",
                    help="仅打印计划，不实际执行")
+    p.add_argument("--self", action="store_true", dest="self_mode",
+                   help="指数自身模式：把指数代码当个股直接拉，不展开成分股")
     p.add_argument("--pg-url", default=None,
                    help="PostgreSQL 连接 URL（默认: $DATABASE_URL）")
     p.add_argument("--log-level", default="INFO",
@@ -959,27 +1046,41 @@ def main():
         sys.exit(1)
 
     # 2. Run sync
-    result = sync(date_str=date_str, index_code=args.index,
-                  batch_size=args.batch_size, dry_run=args.dry_run)
+    if args.self_mode:
+        result = sync_self(date_str=date_str, index_codes_str=args.index,
+                           batch_size=args.batch_size, dry_run=args.dry_run)
+    else:
+        result = sync(date_str=date_str, index_code=args.index,
+                      batch_size=args.batch_size, dry_run=args.dry_run)
 
     # 3. Report
     print()
     print("=" * 60)
-    print(f"  指数成分股资金流向同步报告")
+    if args.self_mode:
+        print(f"  市场指数自身资金流同步报告")
+    else:
+        print(f"  指数成分股资金流向同步报告")
     print("=" * 60)
-    print(f"  指数:          {result.get('index_name', args.index)} ({args.index})")
+    if args.self_mode:
+        print(f"  指数数量:      {result.get('total', 0):>6d}")
+    else:
+        print(f"  指数:          {result.get('index_name', args.index)} ({args.index})")
     print(f"  日期:          {result['date']}")
     if result.get("mode") == "dry_run":
-        print(f"  [DRY RUN] 计划导入: {result['total_stocks']} 只")
-        print(f"  [DRY RUN] 批次数:   {result['batches']}")
+        print(f"  [DRY RUN] 计划导入: {result.get('total', result.get('total_stocks', 0))} 条")
+        print(f"  [DRY RUN] 批次数:   {result.get('batches', 1)}")
     else:
-        print(f"  成分股数:      {result['total_stocks']:>6d}")
-        print(f"  批次数:        {result['batches']:>6d}")
-        print(f"  成功批次:      {result['success_batches']:>6d}")
-        print(f"  失败批次:      {result['fail_batches']:>6d}")
-        print(f"  成功写入:      {result['total_saved']:>6d}")
-        print(f"  耗时:          {result['elapsed_s']:>6.1f}s")
-        if result["errors"]:
+        if args.self_mode:
+            print(f"  批次数:        {result.get('batches', 0):>6d}")
+        else:
+            print(f"  成分股数:      {result.get('total_stocks', 0):>6d}")
+            print(f"  批次数:        {result.get('batches', 0):>6d}")
+        print(f"  成功批次:      {result.get('success_batches', 0):>6d}")
+        print(f"  失败批次:      {result.get('fail_batches', result.get('errors', []) and len(result.get('errors', [])) or 0):>6d}")
+        print(f"  成功写入:      {result.get('total_saved', 0):>6d}")
+        if "elapsed_s" in result:
+            print(f"  耗时:          {result['elapsed_s']:>6.1f}s")
+        if result.get("errors"):
             print(f"  错误:          {len(result['errors']):>6d}")
             for e in result["errors"][:5]:
                 print(f"    - {e}")
