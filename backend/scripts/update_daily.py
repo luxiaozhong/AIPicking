@@ -286,7 +286,7 @@ async def download_one(session, ts_code, symbol, start_date, end_date, fetch_ext
             vol     = float(row[5])
             amount  = vol * close_p * 100
             records.append((ts_code, trade_date, open_p, high_p, low_p,
-                             close_p, prev_close, vol, amount, close_p, None, None))
+                             close_p, prev_close, vol, amount, close_p))
             prev_close = close_p
         except (ValueError, IndexError):
             continue
