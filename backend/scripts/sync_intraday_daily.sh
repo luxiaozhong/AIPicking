@@ -22,7 +22,7 @@ sleep 30
 
 # ── 2. 成分股日线（按指数过滤） ──
 if [ $# -eq 0 ]; then
-    INDICES=(980080 900001)
+    INDICES=(980080 900001 399667)
 else
     INDICES=("$@")
 fi

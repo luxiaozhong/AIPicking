@@ -15,7 +15,7 @@ PYTHON="$SCRIPT_DIR/../venv/bin/python"
 TODAY=$(date +%Y-%m-%d)
 
 if [ $# -eq 0 ]; then
-    INDICES=(980080 900001)
+    INDICES=(980080 900001 399667)
 else
     INDICES=("$@")
 fi
@@ -28,7 +28,7 @@ for i in "${!INDICES[@]}"; do
     echo "[$(date '+%H:%M:%S')] 指数 $idx 资金流完成"
 
     if [ "$i" -lt $((TOTAL - 1)) ]; then
-        sleep 60
+        sleep 10
     fi
 done
 

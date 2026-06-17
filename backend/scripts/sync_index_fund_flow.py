@@ -461,8 +461,9 @@ CREATE INDEX IF NOT EXISTS idx_ifs_code
 
 _SNAPSHOT_INSERT = """
 INSERT INTO intraday_fund_snapshot
-    (trade_date, snapshot_time, ts_code, main_net_flow, jumbo_net_flow, block_net_flow, main_net_flow_5d)
-VALUES (%s, %s, %s, %s, %s, %s, %s)
+    (trade_date, snapshot_time, ts_code, index_code,
+     main_net_flow, jumbo_net_flow, block_net_flow, main_net_flow_5d)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -476,6 +477,11 @@ def ensure_snapshot_table():
             cur.execute(
                 "ALTER TABLE intraday_fund_snapshot "
                 "ADD COLUMN IF NOT EXISTS main_net_flow_5d DOUBLE PRECISION"
+            )
+            # Migration: add index_code column to distinguish snapshots from different indices
+            cur.execute(
+                "ALTER TABLE intraday_fund_snapshot "
+                "ADD COLUMN IF NOT EXISTS index_code VARCHAR(20)"
             )
         conn.commit()
         logging.info("Table intraday_fund_snapshot ensured")
@@ -532,7 +538,7 @@ def _compute_real_5d_flows(date_str: str, ts_codes: list[str]) -> dict[str, floa
         conn.close()
 
 
-def save_snapshots(date_str: str, snapshot_rows: list[dict]) -> int:
+def save_snapshots(date_str: str, index_code: str, snapshot_rows: list[dict]) -> int:
     """Save intraday snapshots for bar chart race replay.
 
     Each row should have: ts_code, main_net_flow, jumbo_net_flow, block_net_flow.
@@ -540,6 +546,7 @@ def save_snapshots(date_str: str, snapshot_rows: list[dict]) -> int:
     not from the potentially inaccurate API field.
 
     All rows share the same snapshot_time (now).
+    The index_code is stored to distinguish snapshots from different indices.
     """
     if not snapshot_rows:
         return 0
@@ -554,6 +561,7 @@ def save_snapshots(date_str: str, snapshot_rows: list[dict]) -> int:
             date_str,
             snapshot_time,
             r["ts_code"],
+            index_code,
             r.get("main_net_flow"),
             r.get("jumbo_net_flow"),
             r.get("block_net_flow"),
@@ -851,7 +859,7 @@ def sync(date_str: str, index_code: str, batch_size: int = BATCH_SIZE,
     # 3. Save intraday snapshots for bar chart race replay
     snapshot_count = 0
     try:
-        snapshot_count = save_snapshots(date_str, snapshot_rows)
+        snapshot_count = save_snapshots(date_str, index_code, snapshot_rows)
     except Exception as e:
         logging.error(f"Failed to save intraday snapshots: {e}")
 

@@ -257,16 +257,24 @@ def _csi_fmt_date(val) -> str:
 
 
 def fetch_constituents_sz(index_code: str) -> list[dict]:
-    """从 akshare 拉取深证指数成分股（仅名单，无权重/行业/市值）"""
+    """从 akshare 拉取深证指数成分股（仅名单，无权重/行业/市值）
+
+    注意：ak.index_stock_cons 返回的 "纳入日期" 是每只股票各自被纳入指数的日期，
+    并非统一的调样生效日。如果直接原样使用，会导致后端按 MAX(eff_date) 查询时
+    只能拿到最新一批被纳入的股票（例如 14/50），而非全部当前成分股。
+
+    因此统一用今天作为 eff_date，确保每次同步后所有当前成分股属于同一批次。
+    """
     import akshare as ak
 
     log.info(f"正在从 深证 获取 {index_code} 成分股...")
     df = ak.index_stock_cons(symbol=index_code)
 
+    today = str(date_type.today())
     records = []
     for _, row in df.iterrows():
         records.append({
-            "eff_date": str(row["纳入日期"]),
+            "eff_date": today,
             "ts_code": str(row["品种代码"]).zfill(6),
             "stock_name": str(row["品种名称"]),
             "industry": "",
@@ -274,7 +282,7 @@ def fetch_constituents_sz(index_code: str) -> list[dict]:
             "weight": None,
         })
 
-    log.info(f"获取到 {len(records)} 只成分股（eff_date={records[0]['eff_date'] if records else 'N/A'}）")
+    log.info(f"获取到 {len(records)} 只成分股（eff_date={today}）")
     return records
 
 

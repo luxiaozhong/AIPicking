@@ -1326,17 +1326,9 @@ class FundFlowService:
         if not d:
             return {"trade_date": None, "snapshots": []}
 
-        ic = IndexConstituent.__table__
         s = Stock.__table__
 
-        # Get latest eff_date
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
-            return {"trade_date": d, "snapshots": []}
-
-        # Query snapshots joined with index_constituents to filter by index
+        # Query snapshots filtered by index_code directly (stored at sync time)
         sql = text(
             """
             SELECT
@@ -1349,17 +1341,13 @@ class FundFlowService:
                 sn.main_net_flow_5d
             FROM intraday_fund_snapshot sn
             JOIN stocks s2 ON sn.ts_code = s2.ts_code
-            JOIN index_constituents ic2
-                ON (s2.ts_code LIKE ic2.ts_code || '.%' OR s2.ts_code = ic2.ts_code)
-                AND ic2.index_code = :index_code
-                AND ic2.eff_date = :eff_date
             WHERE sn.trade_date = :trade_date
+              AND sn.index_code = :index_code
             ORDER BY sn.snapshot_time ASC, sn.main_net_flow DESC
             """
         )
         result = await db.execute(sql, {
             "index_code": index_code,
-            "eff_date": latest_eff,
             "trade_date": d,
         })
 
