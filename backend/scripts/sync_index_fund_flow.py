@@ -547,6 +547,8 @@ def save_snapshots(date_str: str, index_code: str, snapshot_rows: list[dict]) ->
 
     All rows share the same snapshot_time (now).
     The index_code is stored to distinguish snapshots from different indices.
+
+    Auto-cleans snapshots older than 3 days, preserving recent data for replay.
     """
     if not snapshot_rows:
         return 0
@@ -574,15 +576,16 @@ def save_snapshots(date_str: str, index_code: str, snapshot_rows: list[dict]) ->
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # 只保留当天数据，有旧数据才删（避免每次空跑 DELETE）
+            # 保留最近 3 天数据，清理更早的快照
+            cutoff = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
             cur.execute(
-                "SELECT 1 FROM intraday_fund_snapshot WHERE trade_date != %s LIMIT 1",
-                (date_str,),
+                "SELECT 1 FROM intraday_fund_snapshot WHERE trade_date < %s LIMIT 1",
+                (cutoff,),
             )
             if cur.fetchone():
                 cur.execute(
-                    "DELETE FROM intraday_fund_snapshot WHERE trade_date != %s",
-                    (date_str,),
+                    "DELETE FROM intraday_fund_snapshot WHERE trade_date < %s",
+                    (cutoff,),
                 )
             psycopg2.extras.execute_batch(cur, _SNAPSHOT_INSERT, tuples)
         conn.commit()
@@ -1006,12 +1009,7 @@ def main():
 
     date_str = args.date
     if date_str is None:
-        now = datetime.now()
-        if now.hour >= 16:
-            target = now
-        else:
-            target = now - timedelta(days=1)
-        date_str = target.strftime("%Y-%m-%d")
+        date_str = datetime.now().strftime("%Y-%m-%d")
 
     # Validate date format
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
