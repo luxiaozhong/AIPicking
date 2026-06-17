@@ -182,7 +182,7 @@ export default function IndexMACD() {
   // ── ① 加载可选策略列表（有已完成回测的） ──
   useEffect(() => {
     let cancelled = false;
-    backtestService.getBacktests({ status: 'completed', limit: 200 })
+    backtestService.getBacktests({ status: 'completed', limit: 100 })
       .then((res) => {
         if (cancelled) return;
         const seen = new Map<number, string>();
