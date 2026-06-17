@@ -293,6 +293,9 @@ async def _compute_holdings(
                         p["market_value"] - p["cost_basis"], 2
                     )
 
+    # 按市值从大到小排序
+    active.sort(key=lambda p: p["market_value"], reverse=True)
+
     return active
 
 
