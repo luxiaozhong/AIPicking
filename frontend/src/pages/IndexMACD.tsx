@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-  Card, Tabs, Radio, Slider, Row, Col, Tag, Spin, Collapse,
+  Card, Tabs, Radio, Slider, Row, Col, Tag, Spin, Collapse, Select,
   Breadcrumb, Typography, theme, Space, message,
 } from 'antd';
 import {
@@ -126,7 +126,11 @@ export default function IndexMACD() {
   const [searchValue, setSearchValue] = useState('');
 
   // 最新回测推荐
-  const [latestRecs, setLatestRecs] = useState<{
+  const [availableStrategies, setAvailableStrategies] = useState<{ id: number; name: string }[]>([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState<number | null>(null);
+  const [availableBacktests, setAvailableBacktests] = useState<{ id: number; cutoffDate: string }[]>([]);
+  const [selectedBacktestId, setSelectedBacktestId] = useState<number | null>(null);
+  const [currentRecs, setCurrentRecs] = useState<{
     strategyName: string;
     cutoffDate: string;
     recommendations: RecommendationItem[];
@@ -175,26 +179,86 @@ export default function IndexMACD() {
     };
   }, [days]);
 
-  // ── 加载最新回测推荐 ──
+  // ── ① 加载可选策略列表（有已完成回测的） ──
   useEffect(() => {
     let cancelled = false;
-    backtestService.getBacktests({ status: 'completed', limit: 1 })
+    backtestService.getBacktests({ status: 'completed', limit: 200 })
       .then((res) => {
         if (cancelled) return;
-        const latest = res.items?.[0];
-        if (latest && latest.recommendations && latest.recommendations.length > 0) {
-          setLatestRecs({
-            strategyName: latest.strategy_name || latest.name || '未知策略',
-            cutoffDate: latest.cutoff_date,
-            recommendations: latest.recommendations,
+        const seen = new Map<number, string>();
+        res.items.forEach((bt) => {
+          if (!seen.has(bt.strategy_id)) {
+            seen.set(bt.strategy_id, bt.strategy_name || bt.name || `策略${bt.strategy_id}`);
+          }
+        });
+        const strategies = Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+        setAvailableStrategies(strategies);
+
+        // 默认选中最新回测的策略
+        if (res.items.length > 0) {
+          setSelectedStrategyId(res.items[0].strategy_id);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── ② 策略变化 → 加载该策略最近 10 条回测，默认选最新 ──
+  useEffect(() => {
+    if (selectedStrategyId === null) return;
+    let cancelled = false;
+    setAvailableBacktests([]);
+    setSelectedBacktestId(null);
+    setCurrentRecs(null);
+
+    backtestService.getBacktests({ strategy_id: selectedStrategyId, status: 'completed', limit: 10 })
+      .then((res) => {
+        if (cancelled) return;
+        const options = res.items.map((bt) => ({
+          id: bt.id,
+          cutoffDate: bt.cutoff_date,
+        }));
+        setAvailableBacktests(options);
+
+        // 默认选中最新一条
+        const latest = res.items[0];
+        if (latest) {
+          setSelectedBacktestId(latest.id);
+          if (latest.recommendations && latest.recommendations.length > 0) {
+            setCurrentRecs({
+              strategyName: latest.strategy_name || latest.name || '未知策略',
+              cutoffDate: latest.cutoff_date,
+              recommendations: latest.recommendations,
+            });
+          }
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedStrategyId]);
+
+  // ── ③ 回测选择变化 → 加载该回测详情 ──
+  useEffect(() => {
+    if (selectedBacktestId === null) return;
+    let cancelled = false;
+    backtestService.getBacktest(selectedBacktestId)
+      .then((bt) => {
+        if (cancelled) return;
+        if (bt.recommendations && bt.recommendations.length > 0) {
+          setCurrentRecs({
+            strategyName: bt.strategy_name || bt.name || '未知策略',
+            cutoffDate: bt.cutoff_date,
+            recommendations: bt.recommendations,
           });
+        } else {
+          setCurrentRecs(null);
         }
       })
       .catch(() => {
-        // 静默失败 — 无回测数据时不影响页面正常使用
+        if (!cancelled) setCurrentRecs(null);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [selectedBacktestId]);
 
   // ── 个股选择 ──
   const handleStockSelect = useCallback(
@@ -668,71 +732,92 @@ export default function IndexMACD() {
       </Card>
 
       {/* ── 最新回测推荐个股 ── */}
-      {latestRecs && (
+      {availableStrategies.length > 0 && (
         <Card
           size="small"
           style={{ marginTop: 16 }}
           title={
-            <Space>
+            <Space wrap>
               <RiseOutlined style={{ color: token.colorPrimary }} />
               <Text strong>最新回测推荐</Text>
-              <Tag color="blue">{latestRecs.strategyName}</Tag>
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-                截止 {latestRecs.cutoffDate.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3')}
-              </Text>
+              <Select
+                size="small"
+                style={{ minWidth: 150 }}
+                value={selectedStrategyId}
+                onChange={(val) => setSelectedStrategyId(val)}
+                options={availableStrategies.map((s) => ({ value: s.id, label: s.name }))}
+                placeholder="选择策略"
+              />
+              {availableBacktests.length > 0 && (
+                <Select
+                  size="small"
+                  style={{ minWidth: 130 }}
+                  value={selectedBacktestId}
+                  onChange={(val) => setSelectedBacktestId(val)}
+                  options={availableBacktests.map((bt) => ({
+                    value: bt.id,
+                    label: bt.cutoffDate.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'),
+                  }))}
+                  placeholder="选择回测"
+                />
+              )}
             </Space>
           }
         >
-          <Row gutter={[12, 12]}>
-            {latestRecs.recommendations.map((rec, i) => (
-              <Col xs={24} sm={12} md={8} lg={6} xl={4} key={rec.ts_code}>
-                <Card
-                  size="small"
-                  hoverable
-                  style={{
-                    borderLeft: `3px solid ${token.colorPrimary}`,
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => handleStockSelect(rec.ts_code)}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Space size={4}>
-                        <Tag style={{ fontSize: 10, lineHeight: '16px' }}>#{i + 1}</Tag>
-                        <Text strong style={{ fontSize: 13 }}>
-                          {rec.name}
+          {currentRecs ? (
+            <Row gutter={[12, 12]}>
+              {currentRecs.recommendations.map((rec, i) => (
+                <Col xs={24} sm={12} md={8} lg={6} xl={4} key={rec.ts_code}>
+                  <Card
+                    size="small"
+                    hoverable
+                    style={{
+                      borderLeft: `3px solid ${token.colorPrimary}`,
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => handleStockSelect(rec.ts_code)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Space size={4}>
+                          <Tag style={{ fontSize: 10, lineHeight: '16px' }}>#{i + 1}</Tag>
+                          <Text strong style={{ fontSize: 13 }}>
+                            {rec.name}
+                          </Text>
+                        </Space>
+                        <div style={{ marginTop: 2 }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>
+                            {rec.ts_code}
+                          </Text>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <Text strong style={{ fontSize: 18, color: token.colorPrimary }}>
+                          {rec.score.toFixed(1)}
                         </Text>
-                      </Space>
-                      <div style={{ marginTop: 2 }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>
-                          {rec.ts_code}
-                        </Text>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 10 }}>得分</Text>
+                        </div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <Text strong style={{ fontSize: 18, color: token.colorPrimary }}>
-                        {rec.score.toFixed(1)}
-                      </Text>
-                      <div>
-                        <Text type="secondary" style={{ fontSize: 10 }}>得分</Text>
+                    {rec.signal && (
+                      <div style={{ marginTop: 8 }}>
+                        <Text
+                          type="secondary"
+                          style={{ fontSize: 11, lineHeight: '16px' }}
+                          ellipsis={{ tooltip: rec.signal }}
+                        >
+                          {rec.signal}
+                        </Text>
                       </div>
-                    </div>
-                  </div>
-                  {rec.signal && (
-                    <div style={{ marginTop: 8 }}>
-                      <Text
-                        type="secondary"
-                        style={{ fontSize: 11, lineHeight: '16px' }}
-                        ellipsis={{ tooltip: rec.signal }}
-                      >
-                        {rec.signal}
-                      </Text>
-                    </div>
-                  )}
-                </Card>
-              </Col>
-            ))}
-          </Row>
+                    )}
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          ) : (
+            <Text type="secondary">该策略暂无已完成回测</Text>
+          )}
         </Card>
       )}
     </div>
