@@ -11,7 +11,9 @@ import { useNavigate } from 'react-router-dom';
 import IndexMACDChart from '@/components/charts/IndexMACDChart';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import { stockService } from '@/services/stockService';
+import { backtestService } from '@/services/backtestService';
 import type { KLineItem } from '@/types/stock';
+import type { RecommendationItem } from '@/types/backtest';
 import { calcMACD, calcRSI, detectCrosses, detectDivergences } from '@/utils/indicators';
 import { computeAllPredictions } from '@/utils/predictions';
 import type { IndexPredictions, PredictionStatus } from '@/utils/predictions';
@@ -123,6 +125,13 @@ export default function IndexMACD() {
   const [customStocks, setCustomStocks] = useState<{ tsCode: string; name: string }[]>([]);
   const [searchValue, setSearchValue] = useState('');
 
+  // 最新回测推荐
+  const [latestRecs, setLatestRecs] = useState<{
+    strategyName: string;
+    cutoffDate: string;
+    recommendations: RecommendationItem[];
+  } | null>(null);
+
   // ── 加载数据 ──
   // 用 ref 追踪自定义股票，避免 customStocks 变化触发全量重载
   const customRef = useRef(customStocks);
@@ -165,6 +174,27 @@ export default function IndexMACD() {
       cancelled = true;
     };
   }, [days]);
+
+  // ── 加载最新回测推荐 ──
+  useEffect(() => {
+    let cancelled = false;
+    backtestService.getBacktests({ status: 'completed', limit: 1 })
+      .then((res) => {
+        if (cancelled) return;
+        const latest = res.items?.[0];
+        if (latest && latest.recommendations && latest.recommendations.length > 0) {
+          setLatestRecs({
+            strategyName: latest.strategy_name || latest.name || '未知策略',
+            cutoffDate: latest.cutoff_date,
+            recommendations: latest.recommendations,
+          });
+        }
+      })
+      .catch(() => {
+        // 静默失败 — 无回测数据时不影响页面正常使用
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // ── 个股选择 ──
   const handleStockSelect = useCallback(
@@ -636,6 +666,75 @@ export default function IndexMACD() {
           </>
         )}
       </Card>
+
+      {/* ── 最新回测推荐个股 ── */}
+      {latestRecs && (
+        <Card
+          size="small"
+          style={{ marginTop: 16 }}
+          title={
+            <Space>
+              <RiseOutlined style={{ color: token.colorPrimary }} />
+              <Text strong>最新回测推荐</Text>
+              <Tag color="blue">{latestRecs.strategyName}</Tag>
+              <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+                截止 {latestRecs.cutoffDate.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3')}
+              </Text>
+            </Space>
+          }
+        >
+          <Row gutter={[12, 12]}>
+            {latestRecs.recommendations.map((rec, i) => (
+              <Col xs={24} sm={12} md={8} lg={6} xl={4} key={rec.ts_code}>
+                <Card
+                  size="small"
+                  hoverable
+                  style={{
+                    borderLeft: `3px solid ${token.colorPrimary}`,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => handleStockSelect(rec.ts_code)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Space size={4}>
+                        <Tag style={{ fontSize: 10, lineHeight: '16px' }}>#{i + 1}</Tag>
+                        <Text strong style={{ fontSize: 13 }}>
+                          {rec.name}
+                        </Text>
+                      </Space>
+                      <div style={{ marginTop: 2 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {rec.ts_code}
+                        </Text>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <Text strong style={{ fontSize: 18, color: token.colorPrimary }}>
+                        {rec.score.toFixed(1)}
+                      </Text>
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 10 }}>得分</Text>
+                      </div>
+                    </div>
+                  </div>
+                  {rec.signal && (
+                    <div style={{ marginTop: 8 }}>
+                      <Text
+                        type="secondary"
+                        style={{ fontSize: 11, lineHeight: '16px' }}
+                        ellipsis={{ tooltip: rec.signal }}
+                      >
+                        {rec.signal}
+                      </Text>
+                    </div>
+                  )}
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        </Card>
+      )}
     </div>
   );
 }
