@@ -533,336 +533,346 @@ export default function IndexMACD() {
         ))}
       </Row>
 
-      {/* ── 主体内容 ── */}
-      <Card>
-        {/* 工具栏 */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          {/* 指数/个股 Tabs */}
-          <Tabs
-            activeKey={activeTab}
-            onChange={setActiveTab}
-            items={[
-              ...INDICES.map((idx) => ({ key: idx.tsCode, label: idx.name })),
-              ...customStocks.map((s) => ({
-                key: s.tsCode,
-                label: (
-                  <span>
-                    {s.name}
-                    <Tag style={{ marginLeft: 4, fontSize: 10, lineHeight: '14px' }}>个股</Tag>
-                  </span>
-                ),
-              })),
-            ]}
-            style={{ marginBottom: 0 }}
-            size="small"
-          />
-
-          <Space size="middle" wrap>
-            <Radio.Group
-              options={PERIOD_OPTIONS}
-              value={days}
-              onChange={(e) => setDays(e.target.value)}
+      {/* ── 主体内容：左右分栏 ── */}
+      <Row gutter={16}>
+        {/* 左侧：最新回测推荐个股 */}
+        {availableStrategies.length > 0 && (
+          <Col xs={24} md={6}>
+            <Card
               size="small"
-            />
-
-            <Collapse
-              size="small"
-              ghost
-              items={[
-                {
-                  key: 'params',
-                  label: <Text style={{ fontSize: 12 }}>参数设置</Text>,
-                  children: (
-                    <div style={{ padding: '8px 0' }}>
-                      <Row gutter={[24, 8]}>
-                        <Col span={8}>
-                          <Text style={{ fontSize: 12 }}>
-                            MACD 快线: <Text strong>{macdParams.fast}</Text>
-                          </Text>
-                          <Slider
-                            min={2}
-                            max={50}
-                            value={macdParams.fast}
-                            onChange={(v) => setMacdParams((p) => ({ ...p, fast: v }))}
-                          />
-                        </Col>
-                        <Col span={8}>
-                          <Text style={{ fontSize: 12 }}>
-                            MACD 慢线: <Text strong>{macdParams.slow}</Text>
-                          </Text>
-                          <Slider
-                            min={5}
-                            max={100}
-                            value={macdParams.slow}
-                            onChange={(v) => setMacdParams((p) => ({ ...p, slow: v }))}
-                          />
-                        </Col>
-                        <Col span={8}>
-                          <Text style={{ fontSize: 12 }}>
-                            信号线: <Text strong>{macdParams.signal}</Text>
-                          </Text>
-                          <Slider
-                            min={2}
-                            max={30}
-                            value={macdParams.signal}
-                            onChange={(v) => setMacdParams((p) => ({ ...p, signal: v }))}
-                          />
-                        </Col>
-                      </Row>
-                    </div>
-                  ),
-                },
-              ]}
-            />
-          </Space>
-        </div>
-
-        {/* 图表 */}
-        {loading ? (
-          <Spin style={{ display: 'block', margin: '60px auto' }} />
-        ) : currentData.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>暂无数据</div>
-        ) : (
-          <>
-            <IndexMACDChart
-              data={currentData}
-              macdParams={macdParams}
-              rsiParams={DEFAULT_RSI}
-              height={580}
-            />
-
-            {/* 当前指标摘要 */}
-            <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
-              <Col span={6}>
-                <Text style={{ fontSize: 12, color: '#888' }}>
-                  最新收盘:{' '}
-                  <Text strong>{latest?.close.toFixed(2)}</Text>
-                  {changePct !== undefined && (
-                    <span style={{ color: changePct >= 0 ? '#ef5350' : '#26a69a', marginLeft: 4 }}>
-                      {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
-                    </span>
+              title={
+                <Space wrap size={4}>
+                  <RiseOutlined style={{ color: token.colorPrimary }} />
+                  <Text strong style={{ fontSize: 13 }}>回测推荐</Text>
+                  <Select
+                    size="small"
+                    style={{ minWidth: 130 }}
+                    value={selectedStrategyId}
+                    onChange={(val) => setSelectedStrategyId(val)}
+                    options={availableStrategies.map((s) => ({ value: s.id, label: s.name }))}
+                    placeholder="选择策略"
+                  />
+                  {availableBacktests.length > 0 && (
+                    <Select
+                      size="small"
+                      style={{ minWidth: 110 }}
+                      value={selectedBacktestId}
+                      onChange={(val) => setSelectedBacktestId(val)}
+                      options={availableBacktests.map((bt) => ({
+                        value: bt.id,
+                        label: bt.cutoffDate.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'),
+                      }))}
+                      placeholder="选择回测"
+                    />
                   )}
-                </Text>
-              </Col>
-              <Col span={6}>
-                <Text style={{ fontSize: 12, color: '#888' }}>
-                  DIF:{' '}
-                  <Text strong style={{ color: '#1677ff' }}>
-                    {lastDif?.toFixed(2) ?? '—'}
-                  </Text>
-                </Text>
-              </Col>
-              <Col span={6}>
-                <Text style={{ fontSize: 12, color: '#888' }}>
-                  DEA:{' '}
-                  <Text strong style={{ color: '#fa8c16' }}>
-                    {lastDea?.toFixed(2) ?? '—'}
-                  </Text>
-                </Text>
-              </Col>
-              <Col span={6}>
-                <Text style={{ fontSize: 12, color: '#888' }}>
-                  RSI({DEFAULT_RSI.period}):{' '}
-                  <Text strong style={{ color: '#7c3aed' }}>
-                    {lastRSI?.toFixed(1) ?? '—'}
-                  </Text>
-                  {lastRSI !== null && (
-                    <Tag
-                      color={getRSITag(lastRSI, DEFAULT_RSI.overbought, DEFAULT_RSI.oversold).color}
-                      style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px' }}
-                    >
-                      {getRSITag(lastRSI, DEFAULT_RSI.overbought, DEFAULT_RSI.oversold).label}
-                    </Tag>
+                  {backtestParams && (
+                    <>
+                      {backtestParams.track_days && (
+                        <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px' }}>追踪 {backtestParams.track_days.join('/')} 日</Tag>
+                      )}
+                      {Object.entries(backtestParams)
+                        .filter(([k]) => k !== 'track_days')
+                        .slice(0, 2)
+                        .map(([k, v]) => {
+                          const displayValue = Array.isArray(v)
+                            ? v.join(', ')
+                            : typeof v === 'object'
+                              ? JSON.stringify(v)
+                              : String(v);
+                          return (
+                            <Tag key={k} color="default" style={{ fontSize: 10, lineHeight: '16px' }}>
+                              {k}: {displayValue}
+                            </Tag>
+                          );
+                        })}
+                    </>
                   )}
-                </Text>
-              </Col>
-            </Row>
-
-            {/* 最近信号历史 */}
-            {recentSignals.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>
-                  最近信号:
-                </Text>
-                {recentSignals.map((s, i) => (
-                  <Tag key={i} color={s.color} style={{ fontSize: 11, marginBottom: 4 }}>
-                    {s.date} {s.type}
-                  </Tag>
-                ))}
-              </div>
-            )}
-
-            {/* ── 明日预判面板 ── */}
-            {predictions && (
-              <Card
-                size="small"
-                title={
-                  <Space>
-                    <BulbOutlined style={{ color: '#fa8c16' }} />
-                    <Text strong>明日预判</Text>
-                    <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
-                      基于今日收盘 {latest?.close.toFixed(2)}，模拟次日收盘价变化对各指标的影响
-                    </Text>
-                  </Space>
-                }
-                style={{ background: '#fafafa' }}
-              >
-                <PredictionRow
-                  label={predictions.cross.type === 'golden_cross' ? '金叉预判' : '死叉预判'}
-                  icon={
-                    predictions.cross.type === 'golden_cross' ? (
-                      <RiseOutlined style={{ color: '#52c41a' }} />
-                    ) : (
-                      <FallOutlined style={{ color: '#ff4d4f' }} />
-                    )
-                  }
-                  pred={predictions.cross}
-                />
-                <PredictionRow
-                  label="底背离预判"
-                  icon={<WarningOutlined style={{ color: '#52c41a' }} />}
-                  pred={predictions.divergence.bottom}
-                />
-                <PredictionRow
-                  label="顶背离预判"
-                  icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
-                  pred={predictions.divergence.top}
-                />
-                <PredictionRow
-                  label={`RSI超买(${DEFAULT_RSI.overbought})预判`}
-                  icon={<RiseOutlined style={{ color: '#ff4d4f' }} />}
-                  pred={predictions.rsi.overbought}
-                />
-                <PredictionRow
-                  label={`RSI超卖(${DEFAULT_RSI.oversold})预判`}
-                  icon={<FallOutlined style={{ color: '#52c41a' }} />}
-                  pred={predictions.rsi.oversold}
-                />
-              </Card>
-            )}
-          </>
+                </Space>
+              }
+              style={{ height: '100%' }}
+            >
+              {currentRecs ? (
+                <div style={{ maxHeight: 700, overflowY: 'auto' }}>
+                  <Row gutter={[8, 8]}>
+                    {currentRecs.recommendations.map((rec, i) => (
+                      <Col span={24} key={rec.ts_code}>
+                        <Card
+                          size="small"
+                          hoverable
+                          style={{
+                            borderLeft: `3px solid ${token.colorPrimary}`,
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => handleStockSelect(rec.ts_code)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <Space size={4}>
+                                <Tag style={{ fontSize: 10, lineHeight: '16px' }}>#{i + 1}</Tag>
+                                <Text strong style={{ fontSize: 13 }}>
+                                  {rec.name}
+                                </Text>
+                              </Space>
+                              <div style={{ marginTop: 2 }}>
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  {rec.ts_code}
+                                </Text>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <Text strong style={{ fontSize: 16, color: token.colorPrimary }}>
+                                {rec.score.toFixed(1)}
+                              </Text>
+                              <div>
+                                <Text type="secondary" style={{ fontSize: 10 }}>得分</Text>
+                              </div>
+                            </div>
+                          </div>
+                          {rec.signal && (
+                            <div style={{ marginTop: 4 }}>
+                              <Text
+                                type="secondary"
+                                style={{ fontSize: 11, lineHeight: '16px' }}
+                                ellipsis={{ tooltip: rec.signal }}
+                              >
+                                {rec.signal}
+                              </Text>
+                            </div>
+                          )}
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
+                </div>
+              ) : (
+                <Text type="secondary">该策略暂无已完成回测</Text>
+              )}
+            </Card>
+          </Col>
         )}
-      </Card>
 
-      {/* ── 最新回测推荐个股 ── */}
-      {availableStrategies.length > 0 && (
-        <Card
-          size="small"
-          style={{ marginTop: 16 }}
-          title={
-            <Space wrap>
-              <RiseOutlined style={{ color: token.colorPrimary }} />
-              <Text strong>最新回测推荐</Text>
-              <Select
+        {/* 右侧：MACD 图表 + 分析 */}
+        <Col xs={24} md={availableStrategies.length > 0 ? 18 : 24} style={{ overflow: 'hidden' }}>
+          <Card styles={{ body: { overflow: 'hidden' } }}>
+            {/* 工具栏 */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16,
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              {/* 指数/个股 Tabs */}
+              <Tabs
+                activeKey={activeTab}
+                onChange={setActiveTab}
+                items={[
+                  ...INDICES.map((idx) => ({ key: idx.tsCode, label: idx.name })),
+                  ...customStocks.map((s) => ({
+                    key: s.tsCode,
+                    label: (
+                      <span>
+                        {s.name}
+                        <Tag style={{ marginLeft: 4, fontSize: 10, lineHeight: '14px' }}>个股</Tag>
+                      </span>
+                    ),
+                  })),
+                ]}
+                style={{ marginBottom: 0 }}
                 size="small"
-                style={{ minWidth: 150 }}
-                value={selectedStrategyId}
-                onChange={(val) => setSelectedStrategyId(val)}
-                options={availableStrategies.map((s) => ({ value: s.id, label: s.name }))}
-                placeholder="选择策略"
               />
-              {availableBacktests.length > 0 && (
-                <Select
+
+              <Space size="middle" wrap>
+                <Radio.Group
+                  options={PERIOD_OPTIONS}
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
                   size="small"
-                  style={{ minWidth: 130 }}
-                  value={selectedBacktestId}
-                  onChange={(val) => setSelectedBacktestId(val)}
-                  options={availableBacktests.map((bt) => ({
-                    value: bt.id,
-                    label: bt.cutoffDate.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'),
-                  }))}
-                  placeholder="选择回测"
                 />
-              )}
-              {backtestParams && (
-                <>
-                  {backtestParams.track_days && (
-                    <Tag color="blue">追踪 {backtestParams.track_days.join('/')} 日</Tag>
-                  )}
-                  {Object.entries(backtestParams)
-                    .filter(([k]) => k !== 'track_days')
-                    .map(([k, v]) => {
-                      const displayValue = Array.isArray(v)
-                        ? v.join(', ')
-                        : typeof v === 'object'
-                          ? JSON.stringify(v)
-                          : String(v);
-                      return (
-                        <Tag key={k} color="default">
-                          {k}: {displayValue}
+
+                <Collapse
+                  size="small"
+                  ghost
+                  items={[
+                    {
+                      key: 'params',
+                      label: <Text style={{ fontSize: 12 }}>参数设置</Text>,
+                      children: (
+                        <div style={{ padding: '8px 0' }}>
+                          <Row gutter={[24, 8]}>
+                            <Col span={8}>
+                              <Text style={{ fontSize: 12 }}>
+                                MACD 快线: <Text strong>{macdParams.fast}</Text>
+                              </Text>
+                              <Slider
+                                min={2}
+                                max={50}
+                                value={macdParams.fast}
+                                onChange={(v) => setMacdParams((p) => ({ ...p, fast: v }))}
+                              />
+                            </Col>
+                            <Col span={8}>
+                              <Text style={{ fontSize: 12 }}>
+                                MACD 慢线: <Text strong>{macdParams.slow}</Text>
+                              </Text>
+                              <Slider
+                                min={5}
+                                max={100}
+                                value={macdParams.slow}
+                                onChange={(v) => setMacdParams((p) => ({ ...p, slow: v }))}
+                              />
+                            </Col>
+                            <Col span={8}>
+                              <Text style={{ fontSize: 12 }}>
+                                信号线: <Text strong>{macdParams.signal}</Text>
+                              </Text>
+                              <Slider
+                                min={2}
+                                max={30}
+                                value={macdParams.signal}
+                                onChange={(v) => setMacdParams((p) => ({ ...p, signal: v }))}
+                              />
+                            </Col>
+                          </Row>
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </Space>
+            </div>
+
+            {/* 图表 */}
+            {loading ? (
+              <Spin style={{ display: 'block', margin: '60px auto' }} />
+            ) : currentData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>暂无数据</div>
+            ) : (
+              <>
+                <IndexMACDChart
+                  data={currentData}
+                  macdParams={macdParams}
+                  rsiParams={DEFAULT_RSI}
+                  height={580}
+                />
+
+                {/* 当前指标摘要 */}
+                <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
+                  <Col span={6}>
+                    <Text style={{ fontSize: 12, color: '#888' }}>
+                      最新收盘:{' '}
+                      <Text strong>{latest?.close.toFixed(2)}</Text>
+                      {changePct !== undefined && (
+                        <span style={{ color: changePct >= 0 ? '#ef5350' : '#26a69a', marginLeft: 4 }}>
+                          {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+                        </span>
+                      )}
+                    </Text>
+                  </Col>
+                  <Col span={6}>
+                    <Text style={{ fontSize: 12, color: '#888' }}>
+                      DIF:{' '}
+                      <Text strong style={{ color: '#1677ff' }}>
+                        {lastDif?.toFixed(2) ?? '—'}
+                      </Text>
+                    </Text>
+                  </Col>
+                  <Col span={6}>
+                    <Text style={{ fontSize: 12, color: '#888' }}>
+                      DEA:{' '}
+                      <Text strong style={{ color: '#fa8c16' }}>
+                        {lastDea?.toFixed(2) ?? '—'}
+                      </Text>
+                    </Text>
+                  </Col>
+                  <Col span={6}>
+                    <Text style={{ fontSize: 12, color: '#888' }}>
+                      RSI({DEFAULT_RSI.period}):{' '}
+                      <Text strong style={{ color: '#7c3aed' }}>
+                        {lastRSI?.toFixed(1) ?? '—'}
+                      </Text>
+                      {lastRSI !== null && (
+                        <Tag
+                          color={getRSITag(lastRSI, DEFAULT_RSI.overbought, DEFAULT_RSI.oversold).color}
+                          style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px' }}
+                        >
+                          {getRSITag(lastRSI, DEFAULT_RSI.overbought, DEFAULT_RSI.oversold).label}
                         </Tag>
-                      );
-                    })}
-                </>
-              )}
-            </Space>
-          }
-        >
-          {currentRecs ? (
-            <Row gutter={[12, 12]}>
-              {currentRecs.recommendations.map((rec, i) => (
-                <Col xs={24} sm={12} md={8} lg={6} xl={4} key={rec.ts_code}>
+                      )}
+                    </Text>
+                  </Col>
+                </Row>
+
+                {/* 最近信号历史 */}
+                {recentSignals.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>
+                      最近信号:
+                    </Text>
+                    {recentSignals.map((s, i) => (
+                      <Tag key={i} color={s.color} style={{ fontSize: 11, marginBottom: 4 }}>
+                        {s.date} {s.type}
+                      </Tag>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── 明日预判面板 ── */}
+                {predictions && (
                   <Card
                     size="small"
-                    hoverable
-                    style={{
-                      borderLeft: `3px solid ${token.colorPrimary}`,
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => handleStockSelect(rec.ts_code)}
+                    title={
+                      <Space>
+                        <BulbOutlined style={{ color: '#fa8c16' }} />
+                        <Text strong>明日预判</Text>
+                        <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
+                          基于今日收盘 {latest?.close.toFixed(2)}，模拟次日收盘价变化对各指标的影响
+                        </Text>
+                      </Space>
+                    }
+                    style={{ background: '#fafafa' }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <Space size={4}>
-                          <Tag style={{ fontSize: 10, lineHeight: '16px' }}>#{i + 1}</Tag>
-                          <Text strong style={{ fontSize: 13 }}>
-                            {rec.name}
-                          </Text>
-                        </Space>
-                        <div style={{ marginTop: 2 }}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>
-                            {rec.ts_code}
-                          </Text>
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <Text strong style={{ fontSize: 18, color: token.colorPrimary }}>
-                          {rec.score.toFixed(1)}
-                        </Text>
-                        <div>
-                          <Text type="secondary" style={{ fontSize: 10 }}>得分</Text>
-                        </div>
-                      </div>
-                    </div>
-                    {rec.signal && (
-                      <div style={{ marginTop: 8 }}>
-                        <Text
-                          type="secondary"
-                          style={{ fontSize: 11, lineHeight: '16px' }}
-                          ellipsis={{ tooltip: rec.signal }}
-                        >
-                          {rec.signal}
-                        </Text>
-                      </div>
-                    )}
+                    <PredictionRow
+                      label={predictions.cross.type === 'golden_cross' ? '金叉预判' : '死叉预判'}
+                      icon={
+                        predictions.cross.type === 'golden_cross' ? (
+                          <RiseOutlined style={{ color: '#52c41a' }} />
+                        ) : (
+                          <FallOutlined style={{ color: '#ff4d4f' }} />
+                        )
+                      }
+                      pred={predictions.cross}
+                    />
+                    <PredictionRow
+                      label="底背离预判"
+                      icon={<WarningOutlined style={{ color: '#52c41a' }} />}
+                      pred={predictions.divergence.bottom}
+                    />
+                    <PredictionRow
+                      label="顶背离预判"
+                      icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
+                      pred={predictions.divergence.top}
+                    />
+                    <PredictionRow
+                      label={`RSI超买(${DEFAULT_RSI.overbought})预判`}
+                      icon={<RiseOutlined style={{ color: '#ff4d4f' }} />}
+                      pred={predictions.rsi.overbought}
+                    />
+                    <PredictionRow
+                      label={`RSI超卖(${DEFAULT_RSI.oversold})预判`}
+                      icon={<FallOutlined style={{ color: '#52c41a' }} />}
+                      pred={predictions.rsi.oversold}
+                    />
                   </Card>
-                </Col>
-              ))}
-            </Row>
-          ) : (
-            <Text type="secondary">该策略暂无已完成回测</Text>
-          )}
-        </Card>
-      )}
+                )}
+              </>
+            )}
+          </Card>
+        </Col>
+      </Row>
     </div>
   );
 }
