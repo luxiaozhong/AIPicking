@@ -108,6 +108,23 @@ function PredictionRow({
   );
 }
 
+// ── 辅助函数：解析回测 config（后端可能返回字符串或已解析对象）──
+function parseConfig(config: any): Record<string, any> | null {
+  if (!config) return null;
+  if (typeof config === 'string') {
+    try {
+      const parsed = JSON.parse(config);
+      return typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof config === 'object' && !Array.isArray(config)) {
+    return config;
+  }
+  return null;
+}
+
 // ── 主组件 ──
 export default function IndexMACD() {
   const navigate = useNavigate();
@@ -135,6 +152,7 @@ export default function IndexMACD() {
     cutoffDate: string;
     recommendations: RecommendationItem[];
   } | null>(null);
+  const [backtestParams, setBacktestParams] = useState<Record<string, any> | null>(null);
 
   // ── 加载数据 ──
   // 用 ref 追踪自定义股票，避免 customStocks 变化触发全量重载
@@ -231,6 +249,8 @@ export default function IndexMACD() {
               recommendations: latest.recommendations,
             });
           }
+          // 提取回测参数（后端可能返回字符串或已解析对象）
+          setBacktestParams(parseConfig(latest.config));
         }
       })
       .catch(() => {});
@@ -253,6 +273,8 @@ export default function IndexMACD() {
         } else {
           setCurrentRecs(null);
         }
+        // 提取回测参数（后端可能返回字符串或已解析对象）
+        setBacktestParams(parseConfig(bt.config));
       })
       .catch(() => {
         if (!cancelled) setCurrentRecs(null);
@@ -760,6 +782,27 @@ export default function IndexMACD() {
                   }))}
                   placeholder="选择回测"
                 />
+              )}
+              {backtestParams && (
+                <>
+                  {backtestParams.track_days && (
+                    <Tag color="blue">追踪 {backtestParams.track_days.join('/')} 日</Tag>
+                  )}
+                  {Object.entries(backtestParams)
+                    .filter(([k]) => k !== 'track_days')
+                    .map(([k, v]) => {
+                      const displayValue = Array.isArray(v)
+                        ? v.join(', ')
+                        : typeof v === 'object'
+                          ? JSON.stringify(v)
+                          : String(v);
+                      return (
+                        <Tag key={k} color="default">
+                          {k}: {displayValue}
+                        </Tag>
+                      );
+                    })}
+                </>
               )}
             </Space>
           }
