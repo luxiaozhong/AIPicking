@@ -24,14 +24,8 @@ Usage:
     venv/bin/python scripts/sync_stock_fund_flow.py --date 2026-06-12 --dry-run
     venv/bin/python scripts/sync_stock_fund_flow.py --pg-url postgresql://...
 
-Cron:
-    # 上午收盘后预同步（11:30）— 盘后 sync_all.py 会覆盖为最终数据
-    30 11 * * 1-5 cd /opt/AIpicking/backend && \\
-        venv/bin/python scripts/sync_stock_fund_flow.py --date $(date +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
-    # 午后预同步（14:15）— 盘后 sync_all.py 会覆盖为最终数据
-    15 14 * * 1-5 cd /opt/AIpicking/backend && \\
-        venv/bin/python scripts/sync_stock_fund_flow.py --date $(date +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
-    # 盘后最终同步（17:30，通过 sync_all.py 统一调度，自动覆盖上述数据）
+调度方式：
+    - 仅在盘后由 sync_all.py 统一调度（每日一次），不做盘中独立 cron。
 """
 
 from __future__ import annotations
@@ -110,23 +104,6 @@ MAX_RETRIES = 2               # retry attempts for transient failures
 RETRY_BACKOFF = (5, 15)       # (min, max) retry backoff seconds
 MAX_WORKERS = 4               # parallel batch workers
 
-def _load_index_codes_from_db() -> tuple[str, ...]:
-    """从 index_info 表动态加载所有指数代码，自动排除无资金流数据的指数。
-
-    不硬编码列表——通过 sync_index_constituents.py 新增的任何指数
-    都会自动被排除。
-    """
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT index_code FROM index_info")
-            codes = tuple(r[0] for r in cur.fetchall())
-        if not codes:
-            logging.warning("index_info 表为空，无法排除指数股票")
-        return codes
-    finally:
-        conn.close()
-
 # ── npm CLI output column → DB column mapping ─────────────────────────
 # Parsed dynamically from markdown header row; this is the canonical set.
 # npm_field: (db_column, python_type)
@@ -198,24 +175,14 @@ def npm_to_ts_code(npm_code: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════
 
 def load_stocks() -> list[str]:
-    """Load all A-share stock ts_codes from the stocks table, excluding indexes.
-
-    Index codes are dynamically loaded from index_info — any index added via
-    sync_index_constituents.py is automatically excluded.
+    """Load all A-share stock ts_codes from the stocks table (全量，不排除指数).
 
     Returns ts_code strings sorted alphabetically (e.g. ["000001.SZ", ...]).
     """
-    index_codes = _load_index_codes_from_db()
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            if index_codes:
-                cur.execute(
-                    "SELECT ts_code FROM stocks WHERE ts_code NOT IN %s ORDER BY ts_code",
-                    (index_codes,),
-                )
-            else:
-                cur.execute("SELECT ts_code FROM stocks ORDER BY ts_code")
+            cur.execute("SELECT ts_code FROM stocks ORDER BY ts_code")
             rows = cur.fetchall()
     finally:
         conn.close()
