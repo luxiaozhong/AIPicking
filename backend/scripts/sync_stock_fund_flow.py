@@ -9,7 +9,7 @@ Fetches and stores into PostgreSQL:
 覆盖字段：主力净额/超大单/大单/中单/小单 + 5/10/20日累计 + 大宗交易 + 融资融券 + 龙虎榜
 
 Idempotent: INSERT ... ON CONFLICT DO UPDATE — safe to re-run.
-批量策略：每批 50 只股票（npx 启动开销 ~1s），批间延迟 2s，全量约 7 分钟。
+批量策略：每批 200 只股票，4 线程并行，全量约 30 秒。
 
 Writes to table:
   - daily_stock_fund_flow (ORM: DailyStockFundFlow)
@@ -46,6 +46,7 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -103,74 +104,28 @@ def get_conn():
 # ═════════════════════════════════════════════════════════════════════════
 
 NPM_PACKAGE = "westock-data-clawhub@1.0.4"
-BATCH_SIZE = 50
-BATCH_DELAY_BASE = 2.0       # base delay between batches (seconds)
-BATCH_DELAY_JITTER = 1.5     # random jitter on top of base delay
+BATCH_SIZE = 200
 BATCH_TIMEOUT = 120           # subprocess timeout per batch (seconds)
 MAX_RETRIES = 2               # retry attempts for transient failures
 RETRY_BACKOFF = (5, 15)       # (min, max) retry backoff seconds
+MAX_WORKERS = 4               # parallel batch workers
 
-# Index ts_codes to exclude (no fund flow data)
-INDEX_CODES = (
-    "000001.SH", "000002.SH", "000003.SH", "000004.SH", "000005.SH",
-    "000006.SH", "000007.SH", "000008.SH", "000009.SH", "000010.SH",
-    "000011.SH", "000012.SH", "000013.SH", "000015.SH", "000016.SH",
-    "000017.SH", "000300.SH", "000688.SH", "000698.SH", "000852.SH",
-    "000853.SH", "000854.SH", "000855.SH", "000856.SH", "000857.SH",
-    "000858.SH", "000859.SH", "000860.SH", "000861.SH", "000862.SH",
-    "000863.SH", "000864.SH", "000865.SH", "000866.SH", "000867.SH",
-    "000868.SH", "000869.SH", "000870.SH", "000871.SH", "000872.SH",
-    "000873.SH", "000874.SH", "000875.SH", "000876.SH", "000877.SH",
-    "000878.SH", "000879.SH", "000880.SH", "000881.SH", "000882.SH",
-    "000883.SH", "000884.SH", "000885.SH", "000886.SH", "000887.SH",
-    "000888.SH", "000889.SH", "000890.SH", "000891.SH", "000892.SH",
-    "000893.SH", "000894.SH", "000895.SH", "000896.SH", "000897.SH",
-    "000898.SH", "000899.SH", "000900.SH", "000901.SH", "000902.SH",
-    "000903.SH", "000904.SH", "000905.SH", "000906.SH", "000907.SH",
-    "000908.SH", "000909.SH", "000910.SH", "000911.SH", "000912.SH",
-    "000913.SH", "000914.SH", "000915.SH", "000916.SH", "000917.SH",
-    "000918.SH", "000919.SH", "000920.SH", "000921.SH", "000922.SH",
-    "000923.SH", "000924.SH", "000925.SH", "000926.SH", "000927.SH",
-    "000928.SH", "000929.SH", "000930.SH", "000931.SH", "000932.SH",
-    "000933.SH", "000934.SH", "000935.SH", "000936.SH", "000937.SH",
-    "000938.SH", "000939.SH", "000940.SH", "000941.SH", "000942.SH",
-    "000943.SH", "000944.SH", "000945.SH", "000946.SH", "000947.SH",
-    "000948.SH", "000949.SH", "000950.SH", "000951.SH", "000952.SH",
-    "000953.SH", "000954.SH", "000955.SH", "000956.SH", "000957.SH",
-    "000958.SH", "000959.SH", "000960.SH", "000961.SH", "000962.SH",
-    "000963.SH", "000964.SH", "000965.SH", "000966.SH", "000967.SH",
-    "000968.SH", "000969.SH", "000970.SH", "000971.SH", "000972.SH",
-    "000973.SH", "000974.SH", "000975.SH", "000976.SH", "000977.SH",
-    "000978.SH", "000979.SH", "000980.SH", "000981.SH", "000982.SH",
-    "000983.SH", "000984.SH", "000985.SH", "000986.SH", "000987.SH",
-    "000988.SH", "000989.SH", "000990.SH", "000991.SH", "000992.SH",
-    "000993.SH", "000994.SH", "000995.SH", "000996.SH", "000997.SH",
-    "000998.SH", "000999.SH",
-    "399001.SZ", "399002.SZ", "399003.SZ", "399004.SZ", "399005.SZ",
-    "399006.SZ", "399100.SZ", "399101.SZ", "399102.SZ", "399103.SZ",
-    "399106.SZ", "399107.SZ", "399108.SZ", "399300.SZ", "399301.SZ",
-    "399302.SZ", "399303.SZ", "399304.SZ", "399305.SZ", "399306.SZ",
-    "399307.SZ", "399308.SZ", "399309.SZ", "399310.SZ", "399311.SZ",
-    "399312.SZ", "399313.SZ", "399314.SZ", "399315.SZ", "399316.SZ",
-    "399317.SZ", "399318.SZ", "399319.SZ", "399320.SZ", "399321.SZ",
-    "399322.SZ", "399323.SZ", "399324.SZ", "399325.SZ", "399326.SZ",
-    "399327.SZ", "399328.SZ", "399329.SZ", "399330.SZ", "399331.SZ",
-    "399332.SZ", "399333.SZ", "399334.SZ", "399335.SZ", "399336.SZ",
-    "399337.SZ", "399338.SZ", "399339.SZ", "399340.SZ", "399341.SZ",
-    "399342.SZ", "399343.SZ", "399344.SZ", "399345.SZ", "399346.SZ",
-    "399347.SZ", "399348.SZ", "399349.SZ", "399350.SZ", "399351.SZ",
-    "399352.SZ", "399353.SZ", "399354.SZ", "399355.SZ", "399356.SZ",
-    "399357.SZ", "399358.SZ", "399359.SZ", "399360.SZ", "399361.SZ",
-    "399362.SZ", "399363.SZ", "399364.SZ", "399365.SZ", "399366.SZ",
-    "399367.SZ", "399368.SZ", "399369.SZ", "399370.SZ", "399371.SZ",
-    "399372.SZ", "399373.SZ", "399374.SZ", "399375.SZ", "399376.SZ",
-    "399377.SZ", "399378.SZ", "399379.SZ", "399380.SZ", "399381.SZ",
-    "399382.SZ", "399383.SZ", "399384.SZ", "399385.SZ", "399386.SZ",
-    "399387.SZ", "399388.SZ", "399389.SZ", "399390.SZ", "399391.SZ",
-    "399392.SZ", "399393.SZ", "399394.SZ", "399395.SZ", "399396.SZ",
-    "399397.SZ", "399398.SZ", "399399.SZ", "399400.SZ",
-    "899001.BJ", "899002.BJ", "899050.BJ",
-)
+def _load_index_codes_from_db() -> tuple[str, ...]:
+    """从 index_info 表动态加载所有指数代码，自动排除无资金流数据的指数。
+
+    不硬编码列表——通过 sync_index_constituents.py 新增的任何指数
+    都会自动被排除。
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT index_code FROM index_info")
+            codes = tuple(r[0] for r in cur.fetchall())
+        if not codes:
+            logging.warning("index_info 表为空，无法排除指数股票")
+        return codes
+    finally:
+        conn.close()
 
 # ── npm CLI output column → DB column mapping ─────────────────────────
 # Parsed dynamically from markdown header row; this is the canonical set.
@@ -245,15 +200,22 @@ def npm_to_ts_code(npm_code: str) -> str:
 def load_stocks() -> list[str]:
     """Load all A-share stock ts_codes from the stocks table, excluding indexes.
 
+    Index codes are dynamically loaded from index_info — any index added via
+    sync_index_constituents.py is automatically excluded.
+
     Returns ts_code strings sorted alphabetically (e.g. ["000001.SZ", ...]).
     """
+    index_codes = _load_index_codes_from_db()
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT ts_code FROM stocks WHERE ts_code NOT IN %s ORDER BY ts_code",
-                (INDEX_CODES,),
-            )
+            if index_codes:
+                cur.execute(
+                    "SELECT ts_code FROM stocks WHERE ts_code NOT IN %s ORDER BY ts_code",
+                    (index_codes,),
+                )
+            else:
+                cur.execute("SELECT ts_code FROM stocks ORDER BY ts_code")
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -558,17 +520,91 @@ def save_batch(date_str: str, rows: list[dict]) -> int:
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# Batch worker (runs in thread pool)
+# ═════════════════════════════════════════════════════════════════════════
+
+def _process_single_batch(
+    batch: list[str],
+    batch_num: int,
+    total_batches: int,
+    date_str: str,
+    stocks_slice: list[str],
+) -> dict:
+    """Process one batch end-to-end: npx → parse → validate → save.
+
+    Thread-safe: each call creates its own DB connection via save_batch().
+    Returns {"success": bool, "saved": int, "error": str|None}
+    """
+    rows = []
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            rows = run_npm_batch(batch, date_str)
+            if rows:
+                break
+        except Exception as e:
+            logging.warning(
+                f"Batch {batch_num}/{total_batches} "
+                f"attempt {attempt+1} failed: {e}"
+            )
+        if attempt < MAX_RETRIES:
+            backoff = random.uniform(*RETRY_BACKOFF)
+            logging.info(f"Retrying batch {batch_num} in {backoff:.0f}s...")
+            time.sleep(backoff)
+
+    if not rows:
+        first_code, last_code = stocks_slice[0], stocks_slice[-1]
+        err_msg = (
+            f"Batch {batch_num}/{total_batches} "
+            f"({first_code}…{last_code}) "
+            f"failed after {MAX_RETRIES + 1} attempts"
+        )
+        logging.error(err_msg)
+        return {"success": False, "saved": 0, "error": err_msg}
+
+    # Convert npm_code → ts_code for each row
+    for row in rows:
+        if "ts_code" not in row and "secu_code" in row:
+            row["ts_code"] = npm_to_ts_code(row["secu_code"])
+
+    # Validate: API may return previous trading day's data
+    sample_end_date = rows[0].get("end_date", "") if rows else ""
+    if sample_end_date and sample_end_date != date_str:
+        logging.warning(
+            f"Batch {batch_num}/{total_batches}: EndDate mismatch — "
+            f"requested {date_str}, API returned {sample_end_date}. Skipping."
+        )
+        return {"success": True, "saved": 0, "error": None}
+
+    # Save
+    try:
+        saved = save_batch(date_str, rows)
+        first_code, last_code = stocks_slice[0], stocks_slice[-1]
+        logging.info(
+            f"Batch {batch_num}/{total_batches}: "
+            f"{len(rows)} parsed, {saved} saved "
+            f"({first_code} … {last_code})"
+        )
+        return {"success": True, "saved": saved, "error": None}
+    except Exception as e:
+        err_msg = f"Batch {batch_num} save failed: {e}"
+        logging.error(err_msg)
+        return {"success": False, "saved": 0, "error": err_msg}
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # Orchestrator
 # ═════════════════════════════════════════════════════════════════════════
 
 def sync(date_str: str, batch_size: int = BATCH_SIZE,
+         max_workers: int = MAX_WORKERS,
          dry_run: bool = False) -> dict:
-    """Main sync: load stocks, batch-call npm CLI, save to DB.
+    """Main sync: load stocks, parallel batch-call npm CLI, save to DB.
 
     Args:
-        date_str:  Trade date YYYY-MM-DD
-        batch_size: Stocks per npm CLI call (default 50)
-        dry_run:    If True, print plan but don't execute
+        date_str:    Trade date YYYY-MM-DD
+        batch_size:  Stocks per npm CLI call (default 200)
+        max_workers: Parallel batch workers (default 4)
+        dry_run:     If True, print plan but don't execute
 
     Returns:
         {"date": str, "total_stocks": int, "batches": int,
@@ -576,7 +612,7 @@ def sync(date_str: str, batch_size: int = BATCH_SIZE,
          "total_saved": int, "elapsed_s": float, "errors": list[str]}
     """
     # 1. Load stock codes
-    logging.info(f"Loading stock codes from stocks table...")
+    logging.info("Loading stock codes from stocks table...")
     if dry_run:
         stocks = ["000001.SZ", "000002.SZ", "600519.SH"]  # sample for dry-run
     else:
@@ -591,11 +627,11 @@ def sync(date_str: str, batch_size: int = BATCH_SIZE,
     total_batches = math.ceil(len(npm_codes) / batch_size)
 
     logging.info(f"Total stocks: {total_stocks}, batch size: {batch_size}, "
-                 f"batches: {total_batches}")
+                 f"batches: {total_batches}, workers: {max_workers}")
 
     if dry_run:
         logging.info(f"[DRY RUN] Would run {total_batches} batches "
-                     f"(~{total_batches * (BATCH_DELAY_BASE + 2):.0f}s)")
+                     f"with {max_workers} workers")
         for i in range(0, min(3, len(npm_codes)), 1):
             batch = npm_codes[i:i + batch_size]
             logging.info(f"[DRY RUN] Batch 1: npx {NPM_PACKAGE} asfund "
@@ -604,84 +640,40 @@ def sync(date_str: str, batch_size: int = BATCH_SIZE,
                 "batches": total_batches, "total_saved": 0,
                 "mode": "dry_run"}
 
-    # 2. Run batches
+    # 2. Prepare batch tasks
+    batch_tasks = []
+    for batch_idx in range(total_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, len(npm_codes))
+        batch_tasks.append((
+            npm_codes[start:end],
+            batch_idx + 1,
+            total_batches,
+            date_str,
+            stocks[start:end],
+        ))
+
+    # 3. Run batches in parallel
     success_batches = 0
     fail_batches = 0
     total_saved = 0
     errors = []
-
     start_time = time.time()
 
-    for batch_idx in range(total_batches):
-        start = batch_idx * batch_size
-        end = min(start + batch_size, len(npm_codes))
-        batch = npm_codes[start:end]
-        batch_num = batch_idx + 1
-
-        # Try with retries
-        rows = []
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                rows = run_npm_batch(batch, date_str)
-                if rows:
-                    break
-            except Exception as e:
-                logging.warning(f"Batch {batch_num}/{total_batches} "
-                                f"attempt {attempt+1} failed: {e}")
-            if attempt < MAX_RETRIES:
-                backoff = random.uniform(*RETRY_BACKOFF)
-                logging.info(f"Retrying batch {batch_num} in {backoff:.0f}s...")
-                time.sleep(backoff)
-
-        if not rows:
-            fail_batches += 1
-            first_code = stocks[start] if isinstance(stocks[start], str) else stocks[start]
-            last_code = stocks[end - 1] if isinstance(stocks[end - 1], str) else stocks[end - 1]
-            err_msg = (f"Batch {batch_num}/{total_batches} "
-                       f"({first_code}…{last_code}) "
-                       f"failed after {MAX_RETRIES + 1} attempts")
-            errors.append(err_msg)
-            logging.error(err_msg)
-            continue
-
-        # Convert npm_code → ts_code for each row
-        for row in rows:
-            if "ts_code" not in row and "secu_code" in row:
-                row["ts_code"] = npm_to_ts_code(row["secu_code"])
-
-        # Validate: API may return previous trading day's data for non-trading days
-        # (weekends, holidays). Check EndDate matches requested date.
-        sample_end_date = rows[0].get("end_date", "") if rows else ""
-        if sample_end_date and sample_end_date != date_str:
-            logging.warning(
-                f"Batch {batch_num}/{total_batches}: EndDate mismatch — "
-                f"requested {date_str}, API returned {sample_end_date}. "
-                f"Non-trading day, skipping."
-            )
-            continue
-
-        # Save this batch immediately
-        try:
-            saved = save_batch(date_str, rows)
-            total_saved += saved
-            success_batches += 1
-            first_code = stocks[start] if isinstance(stocks[start], str) else stocks[start]
-            last_code = stocks[end - 1] if isinstance(stocks[end - 1], str) else stocks[end - 1]
-            logging.info(
-                f"Batch {batch_num}/{total_batches}: "
-                f"{len(rows)} parsed, {saved} saved "
-                f"({first_code} … {last_code})"
-            )
-        except Exception as e:
-            fail_batches += 1
-            err_msg = f"Batch {batch_num} save failed: {e}"
-            errors.append(err_msg)
-            logging.error(err_msg)
-
-        # Inter-batch delay (except after last batch)
-        if batch_num < total_batches:
-            delay = BATCH_DELAY_BASE + random.uniform(0, BATCH_DELAY_JITTER)
-            time.sleep(delay)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_process_single_batch, *task): task[1]
+            for task in batch_tasks
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result["success"]:
+                success_batches += 1
+                total_saved += result["saved"]
+            else:
+                fail_batches += 1
+                if result.get("error"):
+                    errors.append(result["error"])
 
     elapsed = time.time() - start_time
     logging.info(
@@ -713,6 +705,8 @@ def main():
                    help="交易日期 YYYY-MM-DD（默认: 昨天，即上个交易日）")
     p.add_argument("--batch-size", type=int, default=BATCH_SIZE,
                    help=f"每批股票数量（默认 {BATCH_SIZE}）")
+    p.add_argument("--workers", type=int, default=MAX_WORKERS,
+                   help=f"并发线程数（默认 {MAX_WORKERS}）")
     p.add_argument("--dry-run", action="store_true",
                    help="仅打印计划，不实际执行")
     p.add_argument("--pg-url", default=None,
@@ -772,6 +766,7 @@ def main():
 
     # 2. Run sync
     result = sync(date_str=date_str, batch_size=args.batch_size,
+                  max_workers=args.workers,
                   dry_run=args.dry_run)
 
     # 3. Report
