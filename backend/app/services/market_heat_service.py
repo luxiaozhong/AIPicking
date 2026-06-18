@@ -1138,6 +1138,279 @@ class MarketHeatService:
         await db.commit()
         return results
 
+    # ── 市场压力指数 ────────────────────────────────────────
+
+    @staticmethod
+    def _stress_score_to_level(total_score: int) -> str:
+        """压力指数等级：越高越恐慌"""
+        if total_score >= 80:
+            return "极度恐慌"
+        elif total_score >= 60:
+            return "恐慌"
+        elif total_score >= 40:
+            return "偏紧"
+        elif total_score >= 20:
+            return "正常"
+        return "极度放松"
+
+    @staticmethod
+    async def _calc_stress_decline(db: AsyncSession, date: str) -> float:
+        """1. 指数跌幅 (0-25): 三大指数加权跌幅，跌幅越大分越高"""
+        INDEX_CODES = ["000001.SH", "399001.SZ", "399006.SZ"]
+        WEIGHTS = {"000001.SH": 0.4, "399001.SZ": 0.35, "399006.SZ": 0.25}
+
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
+            * 100
+        )
+
+        stmt = (
+            select(daily_alias.c.ts_code, change_expr.label("change_pct"))
+            .select_from(daily_alias)
+            .outerjoin(
+                prev_alias,
+                (daily_alias.c.ts_code == prev_alias.c.ts_code)
+                & (prev_alias.c.trade_date == (
+                    select(func.max(Daily.__table__.c.trade_date))
+                    .where(
+                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                        & (Daily.__table__.c.trade_date < date)
+                    )
+                    .scalar_subquery()
+                )),
+            )
+            .where(
+                daily_alias.c.trade_date == date,
+                daily_alias.c.ts_code.in_(INDEX_CODES),
+            )
+        )
+        result = await db.execute(stmt)
+        rows = {r.ts_code: r.change_pct for r in result.all() if r.change_pct is not None}
+
+        if not rows:
+            return 12.5  # 无数据 → 中性
+
+        # 加权平均跌幅
+        weighted = 0.0
+        total_weight = 0.0
+        for code, change in rows.items():
+            w = WEIGHTS.get(code, 0.33)
+            weighted += max(0, -change) * w  # 只计跌幅，涨幅=0
+            total_weight += w
+
+        avg_decline = weighted / total_weight if total_weight > 0 else 0
+
+        # 映射：0%跌幅→0分, 3%+跌幅→25分
+        return min(25.0, round(avg_decline / 3.0 * 25, 1))
+
+    @staticmethod
+    async def _calc_stress_volatility(db: AsyncSession, date: str) -> float:
+        """2. 波动率 (0-25): 上证指数近10日波动率（标准差）"""
+        from sqlalchemy import text as sa_text
+
+        # 取上证指数近10日数据（含当日之前的10个交易日）
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
+            * 100
+        )
+
+        stmt = (
+            select(change_expr.label("change_pct"))
+            .select_from(daily_alias)
+            .outerjoin(
+                prev_alias,
+                (daily_alias.c.ts_code == prev_alias.c.ts_code)
+                & (prev_alias.c.trade_date == (
+                    select(func.max(Daily.__table__.c.trade_date))
+                    .where(
+                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                        & (Daily.__table__.c.trade_date < daily_alias.c.trade_date)
+                    )
+                    .scalar_subquery()
+                )),
+            )
+            .where(
+                daily_alias.c.trade_date <= date,
+                daily_alias.c.ts_code == "000001.SH",
+            )
+            .order_by(daily_alias.c.trade_date.desc())
+            .limit(10)
+        )
+        result = await db.execute(stmt)
+        changes = [r.change_pct for r in result.all() if r.change_pct is not None]
+
+        if len(changes) < 3:
+            return 12.5  # 数据不足 → 中性
+
+        # 计算标准差
+        import statistics
+        std = statistics.stdev(changes)
+
+        # 映射：std=0.5%→5分, std=1.0%→12.5分, std=2.5%+→25分
+        if std >= 2.5:
+            return 25.0
+        elif std <= 0.5:
+            return max(0.0, round(std / 0.5 * 5.0, 1))
+        else:
+            # 线性插值 0.5→5, 2.5→25
+            return round(5.0 + (std - 0.5) / (2.5 - 0.5) * 20.0, 1)
+
+    @staticmethod
+    async def _calc_stress_limitdown(db: AsyncSession, date: str) -> float:
+        """3. 跌停潮 (0-25): 跌停个股占比，跌停越多分越高"""
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
+            * 100
+        )
+
+        stmt = (
+            select(
+                func.count().label("total"),
+                func.sum(case((change_expr <= -9.8, 1), else_=0)).label("limit_down"),
+            )
+            .select_from(daily_alias)
+            .outerjoin(
+                prev_alias,
+                (daily_alias.c.ts_code == prev_alias.c.ts_code)
+                & (prev_alias.c.trade_date == (
+                    select(func.max(Daily.__table__.c.trade_date))
+                    .where(
+                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                        & (Daily.__table__.c.trade_date < date)
+                    )
+                    .scalar_subquery()
+                )),
+            )
+            .where(
+                daily_alias.c.trade_date == date,
+                ~daily_alias.c.ts_code.like("%.IDX"),
+            )
+        )
+        result = await db.execute(stmt)
+        row = result.mappings().first()
+        if not row or (row.get("total", 0) or 0) == 0:
+            return 12.5
+
+        total = row["total"] or 1
+        limit_down = row["limit_down"] or 0
+        ratio = limit_down / total  # 0% - 100%
+
+        # 映射：0%→0分, 5%+→25分
+        return min(25.0, round(ratio / 0.05 * 25.0, 1))
+
+    @staticmethod
+    async def _calc_stress_breadth(db: AsyncSession, date: str) -> float:
+        """4. 下跌广度 (0-15): 下跌个股占比，占比越高分越高"""
+        stmt = select(
+            func.count().label("total"),
+            func.sum(case((Daily.close < Daily.open, 1), else_=0)).label("down_count"),
+        ).where(
+            Daily.trade_date == date,
+            ~Daily.ts_code.like("%.IDX"),
+        )
+        result = await db.execute(stmt)
+        row = result.mappings().first()
+        if not row or (row.get("total", 0) or 0) == 0:
+            return 7.5
+
+        total = row["total"] or 1
+        down_count = row["down_count"] or 0
+        ratio = down_count / total  # 0% - 100%
+
+        # 映射：30%(正常分化)→0分, 90%+(普跌)→15分
+        if ratio <= 0.30:
+            return 0.0
+        elif ratio >= 0.90:
+            return 15.0
+        else:
+            return round((ratio - 0.30) / (0.90 - 0.30) * 15.0, 1)
+
+    @staticmethod
+    async def _calc_stress_northbound(db: AsyncSession, date: str) -> float:
+        """5. 北向出逃 (0-10): 北向净流出规模，流出越大分越高"""
+        nb_stmt = select(DailyNorthboundFlow.__table__).where(
+            DailyNorthboundFlow.trade_date == date
+        )
+        nb_result = await db.execute(nb_stmt)
+        nb_row = nb_result.mappings().first()
+
+        if not nb_row or nb_row.get("total_net_yi") is None:
+            return 5.0  # 无数据 → 中性
+
+        net = nb_row["total_net_yi"]
+
+        # 映射：净流入>20亿→0分, 净流出>50亿→10分
+        if net >= 20:
+            return 0.0
+        elif net <= -50:
+            return 10.0
+        elif net <= 0:
+            # 0 到 -50：0→5→10
+            return round(5.0 + abs(net) / 50.0 * 5.0, 1)
+        else:
+            # 0 到 20：5→0
+            return round(5.0 - net / 20.0 * 5.0, 1)
+
+    @staticmethod
+    async def save_stress_index(db: AsyncSession, trade_date: str) -> dict:
+        """计算并持久化指定交易日市场压力指数（幂等）"""
+        from ..models.stock_tables import DailyMarketStress
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        decline = await MarketHeatService._calc_stress_decline(db, trade_date)
+        volatility = await MarketHeatService._calc_stress_volatility(db, trade_date)
+        limitdown = await MarketHeatService._calc_stress_limitdown(db, trade_date)
+        breadth = await MarketHeatService._calc_stress_breadth(db, trade_date)
+        northbound = await MarketHeatService._calc_stress_northbound(db, trade_date)
+
+        scores = {
+            "decline": decline,
+            "volatility": volatility,
+            "limitdown": limitdown,
+            "breadth": breadth,
+            "northbound": northbound,
+        }
+        total_score = round(sum(scores.values()))
+        level = MarketHeatService._stress_score_to_level(total_score)
+
+        stmt = pg_insert(DailyMarketStress.__table__).values(
+            trade_date=trade_date,
+            score=total_score,
+            level=level,
+            decline_score=decline,
+            volatility_score=volatility,
+            limitdown_score=limitdown,
+            breadth_score=breadth,
+            northbound_score=northbound,
+        ).on_conflict_do_update(
+            constraint="uq_market_stress_date",
+            set_=dict(
+                score=total_score,
+                level=level,
+                decline_score=decline,
+                volatility_score=volatility,
+                limitdown_score=limitdown,
+                breadth_score=breadth,
+                northbound_score=northbound,
+            ),
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+        return {"score": total_score, "level": level, "dimensions": scores}
+
     @staticmethod
     async def get_board_temperatures(
         db: AsyncSession, trade_date: Optional[str] = None
