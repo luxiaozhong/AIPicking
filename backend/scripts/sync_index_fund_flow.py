@@ -548,7 +548,7 @@ def save_snapshots(date_str: str, index_code: str, snapshot_rows: list[dict]) ->
     All rows share the same snapshot_time (now).
     The index_code is stored to distinguish snapshots from different indices.
 
-    Auto-cleans snapshots older than 3 days, preserving recent data for replay.
+    Auto-cleans snapshots older than 30 days, preserving recent data for replay.
     """
     if not snapshot_rows:
         return 0
@@ -576,8 +576,8 @@ def save_snapshots(date_str: str, index_code: str, snapshot_rows: list[dict]) ->
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # 保留最近 3 天数据，清理更早的快照
-            cutoff = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
+            # 保留最近 30 天数据，清理更早的快照
+            cutoff = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
             cur.execute(
                 "SELECT 1 FROM intraday_fund_snapshot WHERE trade_date < %s LIMIT 1",
                 (cutoff,),
