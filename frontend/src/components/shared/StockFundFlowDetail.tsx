@@ -3,6 +3,8 @@ import { Card, Row, Col, Spin, Empty, Space, Tag, Typography, Modal } from 'antd
 import ReactECharts from 'echarts-for-react';
 import { fundFlowService } from '@/services/fundFlowService';
 import type { StockTrend, StockTrendDay, StockIntraday } from '@/services/fundFlowService';
+import stockService from '@/services/stockService';
+import type { KLineItem } from '@/types/stock';
 
 const { Text, Title } = Typography;
 
@@ -51,22 +53,97 @@ function buildCumTrendChart(days: StockTrendDay[]) {
   };
 }
 
-function buildMainFlowTrendChart(days: StockTrendDay[]) {
+function buildMainFlowTrendChart(days: StockTrendDay[], klineDays: KLineItem[] = []) {
   const dates = days.map((d) => d.trade_date);
-  return {
-    tooltip: { trigger: 'axis' as const },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 75 },
-    xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-    yAxis: { type: 'value' as const, axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' }, splitLine: { lineStyle: { type: 'dashed', color: '#eee' } } },
-    series: [
-      {
-        name: '主力净流入', type: 'bar' as const,
-        data: days.map((d) => ({ value: d.main_net_flow, itemStyle: { color: d.main_net_flow >= 0 ? RED_COLOR : GREEN_COLOR } })),
+
+  // 构建日期→K线数据映射
+  const klineMap: Record<string, KLineItem> = {};
+  for (const k of klineDays) {
+    klineMap[k.trade_date] = k;
+  }
+
+  // 为每个日期匹配 K 线数据（[open, close, low, high]）
+  const klineData: (number[] | null)[] = dates.map((d) => {
+    const k = klineMap[d];
+    return k ? [k.open, k.close, k.low, k.high] : null;
+  });
+
+  const hasKline = klineData.some((k) => k !== null);
+
+  const series: any[] = [
+    {
+      name: '主力净流入', type: 'bar' as const,
+      data: days.map((d) => ({ value: d.main_net_flow, itemStyle: { color: d.main_net_flow >= 0 ? RED_COLOR : GREEN_COLOR } })),
+    },
+    { name: '主力流入', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_in_flow), itemStyle: { color: RED_COLOR }, lineStyle: { color: RED_COLOR, width: 1, type: 'dashed' as const } },
+    { name: '主力流出', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_out_flow), itemStyle: { color: GREEN_COLOR }, lineStyle: { color: GREEN_COLOR, width: 1, type: 'dashed' as const } },
+  ];
+
+  // yAxis：有K线时双轴，无K线时保持原始对象格式（向后兼容）
+  const yAxis: any = hasKline
+    ? [
+        { type: 'value' as const, axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' }, splitLine: { lineStyle: { type: 'dashed', color: '#eee' } } },
+        { type: 'value' as const, name: '股价(元)', nameTextStyle: { fontSize: 10 }, axisLabel: { formatter: (v: number) => v.toFixed(1) }, splitLine: { show: false }, scale: true },
+      ]
+    : { type: 'value' as const, axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' }, splitLine: { lineStyle: { type: 'dashed', color: '#eee' } } };
+
+  if (hasKline) {
+    series.push({
+      name: 'K线',
+      type: 'candlestick' as const,
+      yAxisIndex: 1,
+      data: klineData,
+      itemStyle: {
+        color: RED_COLOR,
+        color0: GREEN_COLOR,
+        borderColor: RED_COLOR,
+        borderColor0: GREEN_COLOR,
       },
-      { name: '主力流入', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_in_flow), itemStyle: { color: RED_COLOR }, lineStyle: { color: RED_COLOR, width: 1, type: 'dashed' as const } },
-      { name: '主力流出', type: 'line' as const, smooth: true, symbol: 'none' as const, data: days.map((d) => d.main_out_flow), itemStyle: { color: GREEN_COLOR }, lineStyle: { color: GREEN_COLOR, width: 1, type: 'dashed' as const } },
-    ],
+      barWidth: '60%',
+    });
+  }
+
+  // tooltip formatter：防御性包装，避免渲染崩溃
+  const tooltipFormatter = (params: any) => {
+    try {
+      const paramList = Array.isArray(params) ? params : [params];
+      if (paramList.length === 0) return '';
+      const date = paramList[0]?.axisValue || '';
+      let html = `<strong>${date}</strong><br/>`;
+      for (const p of paramList) {
+        if (!p) continue;
+        if (p.seriesName === 'K线') {
+          const k = Array.isArray(p.data) ? p.data : [];
+          if (k.length >= 4) {
+            const chg = k[1] - k[0];
+            const pct = k[0] !== 0 ? ((chg / k[0]) * 100).toFixed(2) : '0.00';
+            const sign = chg >= 0 ? '+' : '';
+            html += `📈 开${k[0]} 收${k[1]} 低${k[2]} 高${k[3]} 涨跌 <span style="color:${chg >= 0 ? RED_COLOR : GREEN_COLOR}">${sign}${chg.toFixed(2)}(${sign}${pct}%)</span><br/>`;
+          }
+        } else {
+          const val = typeof p.value === 'number' ? p.value : (p.value?.value ?? 0);
+          if (typeof val === 'number' && !isNaN(val)) {
+            html += `${p.marker} ${p.seriesName}: ${(val / 1e8).toFixed(2)}亿<br/>`;
+          }
+        }
+      }
+      return html;
+    } catch {
+      return '';
+    }
+  };
+
+  return {
+    tooltip: {
+      trigger: 'axis' as const,
+      ...(hasKline ? { axisPointer: { type: 'cross' as const } } : {}),
+      ...(hasKline ? { formatter: tooltipFormatter } : {}),
+    },
+    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    grid: { left: 60, right: hasKline ? 60 : 20, top: 10, bottom: 75 },
+    xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
+    yAxis,
+    series,
   };
 }
 
@@ -87,18 +164,21 @@ const StockFundFlowDetail: React.FC<StockFundFlowDetailProps> = ({
 }) => {
   const [data, setData] = useState<StockTrend | null>(null);
   const [intraday, setIntraday] = useState<StockIntraday | null>(null);
+  const [klineData, setKlineData] = useState<KLineItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const fetchTrend = useCallback(async () => {
     if (!tsCode) return;
     setLoading(true);
     try {
-      const [trendResult, intradayResult] = await Promise.all([
+      const [trendResult, intradayResult, klineResult] = await Promise.all([
         fundFlowService.getStockTrend(tsCode, days),
         fundFlowService.getStockIntraday(tsCode),
+        stockService.getKLine(tsCode, days).then((d) => d.items).catch(() => [] as KLineItem[]),
       ]);
       setData(trendResult);
       setIntraday(intradayResult);
+      setKlineData(klineResult);
     } catch {
       setData(null);
     } finally {
@@ -292,7 +372,7 @@ const StockFundFlowDetail: React.FC<StockFundFlowDetailProps> = ({
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={24}>
               <Card size="small" title="主力资金流趋势">
-                <ReactECharts option={buildMainFlowTrendChart(data.days)} style={{ height: 300 }} />
+                <ReactECharts option={buildMainFlowTrendChart(data.days, klineData)} style={{ height: 360 }} />
               </Card>
             </Col>
           </Row>
