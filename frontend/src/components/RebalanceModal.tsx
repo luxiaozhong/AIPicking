@@ -103,7 +103,7 @@ export default function RebalanceModal({
     return map;
   }, [holdings, top3]);
 
-  // Sell rows: ALL holdings, top3 ones default unchecked
+  // Sell rows: ALL holdings, all default unchecked
   const initialSellRows: SellRow[] = useMemo(() => {
     const topCodes = new Set(top3.map((r) => r.ts_code));
     return holdings.map((h) => {
@@ -114,7 +114,7 @@ export default function RebalanceModal({
         stock_name: h.stock_name,
         holding_shares: h.shares,
         sell_shares: h.shares,
-        checked: !inTop3,  // unchecked if in top3 (keep by default)
+        checked: false,
         isTop3: inTop3,
       };
     });
@@ -139,7 +139,7 @@ export default function RebalanceModal({
           stock_name: r.name,
           suggested_shares: Math.max(suggested, minLot),
           buy_shares: Math.max(suggested, minLot),
-          checked: true,
+          checked: false,
           isCustom: false,
         };
       });
@@ -207,7 +207,7 @@ export default function RebalanceModal({
       stock_name: stock.name,
       suggested_shares: Math.max(suggested, minLot),
       buy_shares: Math.max(suggested, minLot),
-      checked: true,
+      checked: false,
       isCustom: true,
     };
     setCustomBuyRows((prev) => [...prev, newRow]);
