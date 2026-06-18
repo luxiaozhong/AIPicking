@@ -16,6 +16,7 @@ export interface KLineItem {
   high: number;
   low: number;
   close: number;
+  pre_close: number | null;
   vol: number;
   amount: number;
 }

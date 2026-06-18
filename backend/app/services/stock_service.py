@@ -35,7 +35,7 @@ class StockService:
         stmt = (
             select(
                 Daily.trade_date, Daily.open, Daily.high, Daily.low,
-                Daily.close, Daily.vol, Daily.amount
+                Daily.close, Daily.pre_close, Daily.vol, Daily.amount
             )
             .where(Daily.ts_code == ts_code)
             .order_by(Daily.trade_date.desc())
@@ -46,7 +46,8 @@ class StockService:
         items = [
             {
                 "trade_date": r.trade_date, "open": r.open, "high": r.high,
-                "low": r.low, "close": r.close, "vol": r.vol, "amount": r.amount,
+                "low": r.low, "close": r.close, "pre_close": r.pre_close,
+                "vol": r.vol, "amount": r.amount,
             }
             for r in reversed(rows)
         ]

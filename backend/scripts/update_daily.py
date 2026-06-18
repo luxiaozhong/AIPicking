@@ -346,8 +346,11 @@ def upsert_daily(record):
         INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
-            open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-            close = EXCLUDED.close, pre_close = EXCLUDED.pre_close,
+            open = CASE WHEN EXCLUDED.open > 0 THEN EXCLUDED.open ELSE daily.open END,
+            high = CASE WHEN EXCLUDED.high > 0 THEN EXCLUDED.high ELSE daily.high END,
+            low = CASE WHEN EXCLUDED.low > 0 THEN EXCLUDED.low ELSE daily.low END,
+            close = CASE WHEN EXCLUDED.close > 0 THEN EXCLUDED.close ELSE daily.close END,
+            pre_close = CASE WHEN EXCLUDED.pre_close > 0 THEN EXCLUDED.pre_close ELSE daily.pre_close END,
             vol = EXCLUDED.vol, amount = EXCLUDED.amount,
             adj_close = EXCLUDED.adj_close
     """, record)
@@ -362,8 +365,11 @@ def bulk_upsert(records):
         INSERT INTO daily (ts_code, trade_date, open, high, low, close, pre_close, vol, amount, adj_close)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (ts_code, trade_date) DO UPDATE SET
-            open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-            close = EXCLUDED.close, pre_close = EXCLUDED.pre_close,
+            open = CASE WHEN EXCLUDED.open > 0 THEN EXCLUDED.open ELSE daily.open END,
+            high = CASE WHEN EXCLUDED.high > 0 THEN EXCLUDED.high ELSE daily.high END,
+            low = CASE WHEN EXCLUDED.low > 0 THEN EXCLUDED.low ELSE daily.low END,
+            close = CASE WHEN EXCLUDED.close > 0 THEN EXCLUDED.close ELSE daily.close END,
+            pre_close = CASE WHEN EXCLUDED.pre_close > 0 THEN EXCLUDED.pre_close ELSE daily.pre_close END,
             vol = EXCLUDED.vol, amount = EXCLUDED.amount,
             adj_close = EXCLUDED.adj_close
     """, records)

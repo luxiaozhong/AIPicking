@@ -115,10 +115,17 @@ function buildMainFlowTrendChart(days: StockTrendDay[], klineDays: KLineItem[] =
         if (p.seriesName === 'K线') {
           const k = Array.isArray(p.data) ? p.data : [];
           if (k.length >= 4) {
-            const chg = k[1] - k[0];
-            const pct = k[0] !== 0 ? ((chg / k[0]) * 100).toFixed(2) : '0.00';
+            // 从原始数据中获取 pre_close 用于计算日内涨跌幅
+            const date = paramList[0]?.axisValue || '';
+            const kItem = klineMap[date];
+            const preClose = kItem?.pre_close;
+            const chg = preClose != null ? (k[1] - preClose) : (k[1] - k[0]);
+            const base = preClose != null ? preClose : k[0];
+            const pct = base !== 0 ? ((chg / base) * 100).toFixed(2) : '0.00';
             const sign = chg >= 0 ? '+' : '';
-            html += `📈 开${k[0]} 收${k[1]} 低${k[2]} 高${k[3]} 涨跌 <span style="color:${chg >= 0 ? RED_COLOR : GREEN_COLOR}">${sign}${chg.toFixed(2)}(${sign}${pct}%)</span><br/>`;
+            html += `📈 开${k[0]} 收${k[1]} 低${k[2]} 高${k[3]}`;
+            if (preClose != null) html += ` 昨收${preClose}`;
+            html += ` 涨跌 <span style="color:${chg >= 0 ? RED_COLOR : GREEN_COLOR}">${sign}${chg.toFixed(2)}(${sign}${pct}%)</span><br/>`;
           }
         } else {
           const val = typeof p.value === 'number' ? p.value : (p.value?.value ?? 0);
