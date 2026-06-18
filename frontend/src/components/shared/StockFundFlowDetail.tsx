@@ -62,13 +62,13 @@ function buildMainFlowTrendChart(days: StockTrendDay[], klineDays: KLineItem[] =
     klineMap[k.trade_date] = k;
   }
 
-  // 为每个日期匹配 K 线数据（[open, close, low, high]）
-  const klineData: (number[] | null)[] = dates.map((d) => {
+  // 为每个日期匹配 K 线数据（[open, close, low, high]），无数据用 '-' 避免 ECharts 蜡烛图崩溃
+  const klineData: (number[] | string)[] = dates.map((d) => {
     const k = klineMap[d];
-    return k ? [k.open, k.close, k.low, k.high] : null;
+    return k ? [k.open, k.close, k.low, k.high] : '-';
   });
 
-  const hasKline = klineData.some((k) => k !== null);
+  const hasKline = klineData.some((k) => k !== '-');
 
   const series: any[] = [
     {
