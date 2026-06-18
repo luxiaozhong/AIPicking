@@ -24,6 +24,7 @@ import IndexMACD from '@/pages/IndexMACD';
 import StrategyTracker from '@/pages/StrategyTracker';
 import LoginPage from '@/pages/LoginPage';
 import UserManagement from '@/pages/UserManagement';
+import Watchlist from '@/pages/Watchlist';
 import EducationPage from '@/pages/EducationPage';
 import EducationDetailPage from '@/pages/EducationDetailPage';
 import NotFound from '@/pages/NotFound';
@@ -220,6 +221,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <BacktestDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/watchlist"
+          element={
+            <ProtectedRoute>
+              <Watchlist />
             </ProtectedRoute>
           }
         />

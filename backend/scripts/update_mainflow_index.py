@@ -249,11 +249,18 @@ def upsert_index_info(conn, eff_date: str) -> None:
 
 
 def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
-    """幂等写入成分股到 index_constituents"""
+    """写入成分股到 index_constituents（先删旧再插新，只保留最新一批）"""
     if not stocks:
         return 0
 
     with conn.cursor() as cur:
+        # 删除该指数所有旧记录，确保表中只有最新一批成分股
+        cur.execute(
+            "DELETE FROM index_constituents WHERE index_code = %s",
+            (INDEX_CODE,),
+        )
+        logging.info("已删除 %s 旧成分股记录", cur.rowcount)
+
         psycopg2.extras.execute_values(
             cur,
             """

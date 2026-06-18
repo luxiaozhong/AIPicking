@@ -54,6 +54,15 @@ async def startup_event():
     from .services.education_service import EducationService
     EducationService.instance().load()
 
+    # 种子 900002 临时观察指数元数据（幂等）
+    from .services.watchlist_service import ensure_index_info
+    session = await async_session()
+    try:
+        await ensure_index_info(session)
+        print("临时观察指数 900002 元数据已就绪")
+    finally:
+        await session.close()
+
 
 @app.get("/")
 async def root():
@@ -73,7 +82,7 @@ async def health_check():
 
 
 # 导入并注册 API 路由
-from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments, financials, trade_sims, market_heat, fund_flow, rebalance, strategy_tracker, paper_trade
+from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments, financials, trade_sims, market_heat, fund_flow, rebalance, strategy_tracker, paper_trade, watchlist
 app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["strategies"])
 app.include_router(ratings.router, prefix="/api/v1/strategies", tags=["ratings"])
 app.include_router(comments.router, prefix="/api/v1/strategies", tags=["comments"])
@@ -89,6 +98,7 @@ app.include_router(education.router, prefix="/api/v1/education", tags=["educatio
 app.include_router(financials.router, prefix="/api/v1", tags=["financials"])
 app.include_router(market_heat.router, prefix="/api/v1/market-heat", tags=["market-heat"])
 app.include_router(fund_flow.router, prefix="/api/v1/fund-flow", tags=["fund-flow"])
+app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["watchlist"])
 app.include_router(rebalance.router, prefix="/api/v1/rebalance", tags=["调仓回测"])
 app.include_router(strategy_tracker.router, prefix="/api/v1/strategy-tracker", tags=["策略跟踪"])
 app.include_router(paper_trade.router, prefix="/api/v1/paper-trade", tags=["模拟盘"])
