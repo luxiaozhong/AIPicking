@@ -41,7 +41,7 @@ _LAST_DATE_CACHE: dict = {}
 
 def _index_ts_codes_subq():
     """返回所有指数 ts_code 的子查询，用于排除指数资金流记录"""
-    return select(Stock.__table__.c.ts_code).where(Stock.__table__.c.type == "index")
+    return select(IndexInfo.ts_code).where(IndexInfo.ts_code.isnot(None))
 
 
 class FundFlowService:

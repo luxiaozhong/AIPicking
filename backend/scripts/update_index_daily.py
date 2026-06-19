@@ -44,9 +44,7 @@ for _env_file in (".env", ".env.production"):
     if _path.exists():
         load_dotenv(_path, override=True)
 
-# 确保 backend 在路径中，以便导入 pinyin_utils
 sys.path.insert(0, str(_ENV_DIR))
-from app.utils.pinyin_utils import get_pinyin_initials
 
 # ── 配置 ────────────────────────────────────────────────────────────────────
 
@@ -193,33 +191,37 @@ def count_daily(trade_date: str) -> int:
     return cnt
 
 
-# ── stocks 表 —— 幂等写入指数记录 ──────────────────────────────────────────
+# ── index_info 表 —— 幂等写入指数记录 ──────────────────────────────────────────
 
-def ensure_stocks_entries():
-    """确保 4 个指数记录存在于 stocks 表（INSERT ON CONFLICT 幂等）"""
+def ensure_index_info_entries():
+    """确保 INDICES 中的指数记录存在于 index_info 表（INSERT ON CONFLICT 幂等）"""
     conn = get_conn()
     cur = conn.cursor()
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for idx in INDICES:
-        initials = get_pinyin_initials(idx["name"])
         cur.execute("""
-            INSERT INTO stocks (ts_code, symbol, name, market, list_date, pinyin_initials,
-                                type, industry_l1, industry_l2, industry_l3, region,
-                                concepts, total_shares, float_shares, update_time)
-            VALUES (%s, %s, %s, %s, %s, %s, 'index', '', '', '', '', '', 0, 0, %s)
-            ON CONFLICT (ts_code) DO UPDATE SET
-                type = EXCLUDED.type,
-                name = EXCLUDED.name,
-                symbol = EXCLUDED.symbol,
-                market = EXCLUDED.market,
-                list_date = EXCLUDED.list_date,
-                pinyin_initials = EXCLUDED.pinyin_initials,
-                update_time = EXCLUDED.update_time
-        """, (idx["ts_code"], idx["symbol"], idx["name"], idx["market"],
-              idx["list_date"], initials, now_str))
+            INSERT INTO index_info (index_code, ts_code, index_name, full_name, publisher, data_source)
+            VALUES (%s, %s, %s, %s, %s, 'update_index_daily.py')
+            ON CONFLICT (index_code) DO UPDATE SET
+                ts_code = EXCLUDED.ts_code,
+                index_name = EXCLUDED.index_name,
+                full_name = EXCLUDED.full_name,
+                publisher = EXCLUDED.publisher,
+                last_sync_date = CURRENT_DATE
+        """, (
+            idx["ts_code"].replace(".SH", "").replace(".SZ", ""),  # index_code（无后缀）
+            idx["ts_code"],       # ts_code（带后缀）
+            idx["name"],          # index_name
+            idx["name"],          # full_name（与 index_name 相同，如"上证指数"）
+            _publisher(idx["market"]),
+        ))
     conn.commit()
     conn.close()
-    print(f"✅ stocks 表指数记录已就绪（{len(INDICES)} 条）")
+    print(f"✅ index_info 表指数记录已就绪（{len(INDICES)} 条）")
+
+
+def _publisher(market: str) -> str:
+    """根据 market 推断编制机构"""
+    return {"SH": "上证", "SZ": "深证"}.get(market, "中证")
 
 
 # ── 历史 K 线接口（指数专用：读取 .day 而非 .qfqday）──────────────────────
@@ -413,7 +415,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
         _PG_PARAMS = _parse_pg_url(pg_url)
 
     # 0. 确保 stocks 表有指数记录
-    ensure_stocks_entries()
+    ensure_index_info_entries()
 
     now = datetime.now()
     today_str = now.strftime("%Y%m%d")

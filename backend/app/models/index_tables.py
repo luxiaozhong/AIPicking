@@ -30,6 +30,8 @@ class IndexInfo(BaseModel):
 
     index_code = Column(String(20), unique=True, nullable=False, index=True,
                         comment="指数代码，如 980080（国证成长100）")
+    ts_code = Column(String(20), nullable=True, unique=True,
+                     comment="带交易所后缀的 ts_code，如 980080.SH，用于与 daily_stock_fund_flow 等表关联")
     index_name = Column(String(50), nullable=False,
                         comment="指数简称，如 成长100")
     full_name = Column(String(100),

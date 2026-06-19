@@ -17,9 +17,7 @@ import psycopg2.extras
 import requests
 from dotenv import load_dotenv
 
-# 确保 backend 在路径中，以便导入 pinyin_utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app.utils.pinyin_utils import get_pinyin_initials
 
 # 加载 .env
 _ENV_DIR = Path(__file__).resolve().parent.parent  # backend/
@@ -68,30 +66,24 @@ def _fmt_date(d: str) -> str:
 
 # ── Step 1: 插入 stocks 记录 ──
 
-def insert_stock_entry():
-    """幂等插入科创100指数到 stocks 表"""
+def insert_index_info_entry():
+    """幂等插入科创100指数到 index_info 表"""
     conn = get_conn()
     cur = conn.cursor()
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    initials = get_pinyin_initials(KC100["name"])
+    index_code = KC100["ts_code"].replace(".SH", "").replace(".SZ", "")
     cur.execute("""
-        INSERT INTO stocks (ts_code, symbol, name, market, list_date, pinyin_initials,
-                            type, industry_l1, industry_l2, industry_l3, region,
-                            concepts, total_shares, float_shares, update_time)
-        VALUES (%s, %s, %s, %s, %s, %s, 'index', '', '', '', '', '', 0, 0, %s)
-        ON CONFLICT (ts_code) DO UPDATE SET
-            type = EXCLUDED.type,
-            name = EXCLUDED.name,
-            symbol = EXCLUDED.symbol,
-            market = EXCLUDED.market,
-            list_date = EXCLUDED.list_date,
-            pinyin_initials = EXCLUDED.pinyin_initials,
-            update_time = EXCLUDED.update_time
-    """, (KC100["ts_code"], KC100["symbol"], KC100["name"], KC100["market"],
-          KC100["list_date"], initials, now_str))
+        INSERT INTO index_info (index_code, ts_code, index_name, full_name, publisher, data_source)
+        VALUES (%s, %s, %s, %s, '上证', 'add_kc100_index.py')
+        ON CONFLICT (index_code) DO UPDATE SET
+            ts_code = EXCLUDED.ts_code,
+            index_name = EXCLUDED.index_name,
+            full_name = EXCLUDED.full_name,
+            publisher = EXCLUDED.publisher,
+            last_sync_date = CURRENT_DATE
+    """, (index_code, KC100["ts_code"], KC100["name"], KC100["name"]))
     conn.commit()
     conn.close()
-    print(f"✅ stocks 表已插入 {KC100['ts_code']} {KC100['name']}")
+    print(f"✅ index_info 表已插入 {KC100['ts_code']} {KC100['name']}")
 
 
 # ── Step 2: 从腾讯API拉取历史日K线 ──
@@ -244,7 +236,7 @@ def main():
 
     # 1. 插入 stocks
     print("Step 1/4: 插入 stocks 表记录...")
-    insert_stock_entry()
+    insert_index_info_entry()
 
     # 2. 拉取历史日K线（过去一年：2025-06-13 ~ 2026-06-13）
     end_date = datetime.now().strftime("%Y-%m-%d")
