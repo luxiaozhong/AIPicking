@@ -62,7 +62,6 @@ COOLDOWN_SECONDS = 8         # 每个月份段之间的冷却时间
 JITTER = 0.5                 # 随机抖动范围（秒）
 
 # ── 数据库工具 ────────────────────────────────────────────────────────
-_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH", "000698.SH")
 
 def get_conn():
     return psycopg2.connect(**_PG_PARAMS)
@@ -71,8 +70,7 @@ def load_stocks():
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT ts_code, symbol FROM stocks WHERE ts_code NOT IN %s",
-        (_INDEX_CODES,))
+        "SELECT ts_code, symbol FROM stocks WHERE type = 'stock'")
     rows = cur.fetchall()
     conn.close()
     return [{"ts_code": r[0], "symbol": r[1]} for r in rows]

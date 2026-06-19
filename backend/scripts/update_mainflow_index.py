@@ -165,6 +165,7 @@ def compute_top_stocks(conn, trade_dates: list[str], top_n: int) -> list[dict]:
     聚合最近 N 日主力净流入，返回 Top K 成分股列表。
 
     排除规则：
+      - 指数（stocks.type = 'index'）
       - ST / *ST（stocks.name LIKE '%ST%'）
       - 北交所（ts_code LIKE '%.BJ'）
       - 上市 < 60 自然日
@@ -188,6 +189,7 @@ def compute_top_stocks(conn, trade_dates: list[str], top_n: int) -> list[dict]:
             FROM daily_stock_fund_flow sff
             JOIN stocks s ON s.ts_code = sff.ts_code
             WHERE sff.trade_date = ANY(%s)
+              AND s.type = 'stock'
               AND s.name NOT LIKE '%%ST%%'
               AND sff.ts_code NOT LIKE '%%.BJ'
               AND (s.list_date IS NULL OR s.list_date = '' OR s.list_date <= %s)

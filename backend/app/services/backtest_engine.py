@@ -93,10 +93,18 @@ class BacktestEngine:
     def _load_fund_flow(
         self, session, start_date: str, end_date: str
     ) -> List[Dict]:
-        """加载个股资金流向（主力净流入等）"""
-        stmt = select(DailyStockFundFlow.__table__).where(
-            DailyStockFundFlow.trade_date.between(start_date, end_date)
-        ).order_by(DailyStockFundFlow.trade_date, DailyStockFundFlow.ts_code)
+        """加载个股资金流向（主力净流入等）— 排除指数自身资金流"""
+        f = DailyStockFundFlow.__table__
+        s = Stock.__table__
+        stmt = (
+            select(f)
+            .select_from(f.join(s, f.c.ts_code == s.c.ts_code))
+            .where(
+                f.c.trade_date.between(start_date, end_date),
+                s.c.type == "stock",
+            )
+            .order_by(f.c.trade_date, f.c.ts_code)
+        )
         return [dict(row._mapping) for row in session.execute(stmt)]
 
     def _load_index_constituents(self, session) -> List[Dict]:
@@ -122,12 +130,12 @@ class BacktestEngine:
 
     @staticmethod
     def _load_stocks(session) -> List[Dict]:
-        """加载全量股票基础信息（独立方法，供 RebalanceEngine 复用）"""
+        """加载全量股票基础信息（独立方法，供 RebalanceEngine 复用）— 排除指数"""
         stmt = select(
             Stock.ts_code, Stock.symbol, Stock.name, Stock.market,
             Stock.industry_l1, Stock.industry_l2, Stock.industry_l3,
             Stock.concepts, Stock.total_shares, Stock.float_shares
-        ).where(Stock.ts_code.isnot(None), Stock.ts_code != "")
+        ).where(Stock.ts_code.isnot(None), Stock.ts_code != "", Stock.type == "stock")
         return [dict(row._mapping) for row in session.execute(stmt)]
 
     @staticmethod
@@ -515,12 +523,12 @@ class BacktestEngine:
         """从 PostgreSQL 加载历史数据（截止日及之前），返回完整 strategy_input 数据"""
         session = _get_db()
         try:
-            # 1. 股票基础信息
+            # 1. 股票基础信息（排除指数）
             stmt = select(
                 Stock.ts_code, Stock.symbol, Stock.name, Stock.market,
                 Stock.industry_l1, Stock.industry_l2, Stock.industry_l3,
                 Stock.concepts, Stock.total_shares, Stock.float_shares
-            ).where(Stock.ts_code.isnot(None), Stock.ts_code != "")
+            ).where(Stock.ts_code.isnot(None), Stock.ts_code != "", Stock.type == "stock")
             stocks_result = session.execute(stmt)
             stocks_data = [dict(row._mapping) for row in stocks_result]
 
@@ -677,7 +685,7 @@ class BacktestEngine:
                 Stock.ts_code, Stock.symbol, Stock.name, Stock.market,
                 Stock.industry_l1, Stock.industry_l2, Stock.industry_l3,
                 Stock.concepts, Stock.total_shares, Stock.float_shares
-            ).where(Stock.ts_code.isnot(None), Stock.ts_code != "")
+            ).where(Stock.ts_code.isnot(None), Stock.ts_code != "", Stock.type == "stock")
             stocks_data = [dict(row._mapping) for row in session.execute(stmt)]
 
             start_dt = datetime.strptime(start_date, "%Y%m%d")

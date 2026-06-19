@@ -175,14 +175,14 @@ def npm_to_ts_code(npm_code: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════
 
 def load_stocks() -> list[str]:
-    """Load all A-share stock ts_codes from the stocks table (全量，不排除指数).
+    """Load all A-share stock ts_codes from the stocks table（通过 type='stock' 排除指数）.
 
     Returns ts_code strings sorted alphabetically (e.g. ["000001.SZ", ...]).
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT ts_code FROM stocks ORDER BY ts_code")
+            cur.execute("SELECT ts_code FROM stocks WHERE type = 'stock' ORDER BY ts_code")
             rows = cur.fetchall()
     finally:
         conn.close()

@@ -93,7 +93,8 @@ def load_stocks():
     cur = conn.cursor()
     cur.execute(
         "SELECT ts_code, symbol FROM stocks "
-        "WHERE ts_code IS NOT NULL AND ts_code != ''"
+        "WHERE ts_code IS NOT NULL AND ts_code != '' "
+        "AND (type IS NULL OR type = 'stock')"
     )
     rows = cur.fetchall()
     conn.close()

@@ -16,10 +16,8 @@
     venv/bin/python scripts/update_index_daily.py --intraday                 # 强制盘中实时
     venv/bin/python scripts/update_index_daily.py --pg-url postgresql://...  # 指定 PG 地址
 
-盘中 cron（每个交易日，跟随个股日线每30分钟，腾讯实时行情 qt.gtimg.cn）：
-    38,8 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
-    8,38 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
-    58 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_index_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
+盘中 cron（通过 sync_intraday_daily.sh wrapper，每5分钟，仅交易时段 9:30-11:30 / 13:00-15:00）：
+    # 详见 scripts/sync_intraday_daily.sh 头部注释
 
 环境变量：
     DATABASE_URL — PostgreSQL 连接（默认解析出 psycopg2 可用 URL）
@@ -206,10 +204,11 @@ def ensure_stocks_entries():
         initials = get_pinyin_initials(idx["name"])
         cur.execute("""
             INSERT INTO stocks (ts_code, symbol, name, market, list_date, pinyin_initials,
-                                industry_l1, industry_l2, industry_l3, region,
+                                type, industry_l1, industry_l2, industry_l3, region,
                                 concepts, total_shares, float_shares, update_time)
-            VALUES (%s, %s, %s, %s, %s, %s, '', '', '', '', '', 0, 0, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, 'index', '', '', '', '', '', 0, 0, %s)
             ON CONFLICT (ts_code) DO UPDATE SET
+                type = EXCLUDED.type,
                 name = EXCLUDED.name,
                 symbol = EXCLUDED.symbol,
                 market = EXCLUDED.market,
@@ -220,7 +219,7 @@ def ensure_stocks_entries():
               idx["list_date"], initials, now_str))
     conn.commit()
     conn.close()
-    print("✅ stocks 表指数记录已就绪（5 条）")
+    print(f"✅ stocks 表指数记录已就绪（{len(INDICES)} 条）")
 
 
 # ── 历史 K 线接口（指数专用：读取 .day 而非 .qfqday）──────────────────────

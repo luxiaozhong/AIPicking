@@ -23,14 +23,8 @@
     venv/bin/python scripts/update_daily.py --intraday --index 980080  # 盘中只更新指定指数成分股
     venv/bin/python scripts/update_daily.py --pg-url postgresql://...  # 指定 PG 地址
 
-盘中 cron（全市场，每30分钟，腾讯实时行情 qt.gtimg.cn）：
-    37,7 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
-    7,37 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
-    57 14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday >> /var/log/aipicking/update_daily.log 2>&1
-
-盘中 cron（按指数过滤，每5分钟高频刷新关注股票，腾讯实时行情）：
-    */5 9-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday --index 980080 >> /var/log/aipicking/update_daily_index.log 2>&1
-    */5 9-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/update_daily.py --intraday --index 900001 >> /var/log/aipicking/update_daily_index.log 2>&1
+盘中 cron（通过 sync_intraday_daily.sh wrapper，每5分钟，仅交易时段 9:30-11:30 / 13:00-15:00）：
+    # 详见 scripts/sync_intraday_daily.sh 头部注释
 
 环境变量：
     DATABASE_URL — PostgreSQL 连接（默认解析出 psycopg2 可用 URL）
@@ -146,9 +140,6 @@ def _fmt_date(d: str) -> str:
     return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
 
 
-# 指数 ts_code（由 update_index_daily.py 处理，此处排除）
-_INDEX_CODES = ("000001.SH", "399001.SZ", "399006.SZ", "000688.SH", "000698.SH")
-
 def _infer_exchange(code: str) -> str:
     """根据股票代码前缀推断交易所后缀。
 
@@ -169,12 +160,11 @@ def _infer_exchange(code: str) -> str:
 
 
 def load_stocks():
-    """从 PostgreSQL stocks 表读取股票列表（排除指数）"""
+    """从 PostgreSQL stocks 表读取股票列表（通过 type='stock' 排除指数）"""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT ts_code, symbol FROM stocks WHERE ts_code NOT IN %s",
-        (_INDEX_CODES,))
+        "SELECT ts_code, symbol FROM stocks WHERE type = 'stock'")
     rows = cur.fetchall()
     conn.close()
     return [{"ts_code": r[0], "symbol": r[1]} for r in rows]

@@ -39,6 +39,11 @@ BOARD_NAMES = {
 _LAST_DATE_CACHE: dict = {}
 
 
+def _index_ts_codes_subq():
+    """返回所有指数 ts_code 的子查询，用于排除指数资金流记录"""
+    return select(Stock.__table__.c.ts_code).where(Stock.__table__.c.type == "index")
+
+
 class FundFlowService:
     """个股资金流聚合查询"""
 
@@ -150,7 +155,7 @@ class FundFlowService:
 
         tbl = DailyStockFundFlow.__table__
 
-        # 全市场合计（亿元）
+        # 全市场合计（亿元）— 排除指数自身资金流
         sum_stmt = select(
             func.coalesce(func.sum(tbl.c.main_net_flow) / 1e8, 0).label("main_net_yi"),
             func.coalesce(func.sum(tbl.c.jumbo_net_flow) / 1e8, 0).label("jumbo_net_yi"),
@@ -166,7 +171,10 @@ class FundFlowService:
                 func.count().filter(tbl.c.main_net_flow > 0), 0
             ).label("positive_count"),
             func.count().label("total_count"),
-        ).where(tbl.c.trade_date == d)
+        ).where(
+            tbl.c.trade_date == d,
+            tbl.c.ts_code.not_in(_index_ts_codes_subq()),
+        )
         result = await db.execute(sum_stmt)
         row = result.mappings().first()
         if not row or row["total_count"] == 0:
@@ -183,7 +191,7 @@ class FundFlowService:
             "main_out_yi": round(float(row["main_out_yi"]), 2),
         }
 
-        # 四大指数分别汇总
+        # 四大指数分别汇总 — 排除指数自身资金流
         board_stmt = (
             select(
                 BOARD_LABEL,
@@ -192,7 +200,10 @@ class FundFlowService:
                 func.count().filter(tbl.c.main_net_flow > 0).label("positive_count"),
                 func.count().label("total_count"),
             )
-            .where(tbl.c.trade_date == d)
+            .where(
+                tbl.c.trade_date == d,
+                tbl.c.ts_code.not_in(_index_ts_codes_subq()),
+            )
             .group_by(text("board_code"))
             .order_by(text("board_code"))
         )
@@ -252,7 +263,10 @@ class FundFlowService:
                     (func.sum(tbl.c.retail_in_flow) - func.sum(tbl.c.retail_out_flow)) / 1e8, 0
                 ).label("retail_net_yi"),
             )
-            .where(tbl.c.trade_date >= cutoff)
+            .where(
+                tbl.c.trade_date >= cutoff,
+                tbl.c.ts_code.not_in(_index_ts_codes_subq()),
+            )
             .group_by(tbl.c.trade_date)
             .order_by(tbl.c.trade_date.asc())
         )
@@ -288,7 +302,10 @@ class FundFlowService:
                 BOARD_LABEL,
                 func.coalesce(func.sum(tbl.c.main_net_flow) / 1e8, 0).label("main_net_yi"),
             )
-            .where(tbl.c.trade_date >= cutoff)
+            .where(
+                tbl.c.trade_date >= cutoff,
+                tbl.c.ts_code.not_in(_index_ts_codes_subq()),
+            )
             .group_by(tbl.c.trade_date, text("board_code"))
             .order_by(tbl.c.trade_date.asc())
         )
@@ -551,7 +568,7 @@ class FundFlowService:
                 f.c.close_price,
             )
             .select_from(f.join(s, f.c.ts_code == s.c.ts_code))
-            .where(f.c.trade_date == d)
+            .where(f.c.trade_date == d, s.c.type == "stock")
             .order_by(order_by)
             .limit(limit)
         )
@@ -705,7 +722,10 @@ class FundFlowService:
                 func.count().filter(tbl.c.main_net_flow > 0).label("positive_count"),
                 func.count().label("total_count"),
             )
-            .where(tbl.c.trade_date >= cutoff)
+            .where(
+                tbl.c.trade_date >= cutoff,
+                tbl.c.ts_code.not_in(_index_ts_codes_subq()),
+            )
             .group_by(tbl.c.trade_date)
             .order_by(tbl.c.trade_date.asc())
         )

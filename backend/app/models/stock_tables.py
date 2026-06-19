@@ -24,6 +24,7 @@ class Stock(BaseModel):
     float_shares = Column(BigInteger, default=0)
     update_time = Column(String(30))
     pinyin_initials = Column(String(50), default="", comment="拼音首字母，如 贵州茅台→gzmt")
+    type = Column(String(10), default="stock", index=True, comment="记录类型: stock 个股 / index 指数")
 
 
 class Daily(BaseModel):

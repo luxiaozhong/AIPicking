@@ -76,10 +76,11 @@ def insert_stock_entry():
     initials = get_pinyin_initials(KC100["name"])
     cur.execute("""
         INSERT INTO stocks (ts_code, symbol, name, market, list_date, pinyin_initials,
-                            industry_l1, industry_l2, industry_l3, region,
+                            type, industry_l1, industry_l2, industry_l3, region,
                             concepts, total_shares, float_shares, update_time)
-        VALUES (%s, %s, %s, %s, %s, %s, '', '', '', '', '', 0, 0, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, 'index', '', '', '', '', '', 0, 0, %s)
         ON CONFLICT (ts_code) DO UPDATE SET
+            type = EXCLUDED.type,
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             market = EXCLUDED.market,
