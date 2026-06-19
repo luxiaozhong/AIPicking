@@ -76,6 +76,30 @@ TENCENT_API = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 QUOTE_API   = "http://qt.gtimg.cn/q="
 TIMEOUT     = aiohttp.ClientTimeout(total=15)
 
+# 指数 API 不含交易日字段，通过个股 API field[30] 获取真实交易日
+_REF_STOCK = "sh600519"  # 贵州茅台，用于探测真实交易日
+
+
+def _get_actual_trade_date(fallback_date: str) -> str:
+    """通过个股实时行情 API 获取真实交易日（field[30]=YYYYMMDDHHMMSS）。
+
+    非交易日 API 返回的是上一交易日的快照，field[30] 会显示正确日期。
+    指数 API 不含时间戳，所以需要借助个股 API 来确定日期。
+    """
+    import requests as _requests
+    try:
+        r = _requests.get(f"{QUOTE_API}{_REF_STOCK}", timeout=5)
+        text = r.content.decode("gbk", errors="replace")
+        if "=" in text:
+            content = text.split("=", 1)[1].strip().strip('"')
+            fields = content.split("~")
+            ts = fields[30].strip() if len(fields) > 30 and fields[30].strip() else ""
+            if len(ts) >= 8:
+                return f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+    except Exception:
+        pass
+    return fallback_date
+
 # ── 五大指数定义 ───────────────────────────────────────────────────────────
 INDICES = [
     {
@@ -365,7 +389,7 @@ def bulk_upsert(records):
 
 async def run_intraday(trade_date: str):
     """用实时接口拉取 4 个指数的盘中报价"""
-    trade_date = _fmt_date(trade_date)  # 转为 YYYY-MM-DD 写入 DB
+    trade_date = _get_actual_trade_date(_fmt_date(trade_date))
     print(f"🚀 实时接口模式：拉取 {trade_date} 指数报价...\n")
 
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:

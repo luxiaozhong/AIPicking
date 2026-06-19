@@ -320,7 +320,14 @@ async def fetch_realtime_quote(session, symbol, trade_date):
         if vol == 0 and open_p == 0:
             return None
 
-        record = (None, trade_date,
+        # 用 API 返回的真实交易日（field[30]=YYYYMMDDHHMMSS），非交易日也不会写错日期
+        api_ts = fields[30].strip() if len(fields) > 30 and fields[30].strip() else ""
+        if len(api_ts) >= 8:
+            actual_date = f"{api_ts[:4]}-{api_ts[4:6]}-{api_ts[6:8]}"
+        else:
+            actual_date = trade_date  # fallback
+
+        record = (None, actual_date,
                   open_p or prev_close, high_p or price,
                   low_p or price, price, prev_close,
                   vol, amount, price)
