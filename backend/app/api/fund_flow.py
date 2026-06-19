@@ -88,11 +88,12 @@ async def get_stock_ranking(
     trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
     sort: str = Query("main_net", description="排序字段: main_net, main_net_asc, inflow_rate, jumbo, block, mid, small"),
     limit: int = Query(100, ge=10, le=500, description="返回条数"),
+    board: Optional[str] = Query(None, pattern="^(sh_main|sh_star|sz_main|sz_chi)$", description="板块过滤: sh_main, sh_star, sz_main, sz_chi"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """个股资金流排名"""
-    data = await FundFlowService.get_stock_ranking(db, trade_date, sort, limit)
+    """个股资金流排名（支持按板块过滤）"""
+    data = await FundFlowService.get_stock_ranking(db, trade_date, sort, limit, board)
     return {"code": 0, "message": "ok", "data": data}
 
 

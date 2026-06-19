@@ -34,6 +34,13 @@ BOARD_NAMES = {
     "other": "其他",
 }
 
+BOARD_REGEX = {
+    "sh_main": r"^[56]0[0-5]",
+    "sh_star": r"^688",
+    "sz_main": r"^00[0-3]",
+    "sz_chi": r"^30[01]",
+}
+
 # ── 当日最新日期缓存 ──
 
 _LAST_DATE_CACHE: dict = {}
@@ -529,8 +536,9 @@ class FundFlowService:
         trade_date: Optional[str] = None,
         sort: str = "main_net",
         limit: int = 100,
+        board: Optional[str] = None,
     ) -> dict:
-        """单日个股资金流排名（支持多种排序方式）"""
+        """单日个股资金流排名（支持按板块过滤）"""
         d = trade_date or await FundFlowService._get_latest_date(db)
         if not d:
             return {"trade_date": None, "items": []}
@@ -569,9 +577,10 @@ class FundFlowService:
             )
             .select_from(f.join(s, f.c.ts_code == s.c.ts_code))
             .where(f.c.trade_date == d, s.c.type == "stock")
-            .order_by(order_by)
-            .limit(limit)
         )
+        if board and board in BOARD_REGEX:
+            stmt = stmt.where(f.c.ts_code.regexp_match(BOARD_REGEX[board]))
+        stmt = stmt.order_by(order_by).limit(limit)
         result = await db.execute(stmt)
         rows = result.mappings().all()
 

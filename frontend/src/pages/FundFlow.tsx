@@ -182,6 +182,36 @@ const FundFlow: React.FC = () => {
     setDrawerStock(null);
   };
 
+  // 板块个股排行 Drawer
+  const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
+  const [boardInflow, setBoardInflow] = useState<StockFlowItem[]>([]);
+  const [boardOutflow, setBoardOutflow] = useState<StockFlowItem[]>([]);
+  const [boardDrawerLoading, setBoardDrawerLoading] = useState(false);
+
+  const handleBoardClick = async (boardCode: string) => {
+    setSelectedBoard(boardCode);
+    setBoardDrawerLoading(true);
+    try {
+      const [inflow, outflow] = await Promise.all([
+        fundFlowService.getStockRanking(store.selectedDate, 'main_net', 10, boardCode),
+        fundFlowService.getStockRanking(store.selectedDate, 'main_net_asc', 10, boardCode),
+      ]);
+      setBoardInflow(inflow.items);
+      setBoardOutflow(outflow.items);
+    } catch {
+      setBoardInflow([]);
+      setBoardOutflow([]);
+    } finally {
+      setBoardDrawerLoading(false);
+    }
+  };
+
+  const handleCloseBoardDrawer = () => {
+    setSelectedBoard(null);
+    setBoardInflow([]);
+    setBoardOutflow([]);
+  };
+
   // 初始化
   useEffect(() => {
     store.fetchAvailableDates();
@@ -495,6 +525,46 @@ const FundFlow: React.FC = () => {
     },
   ];
 
+  // ── 板块个股排行 Drawer 表格列（精简版）──
+  const boardStockColumns: ColumnsType<StockFlowItem> = [
+    {
+      title: '#',
+      key: 'rank',
+      width: 36,
+      render: (_: any, __: any, idx: number) => idx + 1,
+    },
+    {
+      title: '代码',
+      dataIndex: 'ts_code',
+      width: 90,
+      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
+    },
+    {
+      title: '名称',
+      dataIndex: 'stock_name',
+      width: 72,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+    },
+    {
+      title: '行业',
+      dataIndex: 'industry_name',
+      width: 72,
+      ellipsis: true,
+      render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text>,
+    },
+    {
+      title: '主力净流入',
+      dataIndex: 'main_net_flow',
+      width: 110,
+      align: 'right',
+      render: (v: number) => (
+        <span style={{ color: posColor(v), fontWeight: 500, fontSize: 12 }}>
+          {(v / 1e8).toFixed(2)} 亿
+        </span>
+      ),
+    },
+  ];
+
   // ── 个股展开：趋势图（按股票缓存，避免多行展开时数据串扰） ──
   const [trendCache, setTrendCache] = useState<Record<string, typeof store.stockTrend>>({});
 
@@ -594,6 +664,61 @@ const FundFlow: React.FC = () => {
             stockName={store.stockTrend?.stock_name}
             onClose={handleCloseDrawer}
           />
+        )}
+      </Drawer>
+
+      {/* ── 板块个股排行 Drawer ── */}
+      <Drawer
+        title={
+          <Space>
+            <Tag color={BOARD_COLORS[selectedBoard || ''] || '#666'}>
+              {selectedBoard && overview?.boards?.find(b => b.board_code === selectedBoard)?.board_name}
+            </Tag>
+            <Text strong>个股资金流 Top 10</Text>
+          </Space>
+        }
+        open={!!selectedBoard}
+        onClose={handleCloseBoardDrawer}
+        width={900}
+        destroyOnClose
+      >
+        {boardDrawerLoading ? (
+          <Spin style={{ display: 'block', padding: 60 }} />
+        ) : (
+          <Row gutter={16}>
+            <Col span={12}>
+              <Card size="small" title={<span style={{ color: RED_COLOR }}>🔴 主力净流入 Top 10</span>}>
+                <Table
+                  dataSource={boardInflow}
+                  rowKey="ts_code"
+                  columns={boardStockColumns}
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: 400 }}
+                  onRow={(record) => ({
+                    onClick: () => handleTopStockSelect(record.ts_code),
+                    style: { cursor: 'pointer' },
+                  })}
+                />
+              </Card>
+            </Col>
+            <Col span={12}>
+              <Card size="small" title={<span style={{ color: GREEN_COLOR }}>🟢 主力净流出 Top 10</span>}>
+                <Table
+                  dataSource={boardOutflow}
+                  rowKey="ts_code"
+                  columns={boardStockColumns}
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: 400 }}
+                  onRow={(record) => ({
+                    onClick: () => handleTopStockSelect(record.ts_code),
+                    style: { cursor: 'pointer' },
+                  })}
+                />
+              </Card>
+            </Col>
+          </Row>
         )}
       </Drawer>
 
@@ -699,7 +824,9 @@ const FundFlow: React.FC = () => {
             <Col xs={12} sm={6} key={b.board_code}>
               <Card
                 size="small"
-                style={{ borderLeft: `3px solid ${BOARD_COLORS[b.board_code] || '#666'}` }}
+                hoverable
+                style={{ borderLeft: `3px solid ${BOARD_COLORS[b.board_code] || '#666'}`, cursor: 'pointer' }}
+                onClick={() => handleBoardClick(b.board_code)}
               >
                 <Text strong>{b.board_name}</Text>
                 <br />

@@ -6,8 +6,15 @@
 # Usage:
 #   bash scripts/sync_intraday_fund_flow.sh
 #
-# Cron（每3分钟，工作日盘中）:
-#   */3 9-11 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
+# Cron（每3分钟，仅交易时段 9:30-11:30 / 13:00-15:00）:
+#   # 上午（9:30-11:30）— 共 41 次
+#   30-57/3 9 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
+#   */3 10 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
+#   0-30/3 11 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
+#   # 下午（13:00-15:00）— 共 41 次
+#   */3 13 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
+#   */3 14 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
+#   0 15 * * 1-5 cd /opt/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /var/log/aipicking/index_fund_flow.log 2>&1
 
 set -euo pipefail
 

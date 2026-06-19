@@ -24,17 +24,13 @@ Usage:
     venv/bin/python scripts/sync_market_data.py --pg-url postgresql://...
 
 Cron:
-    # 盘中每 30 分钟同步板块（交易日 9:35–14:55）
-    35,5 9-11 * * 1-5 cd /opt/AIpicking/backend && \
-        venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
-    5,35 13-14 * * 1-5 cd /opt/AIpicking/backend && \
-        venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
-    55 14 * * 1-5 cd /opt/AIpicking/backend && \
-        venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
-
-    # 收盘后全量同步（18:30）
-    30 18 * * 1-5 cd /opt/AIpicking/backend && \
-        venv/bin/python scripts/sync_market_data.py >> /var/log/aipicking/ingest.log 2>&1
+    # 实际调度由 sync_all.py 盘后统一执行（全量模式），参见 docs/data-pipeline.md
+    #
+    # 如需单独执行：
+    #   盘中轻量同步（仅板块，交易时段内）：
+    #     venv/bin/python scripts/sync_market_data.py --intraday
+    #   收盘后全量同步：
+    #     venv/bin/python scripts/sync_market_data.py --date 2026-06-18
 """
 
 import argparse

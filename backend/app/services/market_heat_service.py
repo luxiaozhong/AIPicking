@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.stock_tables import (
     Daily, DailySectorFlow, DailyHotStock, DailyHotTheme,
-    DailyNorthboundFlow, DailyDragonTiger, DailyDragonTigerSeat
+    DailyNorthboundFlow, DailyDragonTiger, DailyDragonTigerSeat,
+    DailyMarketStress,
 )
 
 # ── 板块→个股模糊匹配：名称归一化 ──────────────────────────────
@@ -162,6 +163,14 @@ _SECTOR_MAP: dict[str, dict] = {
 }
 
 
+def _normalize_trade_date(d: str) -> str:
+    """'20260604' → '2026-06-04'，已是标准格式则原样返回"""
+    if not d:
+        return d
+    if len(d) == 8 and '-' not in d:
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    return d
+
 def _normalize_sector_name(name: str) -> list[str]:
     """归一化板块名称，返回多个候选形式用于模糊匹配。
 
@@ -311,15 +320,33 @@ class MarketHeatService:
             northbound = dict(nb_row) if nb_row else None
 
         # 涨跌比（用 daily 表的日期）
+        # 使用标准日间涨跌幅公式 (close - pre_close) / pre_close，与涨跌分布弹窗一致
+        # pre_close 优先取同步存储值（同一复权因子），回退到自连接前一日 close
+        adv_daily_a = Daily.__table__.alias()
+        adv_prev_a = Daily.__table__.alias()
+        adv_change = (
+            (adv_daily_a.c.close - func.coalesce(adv_daily_a.c.pre_close, adv_prev_a.c.close))
+            / func.nullif(func.coalesce(adv_daily_a.c.pre_close, adv_prev_a.c.close), 0)
+        )
         adv_stmt = select(
             func.count().label("total"),
-            func.sum(
-                case((Daily.close > Daily.open, 1), else_=0)
-            ).label("up_count"),
-            func.sum(
-                case((Daily.close < Daily.open, 1), else_=0)
-            ).label("down_count"),
-        ).where(Daily.trade_date == daily_date, ~Daily.ts_code.like("%.IDX"))
+            func.sum(case((adv_change > 0, 1), else_=0)).label("up_count"),
+            func.sum(case((adv_change < 0, 1), else_=0)).label("down_count"),
+        ).select_from(adv_daily_a).outerjoin(
+            adv_prev_a,
+            (adv_daily_a.c.ts_code == adv_prev_a.c.ts_code)
+            & (adv_prev_a.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == adv_daily_a.c.ts_code)
+                    & (Daily.__table__.c.trade_date < daily_date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            adv_daily_a.c.trade_date == daily_date,
+            ~adv_daily_a.c.ts_code.like("%.IDX"),
+        )
         adv_result = await db.execute(adv_stmt)
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
@@ -361,6 +388,43 @@ class MarketHeatService:
         # 板块温度（尝试从持久化表读取，失败则跳过）
         board_temps = await MarketHeatService.get_board_temperatures(db, daily_date)
 
+        # 四大板块涨跌幅（中位数）
+        from sqlalchemy import text as sa_text
+        board_changes = []
+        daily_a = Daily.__table__.alias()
+        prev_a = Daily.__table__.alias()
+        change_expr = (
+            (daily_a.c.close - func.coalesce(daily_a.c.pre_close, prev_a.c.close, daily_a.c.open))
+            / func.nullif(func.coalesce(daily_a.c.pre_close, prev_a.c.close, daily_a.c.open), 0)
+            * 100
+        )
+        for board_code, board_name, ts_pattern in MarketHeatService.BOARD_DEFINITIONS:
+            bc_stmt = select(
+                func.percentile_cont(0.5).within_group(change_expr).label("median_change_pct"),
+            ).select_from(daily_a).outerjoin(
+                prev_a,
+                (daily_a.c.ts_code == prev_a.c.ts_code)
+                & (prev_a.c.trade_date == (
+                    select(func.max(Daily.__table__.c.trade_date))
+                    .where(
+                        (Daily.__table__.c.ts_code == daily_a.c.ts_code)
+                        & (Daily.__table__.c.trade_date < daily_date)
+                    )
+                    .scalar_subquery()
+                )),
+            ).where(
+                daily_a.c.trade_date == daily_date,
+                ~daily_a.c.ts_code.like("%.IDX"),
+                sa_text(f"daily_1.ts_code ~ '{ts_pattern}'"),
+            )
+            bc_result = await db.execute(bc_stmt)
+            median_change = bc_result.scalar()
+            board_changes.append({
+                "board_code": board_code,
+                "board_name": board_name,
+                "change_pct": round(median_change, 2) if median_change is not None else None,
+            })
+
         return {
             "trade_date": daily_date,
             "temperature": temperature,
@@ -369,6 +433,7 @@ class MarketHeatService:
             "leading_sectors": [_fmt_sector(s) for s in leading],
             "lagging_sectors": [_fmt_sector(s) for s in lagging],
             "board_temperatures": board_temps,
+            "board_changes": board_changes,
         }
 
     # ── 板块资金流 ────────────────────────────────────────────
@@ -904,11 +969,32 @@ class MarketHeatService:
         nb_row = nb_result.mappings().first()
         northbound = dict(nb_row) if nb_row else None
 
+        # 使用标准日间涨跌幅公式，与 get_change_distribution 一致
+        save_daily_a = Daily.__table__.alias()
+        save_prev_a = Daily.__table__.alias()
+        save_change = (
+            (save_daily_a.c.close - func.coalesce(save_daily_a.c.pre_close, save_prev_a.c.close))
+            / func.nullif(func.coalesce(save_daily_a.c.pre_close, save_prev_a.c.close), 0)
+        )
         adv_stmt = select(
             func.count().label("total"),
-            func.sum(case((Daily.close > Daily.open, 1), else_=0)).label("up_count"),
-            func.sum(case((Daily.close < Daily.open, 1), else_=0)).label("down_count"),
-        ).where(Daily.trade_date == trade_date, ~Daily.ts_code.like("%.IDX"))
+            func.sum(case((save_change > 0, 1), else_=0)).label("up_count"),
+            func.sum(case((save_change < 0, 1), else_=0)).label("down_count"),
+        ).select_from(save_daily_a).outerjoin(
+            save_prev_a,
+            (save_daily_a.c.ts_code == save_prev_a.c.ts_code)
+            & (save_prev_a.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == save_daily_a.c.ts_code)
+                    & (Daily.__table__.c.trade_date < trade_date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            save_daily_a.c.trade_date == trade_date,
+            ~save_daily_a.c.ts_code.like("%.IDX"),
+        )
         adv_result = await db.execute(adv_stmt)
         adv_row = adv_result.mappings().first()
         adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
@@ -1138,279 +1224,6 @@ class MarketHeatService:
         await db.commit()
         return results
 
-    # ── 市场压力指数 ────────────────────────────────────────
-
-    @staticmethod
-    def _stress_score_to_level(total_score: int) -> str:
-        """压力指数等级：越高越恐慌"""
-        if total_score >= 80:
-            return "极度恐慌"
-        elif total_score >= 60:
-            return "恐慌"
-        elif total_score >= 40:
-            return "偏紧"
-        elif total_score >= 20:
-            return "正常"
-        return "极度放松"
-
-    @staticmethod
-    async def _calc_stress_decline(db: AsyncSession, date: str) -> float:
-        """1. 指数跌幅 (0-25): 三大指数加权跌幅，跌幅越大分越高"""
-        INDEX_CODES = ["000001.SH", "399001.SZ", "399006.SZ"]
-        WEIGHTS = {"000001.SH": 0.4, "399001.SZ": 0.35, "399006.SZ": 0.25}
-
-        daily_alias = Daily.__table__.alias()
-        prev_alias = Daily.__table__.alias()
-
-        change_expr = (
-            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
-            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
-            * 100
-        )
-
-        stmt = (
-            select(daily_alias.c.ts_code, change_expr.label("change_pct"))
-            .select_from(daily_alias)
-            .outerjoin(
-                prev_alias,
-                (daily_alias.c.ts_code == prev_alias.c.ts_code)
-                & (prev_alias.c.trade_date == (
-                    select(func.max(Daily.__table__.c.trade_date))
-                    .where(
-                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
-                        & (Daily.__table__.c.trade_date < date)
-                    )
-                    .scalar_subquery()
-                )),
-            )
-            .where(
-                daily_alias.c.trade_date == date,
-                daily_alias.c.ts_code.in_(INDEX_CODES),
-            )
-        )
-        result = await db.execute(stmt)
-        rows = {r.ts_code: r.change_pct for r in result.all() if r.change_pct is not None}
-
-        if not rows:
-            return 12.5  # 无数据 → 中性
-
-        # 加权平均跌幅
-        weighted = 0.0
-        total_weight = 0.0
-        for code, change in rows.items():
-            w = WEIGHTS.get(code, 0.33)
-            weighted += max(0, -change) * w  # 只计跌幅，涨幅=0
-            total_weight += w
-
-        avg_decline = weighted / total_weight if total_weight > 0 else 0
-
-        # 映射：0%跌幅→0分, 3%+跌幅→25分
-        return min(25.0, round(avg_decline / 3.0 * 25, 1))
-
-    @staticmethod
-    async def _calc_stress_volatility(db: AsyncSession, date: str) -> float:
-        """2. 波动率 (0-25): 上证指数近10日波动率（标准差）"""
-        from sqlalchemy import text as sa_text
-
-        # 取上证指数近10日数据（含当日之前的10个交易日）
-        daily_alias = Daily.__table__.alias()
-        prev_alias = Daily.__table__.alias()
-
-        change_expr = (
-            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
-            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
-            * 100
-        )
-
-        stmt = (
-            select(change_expr.label("change_pct"))
-            .select_from(daily_alias)
-            .outerjoin(
-                prev_alias,
-                (daily_alias.c.ts_code == prev_alias.c.ts_code)
-                & (prev_alias.c.trade_date == (
-                    select(func.max(Daily.__table__.c.trade_date))
-                    .where(
-                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
-                        & (Daily.__table__.c.trade_date < daily_alias.c.trade_date)
-                    )
-                    .scalar_subquery()
-                )),
-            )
-            .where(
-                daily_alias.c.trade_date <= date,
-                daily_alias.c.ts_code == "000001.SH",
-            )
-            .order_by(daily_alias.c.trade_date.desc())
-            .limit(10)
-        )
-        result = await db.execute(stmt)
-        changes = [r.change_pct for r in result.all() if r.change_pct is not None]
-
-        if len(changes) < 3:
-            return 12.5  # 数据不足 → 中性
-
-        # 计算标准差
-        import statistics
-        std = statistics.stdev(changes)
-
-        # 映射：std=0.5%→5分, std=1.0%→12.5分, std=2.5%+→25分
-        if std >= 2.5:
-            return 25.0
-        elif std <= 0.5:
-            return max(0.0, round(std / 0.5 * 5.0, 1))
-        else:
-            # 线性插值 0.5→5, 2.5→25
-            return round(5.0 + (std - 0.5) / (2.5 - 0.5) * 20.0, 1)
-
-    @staticmethod
-    async def _calc_stress_limitdown(db: AsyncSession, date: str) -> float:
-        """3. 跌停潮 (0-25): 跌停个股占比，跌停越多分越高"""
-        daily_alias = Daily.__table__.alias()
-        prev_alias = Daily.__table__.alias()
-
-        change_expr = (
-            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
-            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
-            * 100
-        )
-
-        stmt = (
-            select(
-                func.count().label("total"),
-                func.sum(case((change_expr <= -9.8, 1), else_=0)).label("limit_down"),
-            )
-            .select_from(daily_alias)
-            .outerjoin(
-                prev_alias,
-                (daily_alias.c.ts_code == prev_alias.c.ts_code)
-                & (prev_alias.c.trade_date == (
-                    select(func.max(Daily.__table__.c.trade_date))
-                    .where(
-                        (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
-                        & (Daily.__table__.c.trade_date < date)
-                    )
-                    .scalar_subquery()
-                )),
-            )
-            .where(
-                daily_alias.c.trade_date == date,
-                ~daily_alias.c.ts_code.like("%.IDX"),
-            )
-        )
-        result = await db.execute(stmt)
-        row = result.mappings().first()
-        if not row or (row.get("total", 0) or 0) == 0:
-            return 12.5
-
-        total = row["total"] or 1
-        limit_down = row["limit_down"] or 0
-        ratio = limit_down / total  # 0% - 100%
-
-        # 映射：0%→0分, 5%+→25分
-        return min(25.0, round(ratio / 0.05 * 25.0, 1))
-
-    @staticmethod
-    async def _calc_stress_breadth(db: AsyncSession, date: str) -> float:
-        """4. 下跌广度 (0-15): 下跌个股占比，占比越高分越高"""
-        stmt = select(
-            func.count().label("total"),
-            func.sum(case((Daily.close < Daily.open, 1), else_=0)).label("down_count"),
-        ).where(
-            Daily.trade_date == date,
-            ~Daily.ts_code.like("%.IDX"),
-        )
-        result = await db.execute(stmt)
-        row = result.mappings().first()
-        if not row or (row.get("total", 0) or 0) == 0:
-            return 7.5
-
-        total = row["total"] or 1
-        down_count = row["down_count"] or 0
-        ratio = down_count / total  # 0% - 100%
-
-        # 映射：30%(正常分化)→0分, 90%+(普跌)→15分
-        if ratio <= 0.30:
-            return 0.0
-        elif ratio >= 0.90:
-            return 15.0
-        else:
-            return round((ratio - 0.30) / (0.90 - 0.30) * 15.0, 1)
-
-    @staticmethod
-    async def _calc_stress_northbound(db: AsyncSession, date: str) -> float:
-        """5. 北向出逃 (0-10): 北向净流出规模，流出越大分越高"""
-        nb_stmt = select(DailyNorthboundFlow.__table__).where(
-            DailyNorthboundFlow.trade_date == date
-        )
-        nb_result = await db.execute(nb_stmt)
-        nb_row = nb_result.mappings().first()
-
-        if not nb_row or nb_row.get("total_net_yi") is None:
-            return 5.0  # 无数据 → 中性
-
-        net = nb_row["total_net_yi"]
-
-        # 映射：净流入>20亿→0分, 净流出>50亿→10分
-        if net >= 20:
-            return 0.0
-        elif net <= -50:
-            return 10.0
-        elif net <= 0:
-            # 0 到 -50：0→5→10
-            return round(5.0 + abs(net) / 50.0 * 5.0, 1)
-        else:
-            # 0 到 20：5→0
-            return round(5.0 - net / 20.0 * 5.0, 1)
-
-    @staticmethod
-    async def save_stress_index(db: AsyncSession, trade_date: str) -> dict:
-        """计算并持久化指定交易日市场压力指数（幂等）"""
-        from ..models.stock_tables import DailyMarketStress
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-        decline = await MarketHeatService._calc_stress_decline(db, trade_date)
-        volatility = await MarketHeatService._calc_stress_volatility(db, trade_date)
-        limitdown = await MarketHeatService._calc_stress_limitdown(db, trade_date)
-        breadth = await MarketHeatService._calc_stress_breadth(db, trade_date)
-        northbound = await MarketHeatService._calc_stress_northbound(db, trade_date)
-
-        scores = {
-            "decline": decline,
-            "volatility": volatility,
-            "limitdown": limitdown,
-            "breadth": breadth,
-            "northbound": northbound,
-        }
-        total_score = round(sum(scores.values()))
-        level = MarketHeatService._stress_score_to_level(total_score)
-
-        stmt = pg_insert(DailyMarketStress.__table__).values(
-            trade_date=trade_date,
-            score=total_score,
-            level=level,
-            decline_score=decline,
-            volatility_score=volatility,
-            limitdown_score=limitdown,
-            breadth_score=breadth,
-            northbound_score=northbound,
-        ).on_conflict_do_update(
-            constraint="uq_market_stress_date",
-            set_=dict(
-                score=total_score,
-                level=level,
-                decline_score=decline,
-                volatility_score=volatility,
-                limitdown_score=limitdown,
-                breadth_score=breadth,
-                northbound_score=northbound,
-            ),
-        )
-        await db.execute(stmt)
-        await db.commit()
-
-        return {"score": total_score, "level": level, "dimensions": scores}
-
     @staticmethod
     async def get_board_temperatures(
         db: AsyncSession, trade_date: Optional[str] = None
@@ -1633,35 +1446,37 @@ class MarketHeatService:
         db: AsyncSession, trade_date: Optional[str] = None
     ) -> dict:
         """板块资金流总览 — 当日全行业板块资金净额合计"""
-        date = trade_date or await MarketHeatService._get_latest_date_for(
+        from datetime import date as _date
+
+        d = trade_date or await MarketHeatService._get_latest_date_for(
             db, DailySectorFlow.__table__.c
         )
-        if not date:
+        if not d:
             return {"trade_date": None, "total_net_yi": 0, "sector_count": 0}
 
-        async def _query(d: str) -> dict:
+        async def _query(td: str) -> dict:
             stmt = select(
                 func.sum(DailySectorFlow.__table__.c.net_inflow).label("total_net"),
                 func.count().label("cnt"),
             ).where(
-                DailySectorFlow.__table__.c.trade_date == d,
+                DailySectorFlow.__table__.c.trade_date == td,
                 DailySectorFlow.__table__.c.sector_type == "industry",
             )
             result = await db.execute(stmt)
             row = result.mappings().first()
+            normalized = _normalize_trade_date(td)
             return {
-                "trade_date": d,
+                "trade_date": normalized,
                 "total_net_yi": round(row["total_net"] or 0, 2),
                 "sector_count": row["cnt"] or 0,
             }
 
-        data = await _query(date)
-        # 指定日期无数据时自动回退到最新
+        data = await _query(d)
         if not data.get("sector_count") and trade_date:
             fallback = await MarketHeatService._get_latest_date_for(
                 db, DailySectorFlow.__table__.c
             )
-            if fallback and fallback != date:
+            if fallback and fallback != d:
                 data = await _query(fallback)
         return data
 
@@ -1669,28 +1484,398 @@ class MarketHeatService:
     async def get_sector_fund_history(
         db: AsyncSession, days: int = 90
     ) -> list[dict]:
-        """板块资金流历史 — 近 N 日每日全行业资金净额合计（按日汇总）"""
-        # 先取最近 N 个有数据的交易日，再按日汇总
-        subq = (
-            select(
-                DailySectorFlow.__table__.c.trade_date,
-                DailySectorFlow.__table__.c.net_inflow,
-            )
-            .where(DailySectorFlow.__table__.c.sector_type == "industry")
-            .order_by(DailySectorFlow.__table__.c.trade_date.desc())
-            .limit(10000)  # 足够覆盖 N 天所有行业
-            .subquery()
-        )
+        """板块资金流历史 — 近 N 日每日全行业资金净额合计"""
+        from datetime import date as _date, timedelta
+        cutoff = (_date.today() - timedelta(days=days)).strftime('%Y-%m-%d')
 
-        # 按日汇总
         stmt = (
             select(
-                subq.c.trade_date,
-                func.sum(subq.c.net_inflow).label("total_net_yi"),
+                DailySectorFlow.__table__.c.trade_date,
+                func.sum(DailySectorFlow.__table__.c.net_inflow).label("total_net_yi"),
                 func.count().label("sector_count"),
             )
-            .group_by(subq.c.trade_date)
-            .order_by(subq.c.trade_date.desc())
+            .where(
+                DailySectorFlow.__table__.c.sector_type == "industry",
+                DailySectorFlow.__table__.c.trade_date >= cutoff,
+            )
+            .group_by(DailySectorFlow.__table__.c.trade_date)
+            .order_by(DailySectorFlow.__table__.c.trade_date.asc())
+        )
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
+
+        history = []
+        for row in rows:
+            history.append({
+                "trade_date": _normalize_trade_date(row["trade_date"]),
+                "total_net_yi": round(row["total_net_yi"] or 0, 2),
+                "sector_count": row["sector_count"] or 0,
+            })
+        return history
+
+    # ── 市场压力指数 ─────────────────────────────────────────
+
+    @staticmethod
+    def _score_to_stress_level(score: int) -> str:
+        if score <= 25:
+            return "平稳"
+        elif score <= 40:
+            return "关注"
+        elif score <= 60:
+            return "压力"
+        elif score <= 80:
+            return "恐慌"
+        return "危机"
+
+    @staticmethod
+    def _calc_decline_score(avg_return: float) -> float:
+        """1. 指数跌幅 (0-25): 全 A 等权涨跌幅分档"""
+        pct = avg_return * 100  # 转为百分比
+        if pct > 2:
+            return 0
+        elif pct > 1:
+            return 3
+        elif pct > 0:
+            return 8
+        elif pct > -1:
+            return 12
+        elif pct > -2:
+            return 16
+        elif pct > -3:
+            return 20
+        elif pct > -4:
+            return 23
+        return 25
+
+    @staticmethod
+    def _calc_volatility_score(ann_vol: float) -> float:
+        """2. 波动率 (0-25): 20 日年化波动率分档"""
+        # ann_vol 为小数，如 0.20 = 20%
+        vol_pct = ann_vol * 100
+        if vol_pct < 15:
+            return 0
+        elif vol_pct < 20:
+            return 5
+        elif vol_pct < 25:
+            return 10
+        elif vol_pct < 30:
+            return 15
+        elif vol_pct < 40:
+            return 20
+        return 25
+
+    @staticmethod
+    def _calc_limitdown_pressure_score(ld_ratio: float) -> float:
+        """3. 跌停潮 (0-25): 跌停占比分档"""
+        # ld_ratio 为百分比，如 0.02 = 2%
+        pct = ld_ratio * 100
+        if pct < 0.5:
+            return 0
+        elif pct < 1:
+            return 5
+        elif pct < 2:
+            return 10
+        elif pct < 5:
+            return 15
+        elif pct < 10:
+            return 20
+        return 25
+
+    @staticmethod
+    def _calc_stress_breadth_score(down_ratio: float) -> float:
+        """4. 下跌广度 (0-15): 下跌家数占比分档"""
+        pct = down_ratio * 100
+        if pct < 40:
+            return 0
+        elif pct < 50:
+            return 3
+        elif pct < 60:
+            return 6
+        elif pct < 70:
+            return 9
+        elif pct < 80:
+            return 12
+        return 15
+
+    @staticmethod
+    def _calc_stress_northbound_score(net_yi: Optional[float]) -> float:
+        """5. 北向出逃 (0-10): 净流出金额分档"""
+        if net_yi is None:
+            return 3  # 无数据中性
+        if net_yi >= 0:
+            return 0
+        if net_yi > -20:
+            return 2
+        if net_yi > -50:
+            return 4
+        if net_yi > -100:
+            return 7
+        return 10
+
+    @staticmethod
+    async def _calc_stress_index(
+        northbound: Optional[dict],
+        adv: dict,
+        date: str,
+        db: AsyncSession,
+    ) -> dict:
+        """5 维度综合评分，满分 100，越高越恐慌"""
+        scores = {}
+
+        # 1. 指数跌幅 (0-25): 全 A 等权涨跌幅
+        from sqlalchemy import text as sa_text
+        # 合并 pre_close 或自连接获取前收盘
+        daily_alias = Daily.__table__.alias()
+        prev_alias = Daily.__table__.alias()
+        change_expr = (
+            (daily_alias.c.close - func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open))
+            / func.nullif(func.coalesce(daily_alias.c.pre_close, prev_alias.c.close, daily_alias.c.open), 0)
+        )
+        avg_return_stmt = select(func.avg(change_expr)).select_from(daily_alias).outerjoin(
+            prev_alias,
+            (daily_alias.c.ts_code == prev_alias.c.ts_code)
+            & (prev_alias.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == daily_alias.c.ts_code)
+                    & (Daily.__table__.c.trade_date < date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            daily_alias.c.trade_date == date,
+            ~daily_alias.c.ts_code.like("%.IDX"),
+            ~daily_alias.c.ts_code.like("%.BJ"),  # 排除北交所
+        )
+        avg_result = await db.execute(avg_return_stmt)
+        avg_return = avg_result.scalar() or 0
+        scores["decline"] = MarketHeatService._calc_decline_score(avg_return)
+
+        # 2. 波动率 (0-25): 近 20 日全 A 等权日收益的 std × √252
+        import math
+        # 获取近 21 个交易日（含当日）的日期列表
+        dates_stmt = (
+            select(Daily.__table__.c.trade_date)
+            .distinct()
+            .where(Daily.__table__.c.trade_date <= date)
+            .order_by(Daily.__table__.c.trade_date.desc())
+            .limit(22)
+        )
+        dates_result = await db.execute(dates_stmt)
+        dates = [r[0] for r in dates_result.all()]
+        dates_sorted = sorted(dates)  # 升序
+
+        if len(dates_sorted) >= 5:
+            # 逐日计算等权日收益率
+            daily_returns = []
+            for d in dates_sorted:
+                d_alias = Daily.__table__.alias()
+                p_alias = Daily.__table__.alias()
+                daily_chg = (
+                    (d_alias.c.close - func.coalesce(d_alias.c.pre_close, p_alias.c.close, d_alias.c.open))
+                    / func.nullif(func.coalesce(d_alias.c.pre_close, p_alias.c.close, d_alias.c.open), 0)
+                )
+                d_stmt = select(func.avg(daily_chg)).select_from(d_alias).outerjoin(
+                    p_alias,
+                    (d_alias.c.ts_code == p_alias.c.ts_code)
+                    & (p_alias.c.trade_date == (
+                        select(func.max(Daily.__table__.c.trade_date))
+                        .where(
+                            (Daily.__table__.c.ts_code == d_alias.c.ts_code)
+                            & (Daily.__table__.c.trade_date < d)
+                        )
+                        .scalar_subquery()
+                    )),
+                ).where(
+                    d_alias.c.trade_date == d,
+                    ~d_alias.c.ts_code.like("%.IDX"),
+                    ~d_alias.c.ts_code.like("%.BJ"),
+                )
+                d_result = await db.execute(d_stmt)
+                d_ret = d_result.scalar()
+                if d_ret is not None:
+                    daily_returns.append(d_ret)
+
+            if len(daily_returns) >= 5:
+                mean_ret = sum(daily_returns) / len(daily_returns)
+                variance = sum((r - mean_ret) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
+                daily_std = math.sqrt(variance)
+                ann_vol = daily_std * math.sqrt(252)  # 年化波动率
+            else:
+                ann_vol = 0.15  # 默认 15%
+        else:
+            ann_vol = 0.15
+        scores["volatility"] = MarketHeatService._calc_volatility_score(ann_vol)
+
+        # 3. 跌停潮 (0-25): 跌停数(≤-9.8%) / 总股票数
+        limit_alias = Daily.__table__.alias()
+        lp_alias = Daily.__table__.alias()
+        ld_change = (
+            (limit_alias.c.close - func.coalesce(limit_alias.c.pre_close, lp_alias.c.close, limit_alias.c.open))
+            / func.nullif(func.coalesce(limit_alias.c.pre_close, lp_alias.c.close, limit_alias.c.open), 0)
+        )
+        ld_stmt = select(
+            func.count().label("total"),
+            func.sum(case((ld_change <= -0.098, 1), else_=0)).label("limit_down"),
+        ).select_from(limit_alias).outerjoin(
+            lp_alias,
+            (limit_alias.c.ts_code == lp_alias.c.ts_code)
+            & (lp_alias.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == limit_alias.c.ts_code)
+                    & (Daily.__table__.c.trade_date < date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            limit_alias.c.trade_date == date,
+            ~limit_alias.c.ts_code.like("%.IDX"),
+            ~limit_alias.c.ts_code.like("%.BJ"),
+        )
+        ld_result = await db.execute(ld_stmt)
+        ld_row = ld_result.mappings().first()
+        ld_total = ld_row["total"] or 0
+        ld_count = ld_row["limit_down"] or 0
+        ld_ratio = ld_count / ld_total if ld_total > 0 else 0
+        scores["limitdown"] = MarketHeatService._calc_limitdown_pressure_score(ld_ratio)
+
+        # 4. 下跌广度 (0-15)
+        adv_total = adv.get("total", 0) or 0
+        adv_down = adv.get("down_count", 0) or 0
+        down_ratio = adv_down / adv_total if adv_total > 0 else 0.5
+        scores["breadth"] = MarketHeatService._calc_stress_breadth_score(down_ratio)
+
+        # 5. 北向出逃 (0-10)
+        net_yi = northbound.get("total_net_yi") if northbound else None
+        scores["northbound"] = MarketHeatService._calc_stress_northbound_score(net_yi)
+
+        total_score = round(sum(scores.values()))
+        level = MarketHeatService._score_to_stress_level(total_score)
+
+        return {
+            "score": total_score,
+            "level": level,
+            "dimensions": scores,
+        }
+
+    @staticmethod
+    async def save_stress_index(db: AsyncSession, trade_date: str) -> dict:
+        """计算并持久化指定交易日市场压力指数（幂等）"""
+        # 获取北向数据
+        nb_stmt = select(DailyNorthboundFlow.__table__).where(
+            DailyNorthboundFlow.trade_date == trade_date
+        )
+        nb_result = await db.execute(nb_stmt)
+        nb_row = nb_result.mappings().first()
+        northbound = dict(nb_row) if nb_row else None
+
+        # 获取涨跌数据
+        # 使用标准日间涨跌幅公式，与 get_change_distribution 一致
+        stress_daily_a = Daily.__table__.alias()
+        stress_prev_a = Daily.__table__.alias()
+        stress_change = (
+            (stress_daily_a.c.close - func.coalesce(stress_daily_a.c.pre_close, stress_prev_a.c.close))
+            / func.nullif(func.coalesce(stress_daily_a.c.pre_close, stress_prev_a.c.close), 0)
+        )
+        adv_stmt = select(
+            func.count().label("total"),
+            func.sum(case((stress_change > 0, 1), else_=0)).label("up_count"),
+            func.sum(case((stress_change < 0, 1), else_=0)).label("down_count"),
+        ).select_from(stress_daily_a).outerjoin(
+            stress_prev_a,
+            (stress_daily_a.c.ts_code == stress_prev_a.c.ts_code)
+            & (stress_prev_a.c.trade_date == (
+                select(func.max(Daily.__table__.c.trade_date))
+                .where(
+                    (Daily.__table__.c.ts_code == stress_daily_a.c.ts_code)
+                    & (Daily.__table__.c.trade_date < trade_date)
+                )
+                .scalar_subquery()
+            )),
+        ).where(
+            stress_daily_a.c.trade_date == trade_date,
+            ~stress_daily_a.c.ts_code.like("%.IDX"),
+        )
+        adv_result = await db.execute(adv_stmt)
+        adv_row = adv_result.mappings().first()
+        adv = dict(adv_row) if adv_row else {"total": 0, "up_count": 0, "down_count": 0}
+
+        stress = await MarketHeatService._calc_stress_index(
+            northbound=northbound, adv=adv, date=trade_date, db=db,
+        )
+
+        dims = stress["dimensions"]
+
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        stmt = pg_insert(DailyMarketStress.__table__).values(
+            trade_date=trade_date,
+            score=stress["score"],
+            level=stress["level"],
+            decline_score=dims["decline"],
+            volatility_score=dims["volatility"],
+            limitdown_score=dims["limitdown"],
+            breadth_score=dims["breadth"],
+            northbound_score=dims["northbound"],
+        ).on_conflict_do_update(
+            constraint="uq_market_stress_date",
+            set_=dict(
+                score=stress["score"],
+                level=stress["level"],
+                decline_score=dims["decline"],
+                volatility_score=dims["volatility"],
+                limitdown_score=dims["limitdown"],
+                breadth_score=dims["breadth"],
+                northbound_score=dims["northbound"],
+            ),
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+        return stress
+
+    @staticmethod
+    async def get_stress_overview(
+        db: AsyncSession, trade_date: Optional[str] = None
+    ) -> Optional[dict]:
+        """获取指定日期压力指数概览"""
+        if not trade_date:
+            stmt = select(func.max(DailyMarketStress.__table__.c.trade_date))
+            result = await db.execute(stmt)
+            trade_date = result.scalar()
+        if not trade_date:
+            return None
+
+        stmt = select(DailyMarketStress.__table__).where(
+            DailyMarketStress.__table__.c.trade_date == trade_date,
+        )
+        result = await db.execute(stmt)
+        row = result.mappings().first()
+        if not row:
+            return None
+
+        r = dict(row)
+        return {
+            "trade_date": r["trade_date"],
+            "score": r["score"],
+            "level": r["level"],
+            "dimensions": {
+                "decline": r["decline_score"],
+                "volatility": r["volatility_score"],
+                "limitdown": r["limitdown_score"],
+                "breadth": r["breadth_score"],
+                "northbound": r["northbound_score"],
+            },
+        }
+
+    @staticmethod
+    async def get_stress_history(
+        db: AsyncSession, days: int = 60
+    ) -> list[dict]:
+        """近 N 日压力指数历史"""
+        stmt = (
+            select(DailyMarketStress.__table__)
+            .order_by(DailyMarketStress.__table__.c.trade_date.desc())
             .limit(days)
         )
         result = await db.execute(stmt)
@@ -1698,9 +1883,17 @@ class MarketHeatService:
 
         history = []
         for row in reversed(list(rows)):
+            r = dict(row)
             history.append({
-                "trade_date": row["trade_date"],
-                "total_net_yi": round(row["total_net_yi"] or 0, 2),
-                "sector_count": row["sector_count"] or 0,
+                "trade_date": r["trade_date"],
+                "score": r["score"],
+                "level": r["level"],
+                "dimensions": {
+                    "decline": r["decline_score"],
+                    "volatility": r["volatility_score"],
+                    "limitdown": r["limitdown_score"],
+                    "breadth": r["breadth_score"],
+                    "northbound": r["northbound_score"],
+                },
             })
         return history

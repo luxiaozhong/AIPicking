@@ -231,10 +231,10 @@ export const fundFlowService = {
     return data.data;
   },
 
-  async getStockRanking(tradeDate?: string, sort: string = 'main_net', limit: number = 100) {
+  async getStockRanking(tradeDate?: string, sort: string = 'main_net', limit: number = 100, board?: string) {
     const { data } = await api.get<{ code: number; data: StockFlowRanking }>(
       '/fund-flow/stocks',
-      { params: { trade_date: tradeDate, sort, limit } }
+      { params: { trade_date: tradeDate, sort, limit, board } }
     );
     return data.data;
   },

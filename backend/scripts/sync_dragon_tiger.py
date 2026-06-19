@@ -11,9 +11,15 @@
     venv/bin/python scripts/sync_dragon_tiger.py --date 2026-05-30      # 指定日期
     venv/bin/python scripts/sync_dragon_tiger.py --date 2026-05-30 --dry-run  # 只拉不存
 
-Cron (weekdays 17:00 Beijing time):
-    0 17 * * 1-5 cd /opt/AIpicking/backend && \
-        venv/bin/python scripts/sync_dragon_tiger.py >> /var/log/aipicking/ingest.log 2>&1
+Cron:
+    # 实际调度：每天 8:30 回补前一日 + sync_all.py 盘后统一执行
+    # 参见 docs/data-pipeline.md
+    #
+    # 8:30 回补（macOS）:
+    #   30 8 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_dragon_tiger.py --date $(date -v-1d +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+    #
+    # 单独执行当日：
+    #   venv/bin/python scripts/sync_dragon_tiger.py --date 2026-06-18
 """
 import argparse
 import itertools

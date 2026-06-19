@@ -6,20 +6,25 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Crontab（每工作日盘中）                             │
+│                    Crontab（每工作日）                                 │
+│                                                                     │
+│   8:30 ──── sync_dragon_tiger.py   ──► 龙虎榜（次日补前一日）        │
 │                                                                     │
 │   9:00 ── sync_northbound.py     ──► daily_northbound_flow          │
 │           （独立 cron，提前同步北向资金）                              │
 │                                                                     │
-│  11:30 ── sync_stock_fund_flow.py  ──► daily_stock_fund_flow        │
-│            (预同步，盘后覆盖)                                         │
+│  9:30~11:30 ── sync_intraday_daily.sh   ──► daily（指数成分股日线）  │
+│  13:00~15:00    每5分钟，交易时段内                                   │
+│                │  1. update_index_daily.py --intraday                │
+│                └─ 2. update_daily.py --intraday --index <idx>        │
 │                                                                     │
-│  每5分钟 ── sync_intraday_fund_flow.sh ──► daily_stock_fund_flow     │
-│             │  1. sync_index_fund_flow.py --index 980080             │
-│             └─ 2. sync_index_fund_flow.py --index 900001             │
-│                                intraday_fund_snapshot                │
+│  9:30~11:30 ── sync_intraday_fund_flow.sh ──► daily_stock_fund_flow │
+│  13:00~15:00    每3分钟，交易时段内                      +            │
+│                │  1. sync_index_fund_flow.py --index <idx>           │
+│                └─ 2. sync_index_fund_flow.py --self <indices>        │
+│                                              intraday_fund_snapshot  │
 │                                                                     │
-│  15:55 ─── sync_all.py（盘后全量兜底）                                │
+│  17:00 ─── sync_all.py（盘后全量兜底）                                │
 │            │                                                        │
 │            ├─ 1. update_daily.py        ──► daily (日线，全市场)      │
 │            ├─ 2. update_index_daily.py  ──► daily (指数日线)         │
@@ -35,8 +40,6 @@
 │            ├─ 7. sync_market_temperature.py──► daily_market_temperature │
 │            └─ 8. sync_report.py         ──► 数据同步日报（通知）      │
 │                                                                     │
-│  8:30 ──── sync_dragon_tiger.py        ──► 龙虎榜（次日补前一日）    │
-│                                                                     │
 │  (未配置 cron，仅手动)                                               │
 │         sync_financials.py       ──► financial_reports（每季度一次）  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -47,24 +50,36 @@
 ### 本地开发机（macOS）
 
 ```cron
-# === 北向资金独立同步（每个交易日 9:00）===
-0 9 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_northbound.py >> /var/log/aipicking/northbound.log 2>&1
-
-# === 盘后总调度（每个工作日 17:30）===
-30 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
-
-# === 盘中指数成分股日线同步（每5分钟，上午 9-11 + 下午 13-14）===
-# 内部依次执行：指数日线 → 980080 → 900001，间隔 30s/60s
-*/5 9-11 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
-*/5 13-14 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
-
-# === 盘中指数成分股资金流同步（每5分钟，上午 9-11 + 下午 13-14）===
-# 内部依次执行：980080 → 900001，间隔 60s
-*/5 9-11 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
-*/5 13-14 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
-
 # === 龙虎榜早上回补（每天 8:30，工作日）===
 30 8 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && venv/bin/python scripts/sync_dragon_tiger.py --date $(date -v-1d +\%Y-\%m-\%d) >> /Users/aklu/CodeBuddy/AIpicking/logs/ingest.log 2>&1
+
+# === 北向资金独立同步（每个交易日 9:00）===
+0 9 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && venv/bin/python scripts/sync_northbound.py >> /Users/aklu/CodeBuddy/AIpicking/logs/northbound.log 2>&1
+
+# === 盘中指数成分股日线同步（每5分钟，交易时段 9:30-11:30 / 13:00-15:00）===
+# 内部依次：指数日线 → 980080 → 900001 → 900002 → 399667，sleep 30s/60s
+# 上午（9:30-11:30）— 共 25 次
+30-59/5 9 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
+*/5 10 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
+0-30/5 11 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
+# 下午（13:00-15:00）— 共 25 次
+*/5 13 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
+*/5 14 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
+0 15 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_daily.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/update_daily_intraday.log 2>&1
+
+# === 盘中指数成分股资金流同步（每3分钟，交易时段 9:30-11:30 / 13:00-15:00）===
+# 内部依次：成分股批量 → 市场指数自身资金流，间隔 10s
+# 上午（9:30-11:30）— 共 41 次
+30-57/3 9 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
+*/3 10 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
+0-30/3 11 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
+# 下午（13:00-15:00）— 共 41 次
+*/3 13 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
+*/3 14 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
+0 15 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && bash scripts/sync_intraday_fund_flow.sh >> /Users/aklu/CodeBuddy/AIpicking/logs/index_fund_flow.log 2>&1
+
+# === 盘后总调度（每个工作日 16:13）===
+13 16 * * 1-5 cd /Users/aklu/CodeBuddy/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /Users/aklu/CodeBuddy/AIpicking/logs/sync_all.log 2>&1
 ```
 
 ### 服务器（Linux，`101.35.254.125`）
@@ -73,31 +88,27 @@
 > 详见 [deployment.md](deployment.md)。
 
 ```cron
-# === 盘后总调度（每个工作日 17:00）===
-0 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
-
-# === 盘中板块同步（每30分钟）===
-35,5 9-11 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
-5,35 13-14 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_market_data.py --intraday >> /var/log/aipicking/ingest.log 2>&1
-
 # === 龙虎榜早上回补 ===
 30 8 * * * cd /opt/AIpicking/backend && venv/bin/python scripts/sync_dragon_tiger.py --date $(date -d "yesterday" +\%Y-\%m-\%d) >> /var/log/aipicking/ingest.log 2>&1
+
+# === 盘后总调度（每个工作日 17:00）===
+0 17 * * 1-5 cd /opt/AIpicking/backend && venv/bin/python scripts/sync_all.py >> /var/log/aipicking/sync_all.log 2>&1
 ```
 
 ### 盘中更新架构
 
-盘中不再全量拉取 ~5200 只 A 股，改为**按指数过滤**：只更新关注指数的成分股（默认 980080 国证成长100 + 900001 主力资金50，共约 150 只），秒级完成。
+盘中不再全量拉取 ~5200 只 A 股，改为**按指数过滤**：只更新关注指数的成分股（默认 980080 国证成长100 + 900001 主力资金50 + 900002 大盘低波50 + 399667 创业大盘，共约 200 只），秒级完成。
 
-两个 wrapper 脚本负责盘中调度，cron 每 5 分钟触发一次：
+两个 wrapper 脚本负责盘中调度，cron 只在交易时段（9:30-11:30 / 13:00-15:00）触发：
 
-| Wrapper | 执行顺序 | 间隔 | 日志 |
-|---------|---------|------|------|
-| `sync_intraday_daily.sh` | 指数日线 → 980080 成分股 → 900001 成分股 | 30s / 60s | `update_daily_intraday.log` |
-| `sync_intraday_fund_flow.sh` | 980080 资金流 → 900001 资金流 | 60s | `index_fund_flow.log` |
+| Wrapper | 频率 | 执行顺序 | 间隔 | 日志 |
+|---------|------|---------|------|------|
+| `sync_intraday_daily.sh` | 每 5 分钟 | 指数日线 → 980080 → 900001 → 900002 → 399667 | 30s / 60s | `update_daily_intraday.log` |
+| `sync_intraday_fund_flow.sh` | 每 3 分钟 | 成分股批量（4 指数）→ 市场指数自身资金流（14 指数） | 10s | `index_fund_flow.log` |
 
 设计要点：
-- **避免并发**：同一 wrapper 内各步骤串行、间隔 30-60s，两个 wrapper 间 cron 自然错开
-- **午休处理**：`9-11` 覆盖 11:30-13:00 午休时段，休市期间数据源返回空数据，不产生脏数据
+- **交易时段对齐**：cron 精确匹配 9:30-11:30 和 13:00-15:00，不在开盘前和午休期间浪费 API 调用
+- **避免并发**：同一 wrapper 内各步骤串行、间隔 10-60s，两个 wrapper 间 cron 同一分钟触发但访问不同表，不冲突
 - **盘后兜底**：`sync_all.py` 在盘后以全量模式重跑，确保数据完整性
 - **可扩展**：默认指数可通过命令行参数覆盖，如 `bash scripts/sync_intraday_daily.sh 980080 900001 931643`
 
@@ -306,6 +317,7 @@ venv/bin/python scripts/sync_financials.py --init             # 全量近 5 年
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-18 | 盘中 cron 精确对齐交易时段（9:30-11:30 / 13:00-15:00），消除开盘前/午休无效调用，新增 15:00 收盘快照；资金流改为每 3 分钟（原 5 分钟）；服务器移除盘中同步（暂不需要）；shell wrapper 默认指数扩展为 4 个；sync_all 调整为 16:13 |
 | 2026-06-16 | 盘中日线/资金流改为按指数过滤（~150 只），新增 `sync_intraday_daily.sh` + `sync_intraday_fund_flow.sh` wrapper，`update_daily.py` 新增 `--index` 参数；移除全市场 30 分钟盘中日线 |
 | 2026-06-15 | 新增 11:30 / 14:15 两档个股资金流盘中预同步（幂等写入，盘后 sync_all 覆盖为最终数据） |
 | 2026-06-09 | 新增 `sync_northbound.py` 独立 cron（每天 9:00），提前同步北向资金数据 |
