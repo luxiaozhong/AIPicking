@@ -133,7 +133,8 @@ async def download_one(session, ts_code, symbol, start_date, end_date, retry=0):
                 if k.upper() == symbol.upper():
                     stock_data = v
                     break
-        qfq_data = stock_data.get("qfqday", [])
+        # 腾讯 API 对不同股票返回不同键名：主板用 qfqday，部分科创板用 day
+        qfq_data = stock_data.get("qfqday") or stock_data.get("day", [])
     except (json.JSONDecodeError, AttributeError):
         if retry < MAX_RETRIES:
             wait = (2 ** retry) + random.uniform(0, JITTER)

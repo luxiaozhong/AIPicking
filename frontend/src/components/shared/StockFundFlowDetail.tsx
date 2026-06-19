@@ -185,7 +185,9 @@ const StockFundFlowDetail: React.FC<StockFundFlowDetailProps> = ({
       const [trendResult, intradayResult, klineResult] = await Promise.all([
         fundFlowService.getStockTrend(tsCode, days),
         fundFlowService.getStockIntraday(tsCode),
-        stockService.getKLine(tsCode, days).then((d) => d.items).catch(() => [] as KLineItem[]),
+        // K 线 days 需对齐资金流 cutoff（today - (days+25) 日历天），
+        // 避免 K 线记录数不够导致早期日期无蜡烛图覆盖
+        stockService.getKLine(tsCode, Math.max(days + 25, 60)).then((d) => d.items).catch(() => [] as KLineItem[]),
       ]);
       setData(trendResult);
       setIntraday(intradayResult);
