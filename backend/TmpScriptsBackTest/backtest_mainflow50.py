@@ -138,7 +138,7 @@ STAMP_TAX = 0.001   # 0.1%
 COMMISSION = 0.0003  # 0.03%
 
 
-def run_backtest(top_n: int = 50, include_cost: bool = True):
+def run_backtest(top_n: int = 50, include_cost: bool = True, detail: bool = False):
     conn = _get_pg_conn()
     try:
         # ── Load data ────────────────────────────────────────
@@ -213,6 +213,14 @@ def run_backtest(top_n: int = 50, include_cost: bool = True):
           f"{targets[0]['ts_code'].split('.')[0] if targets else '—'} "
           f"{targets[1]['ts_code'].split('.')[0] if len(targets)>1 else ''} "
           f"{targets[2]['ts_code'].split('.')[0] if len(targets)>2 else ''}")
+
+    if detail:
+        holdings_sorted = sorted(targets, key=lambda s: s["flow_15d"], reverse=True)
+        codes_line = " ".join(
+            f"{s['ts_code'].split('.')[0]}({s['flow_15d']/1e8:.1f}亿)"
+            for s in holdings_sorted
+        )
+        print(f"           持仓详情: {codes_line}")
 
     last_report_nav = nav
 
@@ -301,6 +309,15 @@ def run_backtest(top_n: int = 50, include_cost: bool = True):
               f"{turnover_pct:>6.1f}% {cost_total:>8.2f} "
               f"{top3_str:<30}")
 
+        if detail:
+            # Print all holdings sorted by flow_15d
+            holdings_sorted = sorted(targets, key=lambda s: s["flow_15d"], reverse=True)
+            codes_line = " ".join(
+                f"{s['ts_code'].split('.')[0]}({s['flow_15d']/1e8:.1f}亿)"
+                for s in holdings_sorted
+            )
+            print(f"           持仓详情: {codes_line}")
+
     # ── Final line ──────────────────────────────────────────
     total_return = (nav / 1000 - 1) * 100
     weeks = len(eff_dates) - 1
@@ -323,9 +340,10 @@ def main():
     p = argparse.ArgumentParser(description="主力资金50指数回测")
     p.add_argument("--top", type=int, default=50, help="Top N (default 50)")
     p.add_argument("--no-cost", action="store_true", help="不计交易费用")
+    p.add_argument("--detail", action="store_true", help="每期显示全部持仓明细")
     args = p.parse_args()
 
-    run_backtest(top_n=args.top, include_cost=not args.no_cost)
+    run_backtest(top_n=args.top, include_cost=not args.no_cost, detail=args.detail)
 
 
 if __name__ == "__main__":
