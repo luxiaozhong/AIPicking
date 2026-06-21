@@ -83,7 +83,7 @@
 | `get_lookback_trade_dates()` | 不变 |
 | `compute_top_stocks()` | 改为 `compute_rankings()` — 仍聚合 15 日主力净流入，但返回完整排名（top 60） |
 | `upsert_index_info()` | 不变 |
-| `upsert_constituents()` | **移除 DELETE**，只做 upsert |
+| `upsert_constituents()` | **移除 DELETE**，只做 upsert；`market_cap` 列复用存储 `flow_15d`（15日主力净流入） |
 | `verify()` | 更新：验证最新 eff_date 的成分股 |
 | `run()` | 重构：加入调仓日检查、缓冲垫逻辑、趋势过滤 |
 | `main()` | 新增 `--force` 参数 |
