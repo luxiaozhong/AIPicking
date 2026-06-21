@@ -31,12 +31,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 import os
 import sys
-from datetime import date as date_type, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 import psycopg2
@@ -111,6 +109,10 @@ HOLIDAYS = {
            "0405", "0406", "0407", "0501", "0502", "0503", "0504", "0505",
            "0625", "0626", "0627", "0929", "0930", "1001", "1002", "1003", "1004", "1005", "1006", "1007"},
 }
+
+BUFFER_KICK_RANK = 55       # 持仓排名 > 此值则强制踢出
+BUFFER_ENTER_RANK = 45      # 未持仓排名 ≤ 此值则优先纳入
+RANKING_LIMIT = 60          # 计算排名时取 top 60（>= BUFFER_KICK_RANK）
 
 
 def is_trade_day(date_str: str) -> bool:
@@ -193,18 +195,14 @@ def get_lookback_trade_dates(conn, end_date: str, n: int = LOOKBACK_DAYS) -> lis
 # Core logic
 # ═════════════════════════════════════════════════════════════════════════
 
-def compute_top_stocks(conn, trade_dates: list[str], top_n: int) -> list[dict]:
+def compute_rankings(conn, trade_dates: list[str], limit: int = RANKING_LIMIT) -> list[dict]:
     """
-    聚合最近 N 日主力净流入，返回 Top K 成分股列表。
+    聚合最近 N 日主力净流入，返回排名列表（降序）。
 
-    排除规则：
-      - 指数（stocks.type = 'index'）
-      - ST / *ST（stocks.name LIKE '%ST%'）
-      - 北交所（ts_code LIKE '%.BJ'）
-      - 上市 < 60 自然日
+    排除规则同 compute_top_stocks。
 
     Returns:
-        [{ts_code, stock_name, flow_15d, weight}, ...]  按 flow_15d 降序
+        [{ts_code, stock_name, flow_15d}, ...]  按 flow_15d 降序，最多 limit 条
     """
     if not trade_dates:
         logging.error("没有交易日数据，无法计算")
@@ -231,7 +229,7 @@ def compute_top_stocks(conn, trade_dates: list[str], top_n: int) -> list[dict]:
             ORDER BY flow_15d DESC
             LIMIT %s
             """,
-            (trade_dates, min_list_date, top_n),
+            (trade_dates, min_list_date, limit),
         )
         rows = cur.fetchall()
 
@@ -240,23 +238,128 @@ def compute_top_stocks(conn, trade_dates: list[str], top_n: int) -> list[dict]:
             "ts_code": r[0],
             "stock_name": r[1],
             "flow_15d": float(r[2]),
-            "weight": EQUAL_WEIGHT,
         }
         for r in rows
     ]
 
-    if len(stocks) < top_n:
+    if len(stocks) < limit:
         logging.warning(
-            "符合条件的股票仅 %d 只（目标 %d）—— 全市场主力净流入>0 的不足",
-            len(stocks), top_n,
+            "符合条件的股票仅 %d 只（查询 limit=%d）—— 全市场主力净流入>0 的不足",
+            len(stocks), limit,
         )
     else:
-        logging.info("筛选出 %d 只成分股，主力净流入范围: %.2f亿 ~ %.2f亿",
+        logging.info("排名计算完成: %d 只，主力净流入范围: %.2f亿 ~ %.2f亿",
                      len(stocks),
                      stocks[-1]["flow_15d"] / 1e8,
                      stocks[0]["flow_15d"] / 1e8)
 
     return stocks
+
+
+def get_current_holdings(conn) -> list[dict]:
+    """读取最新一批成分股持仓。
+
+    Returns:
+        [{ts_code, stock_name, weight}, ...]，无历史持仓时返回空列表
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT ts_code, stock_name, weight
+            FROM index_constituents
+            WHERE index_code = %s
+              AND eff_date = (
+                  SELECT MAX(eff_date) FROM index_constituents
+                  WHERE index_code = %s
+              )
+            """,
+            (INDEX_CODE, INDEX_CODE),
+        )
+        rows = cur.fetchall()
+    holdings = [
+        {"ts_code": r[0], "stock_name": r[1], "weight": float(r[2])}
+        for r in rows
+    ]
+    if holdings:
+        logging.info("当前持仓: %d 只（eff_date 最新批次）", len(holdings))
+    else:
+        logging.info("无历史持仓，将直接取 Top %d", DEFAULT_TOP_N)
+    return holdings
+
+
+def apply_buffer(rankings: list[dict], holdings: list[dict], top_n: int) -> list[dict]:
+    """应用缓冲垫规则，返回最终成分股列表。
+
+    规则：
+      1. 持仓股中排名 ≤ BUFFER_KICK_RANK → 保留
+      2. 持仓股中排名 > BUFFER_KICK_RANK 或不在排名中 → 踢出
+      3. 未持仓股中排名 ≤ BUFFER_ENTER_RANK → 优先纳入
+      4. 保留+纳入 < top_n → 从排名最高未持仓股中补满
+
+    Args:
+        rankings: 排名列表，index 0 = rank 1（已过滤趋势）
+        holdings: 当前持仓列表
+        top_n: 目标成分股数量
+
+    Returns:
+        [{ts_code, stock_name, flow_15d, weight}, ...]
+    """
+    holding_codes = {h["ts_code"] for h in holdings}
+    ranking_by_code = {r["ts_code"]: r for r in rankings}
+
+    # 1. 保留持仓中排名仍在 BUFFER_KICK_RANK 以内的
+    keep = []
+    kicked = []
+    for h in holdings:
+        if h["ts_code"] in ranking_by_code:
+            # 查找排名位置（0-based）
+            rank_pos = next(
+                i for i, r in enumerate(rankings) if r["ts_code"] == h["ts_code"]
+            )
+            if rank_pos < BUFFER_KICK_RANK:
+                keep.append(dict(ranking_by_code[h["ts_code"]]))
+            else:
+                kicked.append((h["ts_code"], rank_pos + 1))
+        else:
+            # 不在排名中（可能退市/停牌）→ 踢出
+            kicked.append((h["ts_code"], None))
+
+    if kicked:
+        for code, rank in kicked:
+            if rank:
+                logging.info("  踢出: %s（排名 %d > %d）", code, rank, BUFFER_KICK_RANK)
+            else:
+                logging.info("  踢出: %s（不在排名中，可能退市/停牌）", code)
+    logging.info("保留持仓: %d 只", len(keep))
+
+    # 2. 优先纳入：未持仓中排名 ≤ BUFFER_ENTER_RANK
+    priority_add = []
+    for i, r in enumerate(rankings):
+        if r["ts_code"] not in holding_codes and i < BUFFER_ENTER_RANK:
+            priority_add.append(dict(r))
+    logging.info("优先纳入: %d 只（排名 ≤ %d）", len(priority_add), BUFFER_ENTER_RANK)
+
+    result = keep + priority_add
+    result_codes = {r["ts_code"] for r in result}
+
+    # 3. 补满到 top_n
+    if len(result) < top_n:
+        for r in rankings:
+            if r["ts_code"] not in result_codes and r["ts_code"] not in holding_codes:
+                result.append(dict(r))
+                result_codes.add(r["ts_code"])
+                if len(result) >= top_n:
+                    break
+        logging.info("补满: %d 只", len(result) - len(keep) - len(priority_add))
+
+    # 4. 赋等权重
+    for r in result:
+        r["weight"] = EQUAL_WEIGHT
+
+    logging.info("缓冲垫调整完成: 保留 %d + 纳入 %d → 最终 %d 只",
+                 len(keep), len(result) - len(keep), len(result))
+
+    return result[:top_n]
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -372,7 +475,7 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
             return {"success": False, "error": "insufficient_trade_days"}
 
         # 2. 计算 Top N
-        stocks = compute_top_stocks(conn, trade_dates, top_n)
+        stocks = compute_rankings(conn, trade_dates)
 
         if dry_run:
             logging.info("[DRY RUN] 不写入数据库")
