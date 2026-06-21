@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-主力资金50指数 — 每日盘后更新成分股
+主力资金50指数 — 每周五盘后更新成分股（节假日顺延）
 
 从 daily_stock_fund_flow 表中聚合全市场 A 股最近 15 个交易日的
 main_net_flow（主力净流入）总和，排除 ST/*ST/次新股/北交所，
@@ -580,7 +580,7 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
 
         if len(stocks) < top_n:
             logging.warning(
-                "最终成分股仅 %d 只（目标 %d）—— 趋势过滤后符合条件的不足",
+                "最终成分股仅 %d 只（目标 %d）—— 趋势过滤/缓冲垫后符合条件的不足",
                 len(stocks), top_n,
             )
 
@@ -611,7 +611,7 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
 
 def main():
     p = argparse.ArgumentParser(
-        description="主力资金50指数 — 每日盘后更新成分股")
+        description="主力资金50指数 — 每周五盘后更新成分股（节假日顺延）")
     p.add_argument("--date", default=None,
                    help="生效日期 YYYY-MM-DD（默认: 盘后取最近交易日）")
     p.add_argument("--top", type=int, default=DEFAULT_TOP_N,
