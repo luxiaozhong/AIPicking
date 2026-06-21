@@ -470,11 +470,12 @@ def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
             ON CONFLICT (index_code, ts_code, eff_date) DO UPDATE SET
                 stock_name = EXCLUDED.stock_name,
                 weight     = EXCLUDED.weight,
+                market_cap = EXCLUDED.market_cap,
                 updated_at = NOW() AT TIME ZONE 'Asia/Shanghai'
             """,
             [
                 (INDEX_CODE, s["ts_code"], s["stock_name"],
-                 "", None, s["weight"], eff_date)
+                 "", s.get("flow_15d"), s["weight"], eff_date)
                 for s in stocks
             ],
             template="(%s, %s, %s, %s, %s, %s, %s)",
