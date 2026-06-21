@@ -531,7 +531,7 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
     """主流程"""
     conn = get_conn()
     try:
-        # 0. 调仓日检查（--force 或 --date 指定日期时跳过）
+        # 0. 调仓日检查
         if not force and not is_rebalance_day(eff_date):
             logging.info("非调仓日（%s），跳过。可用 --force 强制运行", eff_date)
             return {"success": True, "mode": "skip", "reason": "not_rebalance_day", "eff_date": eff_date}
@@ -543,7 +543,7 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
                           len(trade_dates), LOOKBACK_DAYS)
             return {"success": False, "error": "insufficient_trade_days"}
 
-        # 2. 计算排名（取 top RANKING_LIMIT，给缓冲垫留空间）
+        # 2. 计算排名
         rankings = compute_rankings(conn, trade_dates, RANKING_LIMIT)
         if not rankings:
             logging.error("无符合条件的股票")
@@ -592,11 +592,11 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
                 print(f"  {i:>4} | {s['ts_code']:<10} | {s['stock_name']:<8} | {s['flow_15d']/1e8:>10.2f}")
             return {"success": True, "mode": "dry_run", "count": len(stocks)}
 
-        # 3. 写入
+        # 6. 写入
         upsert_index_info(conn, eff_date, len(stocks))
         upsert_constituents(conn, stocks, eff_date)
 
-        # 4. 验证
+        # 7. 验证
         verify(conn, eff_date)
 
         return {"success": True, "count": len(stocks), "eff_date": eff_date}
