@@ -46,6 +46,10 @@ class RebalanceService:
                 if k not in config:
                     config[k] = v
 
+        # 自动生成名称：指数代码-推荐 N-回顾 M
+        if not data.name:
+            data.name = f"{config['index_code']}-推荐{config['N']}-回顾{config['M']}"
+
         report = RebalanceReport(
             strategy_id=data.strategy_id,
             user_id=user_id,

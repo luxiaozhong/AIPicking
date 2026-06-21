@@ -184,7 +184,14 @@ export default function RebalanceDetail() {
   return (
     <>
       <PageHeader
-        title={report.name || `调仓回测 #${report.id}`}
+        title={(() => {
+          if (report.name) return report.name;
+          const c = report.config;
+          if (c && c.index_code) {
+            return `${c.index_code}-推荐${c.N ?? '?'}-回顾${c.M ?? '?'}`;
+          }
+          return `调仓回测 #${report.id}`;
+        })()}
         breadcrumb={[
           { title: '回测列表', path: '/backtests' },
           { title: '调仓回测详情' },

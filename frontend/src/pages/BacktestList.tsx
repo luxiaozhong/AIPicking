@@ -157,7 +157,14 @@ export default function BacktestList() {
       title: '名称', dataIndex: 'name', key: 'name',
       render: (text: string, record: RebalanceReport) => (
         <Button type="link" onClick={() => navigate(`/backtests/rebalance/${record.id}`)}>
-          {text || `调仓回测 #${record.id}`}
+          {(() => {
+            if (text) return text;
+            const c = record.config;
+            if (c && c.index_code) {
+              return `${c.index_code}-推荐${c.N ?? '?'}-回顾${c.M ?? '?'}`;
+            }
+            return `调仓回测 #${record.id}`;
+          })()}
         </Button>
       ),
     },
