@@ -114,6 +114,9 @@ BUFFER_KICK_RANK = 55       # 持仓排名 > 此值则强制踢出
 BUFFER_ENTER_RANK = 45      # 未持仓排名 ≤ 此值则优先纳入
 RANKING_LIMIT = 60          # 计算排名时取 top 60（>= BUFFER_KICK_RANK）
 
+MA_PERIOD = 20              # 均线周期
+MAX_5D_GAIN = 0.15          # 5日最大涨幅（15%）
+
 
 def is_trade_day(date_str: str) -> bool:
     """判断是否为交易日，输入 YYYYMMDD 或 YYYY-MM-DD"""
@@ -362,11 +365,77 @@ def apply_buffer(rankings: list[dict], holdings: list[dict], top_n: int) -> list
     return result[:top_n]
 
 
+def apply_trend_filter(conn, ts_codes: list[str], end_date: str) -> set[str]:
+    """批量趋势过滤，返回通过过滤的 ts_code 集合。
+
+    两个条件（AND）：
+      1. 收盘价 > 20日均线（基于最近 20 个交易日的 AVG(close)）
+      2. 5日涨幅 < 15%（(close - close_5d_ago) / close_5d_ago）
+
+    Args:
+        conn: psycopg2 连接
+        ts_codes: 待检查的股票代码列表
+        end_date: 截止交易日 YYYY-MM-DD
+
+    Returns:
+        通过过滤的 ts_code 集合
+    """
+    if not ts_codes:
+        return set()
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH daily_window AS (
+                SELECT
+                    ts_code,
+                    trade_date,
+                    close,
+                    AVG(close) OVER (
+                        PARTITION BY ts_code ORDER BY trade_date
+                        ROWS BETWEEN %s PRECEDING AND CURRENT ROW
+                    ) AS ma,
+                    LAG(close, %s) OVER (
+                        PARTITION BY ts_code ORDER BY trade_date
+                    ) AS close_5d_ago
+                FROM daily
+                WHERE ts_code = ANY(%s)
+                  AND trade_date <= %s
+            ),
+            latest AS (
+                SELECT DISTINCT ON (ts_code)
+                    ts_code, close, ma, close_5d_ago
+                FROM daily_window
+                WHERE trade_date = (
+                    SELECT MAX(trade_date) FROM daily_window
+                    WHERE ts_code = daily_window.ts_code
+                )
+            )
+            SELECT ts_code FROM latest
+            WHERE close > ma
+              AND close_5d_ago IS NOT NULL
+              AND close_5d_ago > 0
+              AND (close - close_5d_ago) / close_5d_ago < %s
+            """,
+            (MA_PERIOD - 1, 4, ts_codes, end_date, MAX_5D_GAIN),
+        )
+        passed = {r[0] for r in cur.fetchall()}
+
+    failed = len(ts_codes) - len(passed)
+    if failed:
+        logging.info("趋势过滤: %d/%d 通过, %d 未通过（20MA或5日涨幅≥15%%）",
+                     len(passed), len(ts_codes), failed)
+    else:
+        logging.info("趋势过滤: %d/%d 全部通过", len(passed), len(ts_codes))
+
+    return passed
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Database upsert
 # ═════════════════════════════════════════════════════════════════════════
 
-def upsert_index_info(conn, eff_date: str) -> None:
+def upsert_index_info(conn, eff_date: str, count: int) -> None:
     """幂等写入指数元数据到 index_info"""
     with conn.cursor() as cur:
         cur.execute(
@@ -380,10 +449,10 @@ def upsert_index_info(conn, eff_date: str) -> None:
                 updated_at = NOW() AT TIME ZONE 'Asia/Shanghai'
             """,
             (INDEX_CODE, INDEX_NAME, FULL_NAME, PUBLISHER,
-             DEFAULT_TOP_N, DATA_SOURCE, eff_date),
+             count, DATA_SOURCE, eff_date),
         )
     conn.commit()
-    logging.info("指数元数据已更新: %s (%s)", FULL_NAME, INDEX_CODE)
+    logging.info("指数元数据已更新: %s (%s), %d 只成分股", FULL_NAME, INDEX_CODE, count)
 
 
 def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
@@ -474,8 +543,46 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
                           len(trade_dates), LOOKBACK_DAYS)
             return {"success": False, "error": "insufficient_trade_days"}
 
-        # 2. 计算 Top N
-        stocks = compute_rankings(conn, trade_dates)
+        # 2. 计算排名（取 top RANKING_LIMIT，给缓冲垫留空间）
+        rankings = compute_rankings(conn, trade_dates, RANKING_LIMIT)
+        if not rankings:
+            logging.error("无符合条件的股票")
+            return {"success": False, "error": "no_qualified_stocks"}
+
+        # 3. 获取当前持仓
+        holdings = get_current_holdings(conn)
+
+        # 4. 趋势过滤（仅对未持仓的候选股）
+        holding_codes = {h["ts_code"] for h in holdings}
+        candidate_codes = [
+            r["ts_code"] for r in rankings if r["ts_code"] not in holding_codes
+        ]
+        if candidate_codes:
+            passed_codes = apply_trend_filter(conn, candidate_codes, trade_dates[0])
+        else:
+            passed_codes = set()
+
+        # 构建过滤后的排名列表：持仓股始终保留（不受趋势过滤影响）
+        filtered_rankings = [
+            r for r in rankings
+            if r["ts_code"] in holding_codes or r["ts_code"] in passed_codes
+        ]
+
+        # 5. 应用缓冲垫
+        if holdings:
+            stocks = apply_buffer(filtered_rankings, holdings, top_n)
+        else:
+            # 首次运行：无历史持仓，直接取过滤后 Top N
+            stocks = filtered_rankings[:top_n]
+            for s in stocks:
+                s["weight"] = EQUAL_WEIGHT
+            logging.info("首次运行: 直接取过滤后 Top %d", len(stocks))
+
+        if len(stocks) < top_n:
+            logging.warning(
+                "最终成分股仅 %d 只（目标 %d）—— 趋势过滤后符合条件的不足",
+                len(stocks), top_n,
+            )
 
         if dry_run:
             logging.info("[DRY RUN] 不写入数据库")
@@ -486,7 +593,7 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
             return {"success": True, "mode": "dry_run", "count": len(stocks)}
 
         # 3. 写入
-        upsert_index_info(conn, eff_date)
+        upsert_index_info(conn, eff_date, len(stocks))
         upsert_constituents(conn, stocks, eff_date)
 
         # 4. 验证
