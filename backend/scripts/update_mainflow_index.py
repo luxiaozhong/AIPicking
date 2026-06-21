@@ -137,6 +137,39 @@ def get_latest_trade_day() -> str:
     raise RuntimeError("无法找到最近交易日")
 
 
+def is_rebalance_day(date_str: str) -> bool:
+    """判断 date_str 是否为调仓日。
+
+    规则：最近一个周五（含当日），如果周五是节假日则顺延到下一交易日。
+
+    Args:
+        date_str: YYYY-MM-DD 格式日期
+
+    Returns:
+        True 如果当天是调仓日
+    """
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+
+    # 1. 找最近一个周五
+    days_since_friday = (d.weekday() - 4) % 7
+    last_friday = d - timedelta(days=days_since_friday)
+    last_friday_key = last_friday.strftime("%Y%m%d")
+
+    # 2. 最近周五是交易日 且 今天就是那个周五 → 调仓日
+    if is_trade_day(last_friday_key) and d == last_friday:
+        return True
+
+    # 3. 最近周五是节假日 → 找顺延后的第一个交易日
+    if not is_trade_day(last_friday_key):
+        next_day = last_friday + timedelta(days=1)
+        for _ in range(7):
+            if is_trade_day(next_day.strftime("%Y%m%d")):
+                return d == next_day  # 今天就是顺延日
+            next_day += timedelta(days=1)
+
+    return False
+
+
 def get_lookback_trade_dates(conn, end_date: str, n: int = LOOKBACK_DAYS) -> list[str]:
     """从 daily 表中取最近 N 个有日线数据的交易日（降序），返回 YYYY-MM-DD 列表。"""
     with conn.cursor() as cur:
@@ -251,18 +284,11 @@ def upsert_index_info(conn, eff_date: str) -> None:
 
 
 def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
-    """写入成分股到 index_constituents（先删旧再插新，只保留最新一批）"""
+    """写入成分股到 index_constituents（保留历史 eff_date，可回溯）"""
     if not stocks:
         return 0
 
     with conn.cursor() as cur:
-        # 删除该指数所有旧记录，确保表中只有最新一批成分股
-        cur.execute(
-            "DELETE FROM index_constituents WHERE index_code = %s",
-            (INDEX_CODE,),
-        )
-        logging.info("已删除 %s 旧成分股记录", cur.rowcount)
-
         psycopg2.extras.execute_values(
             cur,
             """
@@ -329,10 +355,15 @@ def verify(conn, eff_date: str) -> None:
 # Orchestrator
 # ═════════════════════════════════════════════════════════════════════════
 
-def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False) -> dict:
+def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force: bool = False) -> dict:
     """主流程"""
     conn = get_conn()
     try:
+        # 0. 调仓日检查（--force 或 --date 指定日期时跳过）
+        if not force and not is_rebalance_day(eff_date):
+            logging.info("非调仓日（%s），跳过。可用 --force 强制运行", eff_date)
+            return {"success": True, "mode": "skip", "reason": "not_rebalance_day", "eff_date": eff_date}
+
         # 1. 取最近 N 个交易日
         trade_dates = get_lookback_trade_dates(conn, eff_date, LOOKBACK_DAYS)
         if len(trade_dates) < 3:
@@ -377,6 +408,8 @@ def main():
                    help=f"成分股数量（默认 {DEFAULT_TOP_N}）")
     p.add_argument("--dry-run", action="store_true",
                    help="仅预览 Top N，不写入数据库")
+    p.add_argument("--force", action="store_true",
+                   help="忽略调仓日检查，强制运行（用于回测补跑）")
     p.add_argument("--pg-url", default=None,
                    help="PostgreSQL 连接 URL（默认: $DATABASE_URL）")
     p.add_argument("--log-level", default="INFO",
@@ -404,10 +437,14 @@ def main():
 
     logging.info("主力资金50指数更新 — eff_date=%s top=%d", eff_date, args.top)
 
-    result = run(eff_date=eff_date, top_n=args.top, dry_run=args.dry_run)
+    # 指定 --date 时自动视为 force（允许在非周五回测）
+    is_force = args.force or args.date is not None
+    result = run(eff_date=eff_date, top_n=args.top, dry_run=args.dry_run, force=is_force)
 
     if result["success"]:
-        if result.get("mode") == "dry_run":
+        if result.get("mode") == "skip":
+            print(f"⏭ 非调仓日，已跳过（{result['eff_date']}）")
+        elif result.get("mode") == "dry_run":
             print(f"\n✅ [DRY RUN] 预览完成：{result['count']} 只")
         else:
             print(f"\n✅ 主力资金50 更新完成：{result['count']} 只成分股（{result['eff_date']}）")
