@@ -177,21 +177,25 @@ def load_index_stocks(index_code: str):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # 取最新生效日的成分股，JOIN stocks 获取带后缀的 ts_code
+            # 取指数全部成分股（按 ts_code 去重，保留最新 eff_date 的记录），
+            # JOIN stocks 获取带后缀的 ts_code。
+            #
+            # 不用 MAX(eff_date) 全局过滤，因为手动维护的临时指数（如 900002）
+            # 成分股在不同日期分批加入，全局取最大 eff_date 会导致只拿到最新一批。
             cur.execute(
                 """
                 SELECT ic.ts_code AS raw_code, ic.stock_name,
                        s.ts_code AS full_ts_code
-                FROM index_constituents ic
+                FROM (
+                    SELECT DISTINCT ON (ts_code) ts_code, stock_name, weight
+                    FROM index_constituents
+                    WHERE index_code = %s
+                    ORDER BY ts_code, eff_date DESC
+                ) ic
                 LEFT JOIN stocks s ON (s.ts_code LIKE ic.ts_code || '.%%' OR s.ts_code = ic.ts_code)
-                WHERE ic.index_code = %s
-                  AND ic.eff_date = (
-                      SELECT MAX(eff_date) FROM index_constituents
-                      WHERE index_code = %s
-                  )
                 ORDER BY ic.weight DESC NULLS LAST
                 """,
-                (index_code, index_code),
+                (index_code,),
             )
             rows = cur.fetchall()
     finally:
