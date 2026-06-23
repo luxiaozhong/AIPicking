@@ -32,6 +32,7 @@ export interface ConstituentFlowItem {
   main_inflow_circ_rate: number;
   main_inflow_rank: number | null;
   close_price: number;
+  pct_change: number;
 }
 
 export interface ConstituentFlowRanking {

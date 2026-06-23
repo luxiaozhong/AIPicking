@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Spin, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import type { IndustrySummaryItem } from '@/services/indexFundFlowService';
@@ -9,16 +9,20 @@ const GREEN_COLOR = '#3f8600';
 interface Props {
   data: IndustrySummaryItem[];
   loading: boolean;
+  onIndustryClick?: (industryName: string) => void;
 }
 
-const IndustrySummaryBar: React.FC<Props> = ({ data, loading }) => {
+const IndustrySummaryBar: React.FC<Props> = ({ data, loading, onIndustryClick }) => {
+  const sorted = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    return [...data].sort(
+      (a, b) => Math.abs(b.main_net_yi) - Math.abs(a.main_net_yi)
+    );
+  }, [data]);
+
   const option = useMemo(() => {
     if (!data || data.length === 0) return {};
 
-    // Sort by abs value descending
-    const sorted = [...data].sort(
-      (a, b) => Math.abs(b.main_net_yi) - Math.abs(a.main_net_yi)
-    );
     const names = sorted.map((d) => d.industry_name).reverse();
     const values = sorted.map((d) => d.main_net_yi).reverse();
 
@@ -75,7 +79,17 @@ const IndustrySummaryBar: React.FC<Props> = ({ data, loading }) => {
         },
       ],
     };
-  }, [data]);
+  }, [data, sorted]);
+
+  const handleChartClick = useCallback((params: any) => {
+    if (!onIndustryClick || !sorted.length) return;
+    // ECharts bar click gives dataIndex; map back to sorted order
+    const idx = sorted.length - 1 - params.dataIndex;
+    const item = sorted[idx];
+    if (item) {
+      onIndustryClick(item.industry_name);
+    }
+  }, [onIndustryClick, sorted]);
 
   if (loading) {
     return (
@@ -90,7 +104,12 @@ const IndustrySummaryBar: React.FC<Props> = ({ data, loading }) => {
   }
 
   return (
-    <ReactECharts option={option} style={{ height: 350, width: '100%' }} notMerge />
+    <ReactECharts
+      option={option}
+      style={{ height: 350, width: '100%' }}
+      notMerge
+      onEvents={{ click: handleChartClick }}
+    />
   );
 };
 

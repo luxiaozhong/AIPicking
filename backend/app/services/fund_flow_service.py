@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import select, func, case, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.stock_tables import DailyStockFundFlow, Stock
+from ..models.stock_tables import DailyStockFundFlow, Stock, Daily
 from ..models.index_tables import IndexInfo, IndexConstituent
 
 
@@ -1031,6 +1031,7 @@ class FundFlowService:
         f = DailyStockFundFlow.__table__
         s = Stock.__table__
         ic = IndexConstituent.__table__
+        dl = Daily.__table__
 
         # Determine sort column
         sort_map = {
@@ -1068,10 +1069,12 @@ class FundFlowService:
                 f.c.main_inflow_circ_rate,
                 f.c.main_inflow_rank,
                 f.c.close_price,
+                dl.c.pre_close,
             )
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
                 .join(f, f.c.ts_code == s.c.ts_code)
+                .join(dl, (dl.c.ts_code == s.c.ts_code) & (dl.c.trade_date == f.c.trade_date), isouter=True)
             )
             .where(
                 ic.c.index_code == index_code,
@@ -1092,6 +1095,9 @@ class FundFlowService:
         for r in rows:
             ts = r["ts_code"]
             r5 = rolling.get(ts, {})
+            close = float(r["close_price"] or 0)
+            pre_close = float(r["pre_close"] or 0)
+            pct_change = round((close - pre_close) / pre_close * 100, 2) if pre_close else 0
             items.append({
                 "ts_code": r["ts_code"],
                 "stock_name": r["stock_name"] or "",
@@ -1111,7 +1117,8 @@ class FundFlowService:
                 "main_net_flow_20d": r5.get(f"{d}|20d", 0),
                 "main_inflow_circ_rate": float(r["main_inflow_circ_rate"] or 0),
                 "main_inflow_rank": r["main_inflow_rank"],
-                "close_price": float(r["close_price"] or 0),
+                "close_price": close,
+                "pct_change": pct_change,
             })
         return {"trade_date": FundFlowService._normalize_date(d), "items": items}
 

@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useCallback, useState } from 'react';
 import {
   Card, Row, Col, Tabs, Select, DatePicker, Spin, Empty, Alert,
   Statistic, Typography, Space, Tag, Button, InputNumber, Modal,
+  Drawer, Table,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   DollarOutlined, RiseOutlined, FallOutlined, ReloadOutlined,
   BarChartOutlined, PieChartOutlined,
@@ -10,7 +12,7 @@ import {
 import ReactECharts from 'echarts-for-react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useIndexFundFlowStore } from '@/stores/indexFundFlowStore';
-import { indexFundFlowService, type IndexHistoryItem, type RankingTrendData } from '@/services/indexFundFlowService';
+import { indexFundFlowService, type IndexHistoryItem, type RankingTrendData, type ConstituentFlowItem } from '@/services/indexFundFlowService';
 import ConstituentTreemap from '@/components/index-fund-flow/ConstituentTreemap';
 import BarChartRace from '@/components/index-fund-flow/BarChartRace';
 import MultiStockTrendChart from '@/components/index-fund-flow/MultiStockTrendChart';
@@ -40,6 +42,23 @@ const IndexFundFlow: React.FC = () => {
   const [kpiLoading, setKpiLoading] = useState(false);
   const [rankingTrend, setRankingTrend] = useState<RankingTrendData | null>(null);
   const [rankingTrendLoading, setRankingTrendLoading] = useState(false);
+
+  // 行业个股 Drawer
+  const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
+  const [industryStocks, setIndustryStocks] = useState<ConstituentFlowItem[]>([]);
+
+  const handleIndustryClick = useCallback((industryName: string) => {
+    setSelectedIndustry(industryName);
+    const stocks = store.constituentFlow
+      .filter((s) => s.industry_name === industryName)
+      .sort((a, b) => b.main_net_flow - a.main_net_flow);
+    setIndustryStocks(stocks);
+  }, [store.constituentFlow]);
+
+  const handleCloseIndustryDrawer = useCallback(() => {
+    setSelectedIndustry(null);
+    setIndustryStocks([]);
+  }, []);
 
   const fetchRankingTrend = useCallback(async () => {
     if (!store.selectedIndexCode) return;
@@ -120,6 +139,52 @@ const IndexFundFlow: React.FC = () => {
   }, [store.indices, store.selectedIndexCode]);
 
   const isLoading = Object.values(store.loading).some(Boolean) && store.constituentFlow.length === 0;
+
+  // 行业个股 Drawer 表格列
+  const industryStockColumns: ColumnsType<ConstituentFlowItem> = [
+    {
+      title: '#',
+      key: 'rank',
+      width: 40,
+      render: (_: any, __: any, idx: number) => idx + 1,
+    },
+    {
+      title: '代码',
+      dataIndex: 'ts_code',
+      width: 100,
+      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
+    },
+    {
+      title: '名称',
+      dataIndex: 'stock_name',
+      width: 80,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+    },
+    {
+      title: '主力净流入',
+      dataIndex: 'main_net_flow',
+      width: 120,
+      align: 'right',
+      sorter: (a, b) => a.main_net_flow - b.main_net_flow,
+      render: (v: number) => (
+        <span style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500, fontSize: 12 }}>
+          {(v / 1e8).toFixed(2)} 亿
+        </span>
+      ),
+    },
+    {
+      title: '涨跌幅',
+      dataIndex: 'pct_change',
+      width: 80,
+      align: 'right',
+      sorter: (a, b) => a.pct_change - b.pct_change,
+      render: (v: number) => (
+        <span style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500, fontSize: 12 }}>
+          {v > 0 ? '+' : ''}{v.toFixed(2)}%
+        </span>
+      ),
+    },
+  ];
 
   const tabItems = [
     {
@@ -258,6 +323,7 @@ const IndexFundFlow: React.FC = () => {
                 <IndustrySummaryBar
                   data={store.industrySummary}
                   loading={store.loading.industrySummary}
+                  onIndustryClick={handleIndustryClick}
                 />
               </Card>
             </Col>
@@ -481,6 +547,33 @@ const IndexFundFlow: React.FC = () => {
           />
         )}
       </Modal>
+
+      {/* 行业个股 Drawer */}
+      <Drawer
+        title={
+          <Space>
+            <Tag color="blue">{selectedIndustry}</Tag>
+            <Text strong>成分股 ({industryStocks.length})</Text>
+          </Space>
+        }
+        open={!!selectedIndustry}
+        onClose={handleCloseIndustryDrawer}
+        width={720}
+        destroyOnClose
+      >
+        <Table
+          dataSource={industryStocks}
+          rowKey="ts_code"
+          columns={industryStockColumns}
+          size="small"
+          pagination={false}
+          scroll={{ y: 'calc(100vh - 160px)' }}
+          onRow={(record) => ({
+            onClick: () => handleStockClick(record.ts_code),
+            style: { cursor: 'pointer' },
+          })}
+        />
+      </Drawer>
     </div>
   );
 };
