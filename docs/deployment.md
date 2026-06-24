@@ -31,12 +31,13 @@ git push origin feat/my-change
 # 合并到 main（PR 或本地 merge）
 git checkout main && git merge feat/my-change && git push origin main
 
-# 服务器：拉取 → 安装依赖 → 重启服务
+# 服务器：拉取 → 安装依赖 → DB 迁移 → 重启服务
 ssh root@101.35.254.125
 cd /opt/AIpicking
 git pull
 pip install -r backend/requirements.txt
-cd frontend && npm install --silent && npm run build
+cd backend && venv/bin/python scripts/migrate_schema.py   # ⚠️ 每次 git pull 后必须执行
+cd ../frontend && npm install --silent && npm run build
 systemctl restart aipicking
 ```
 
