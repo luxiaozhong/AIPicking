@@ -140,6 +140,13 @@ class FundFlowService:
         return d
 
     @staticmethod
+    async def _get_latest_snapshot_date(db: AsyncSession) -> str:
+        """获取 intraday_fund_snapshot 中最新交易日（盘中快照用）"""
+        sql = text("SELECT MAX(trade_date) FROM intraday_fund_snapshot")
+        result = await db.execute(sql)
+        return result.scalar()
+
+    @staticmethod
     def _normalize_date(d) -> str:
         """统一日期格式 YYYY-MM-DD"""
         if d is None:
@@ -1358,7 +1365,7 @@ class FundFlowService:
         trade_date: Optional[str] = None,
     ) -> dict:
         """查询 intraday_fund_snapshot，按 snapshot_time 分组返回"""
-        d = trade_date or await FundFlowService._get_latest_date(db)
+        d = trade_date or await FundFlowService._get_latest_snapshot_date(db)
         if not d:
             return {"trade_date": None, "snapshots": []}
 

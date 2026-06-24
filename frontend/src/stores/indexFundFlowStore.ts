@@ -29,6 +29,7 @@ interface IndexFundFlowState {
 
   // ── D 看板数据 ──
   constituentFlow: ConstituentFlowItem[];
+  constituentFlowDate: string | null;
   multiStockTrend: MultiStockTrend | null;
   industrySummary: IndustrySummaryItem[];
   treemapData: TreemapItem[];
@@ -72,6 +73,7 @@ export const useIndexFundFlowStore = create<IndexFundFlowState>((set, get) => ({
   selectedIndexCode: null,
   indices: [],
   constituentFlow: [],
+  constituentFlowDate: null,
   multiStockTrend: null,
   industrySummary: [],
   treemapData: [],
@@ -161,6 +163,7 @@ export const useIndexFundFlowStore = create<IndexFundFlowState>((set, get) => ({
       );
       set({
         constituentFlow: data.items,
+        constituentFlowDate: data.trade_date || null,
         lastUpdated: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
         loading: { ...get().loading, constituentFlow: false },
       });

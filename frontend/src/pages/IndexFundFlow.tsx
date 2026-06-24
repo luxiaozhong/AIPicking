@@ -7,7 +7,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   DollarOutlined, RiseOutlined, FallOutlined, ReloadOutlined,
-  BarChartOutlined, PieChartOutlined,
+  BarChartOutlined, PieChartOutlined, ClockCircleOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -132,6 +132,56 @@ const IndexFundFlow: React.FC = () => {
     const positivePct5d = items.length > 0 ? (positiveCount5d / items.length * 100) : 0;
     return { totalMainNet, totalMainNet5d, totalJumbo, totalBlock, positivePct, positiveCount, positivePct5d, total: items.length };
   }, [store.constituentFlow]);
+
+  // Intraday KPIs — derived from latest snapshot frame (today's real-time data)
+  const todayStr = useMemo(() => dayjs().format('YYYY-MM-DD'), []);
+
+  const { isShowingIntraday, intradayKpis, latestSnapshotTime, kpisIsToday } = useMemo(() => {
+    const frames = store.snapshots?.snapshots;
+    const hasFrames = frames && Array.isArray(frames) && frames.length > 0;
+    const snapshotDate = store.snapshots?.trade_date;
+    const isTodaySnapshot = snapshotDate === todayStr;
+    const hasNoExplicitDate = !store.selectedDate;
+
+    // Check if EOD data (constituentFlow) is from the same date as snapshots
+    // If so, kpis values are today's data, not yesterday's — adjust comparison labels
+    const kpisIsToday = store.constituentFlowDate === todayStr;
+
+    if (!hasNoExplicitDate || !hasFrames || !isTodaySnapshot) {
+      return { isShowingIntraday: false, intradayKpis: null, latestSnapshotTime: null, kpisIsToday: false };
+    }
+
+    // Get the latest (most recent) frame
+    const latestFrame = frames[frames.length - 1];
+    const stocks = latestFrame.stocks;
+
+    // Today's intraday flows
+    const totalMainNet = stocks.reduce((s, st) => s + st.main_net_flow, 0);
+    const totalJumbo = stocks.reduce((s, st) => s + st.jumbo_net_flow, 0);
+    const totalBlock = stocks.reduce((s, st) => s + st.block_net_flow, 0);
+    const positiveCount = stocks.filter(st => st.main_net_flow > 0).length;
+    const positivePct = stocks.length > 0 ? (positiveCount / stocks.length * 100) : 0;
+
+    // 5-day cumulative: today intraday + previous 4 EOD days (same logic as BarChartRace)
+    const totalMainNet5d = stocks.reduce((s, st) => s + (st.main_net_flow_5d || 0), 0);
+    const totalPrev4d = totalMainNet5d - totalMainNet;
+
+    // Extract HH:MM from snapshot_time (handles full timestamps like "2026-06-24 14:55:00+08:00")
+    const rawTime = latestFrame.snapshot_time;
+    const match = rawTime.match(/(\d{2}:\d{2})/);
+    const displayTime = match ? match[1] : rawTime.substring(0, 5);
+
+    return {
+      isShowingIntraday: true,
+      kpisIsToday,
+      intradayKpis: {
+        totalMainNet, totalMainNet5d, totalPrev4d,
+        totalJumbo, totalBlock,
+        positivePct, positiveCount, total: stocks.length,
+      },
+      latestSnapshotTime: displayTime,
+    };
+  }, [store.snapshots, store.selectedDate, store.constituentFlowDate, todayStr]);
 
   const selectedIndexName = useMemo(() => {
     const idx = store.indices.find((i) => i.index_code === store.selectedIndexCode);
@@ -403,63 +453,91 @@ const IndexFundFlow: React.FC = () => {
         />
       )}
 
+      {/* 盘中数据时间指示 */}
+      {isShowingIntraday && latestSnapshotTime && (
+        <div style={{ marginBottom: 8, fontSize: 12, color: '#1677ff', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ClockCircleOutlined />
+          <span>盘中数据截至 <Text strong style={{ color: '#1677ff' }}>{latestSnapshotTime}</Text>{store.isPolling && '（自动刷新中）'}</span>
+        </div>
+      )}
+
       {/* KPI Cards */}
       {kpis && (
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable onClick={() => handleKpiClick('主力净流入', 'main_net_yi')}>
               <Statistic
-                title="主力净流入"
-                value={kpis.totalMainNet / 1e8}
+                title={isShowingIntraday ? '主力净流入（盘中）' : '主力净流入'}
+                value={isShowingIntraday ? intradayKpis!.totalMainNet5d / 1e8 : kpis.totalMainNet / 1e8}
                 precision={2}
                 suffix="亿"
-                prefix={kpis.totalMainNet >= 0 ? <RiseOutlined /> : <FallOutlined />}
-                valueStyle={{ color: kpis.totalMainNet >= 0 ? RED_COLOR : GREEN_COLOR, fontSize: 18 }}
+                prefix={(isShowingIntraday ? intradayKpis!.totalMainNet5d : kpis.totalMainNet) >= 0 ? <RiseOutlined /> : <FallOutlined />}
+                valueStyle={{ color: (isShowingIntraday ? intradayKpis!.totalMainNet5d : kpis.totalMainNet) >= 0 ? RED_COLOR : GREEN_COLOR, fontSize: 18 }}
               />
               <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                5日累计: <Text style={{ color: kpis.totalMainNet5d >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>{(kpis.totalMainNet5d / 1e8).toFixed(2)}亿</Text>
+                {isShowingIntraday ? (
+                  <span>
+                    前4日 <Text style={{ color: intradayKpis!.totalPrev4d >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>{(intradayKpis!.totalPrev4d / 1e8).toFixed(2)}亿</Text>
+                    <span style={{ margin: '0 4px', color: '#ccc' }}>|</span>
+                    今日 <Text style={{ color: intradayKpis!.totalMainNet >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>{(intradayKpis!.totalMainNet / 1e8).toFixed(2)}亿</Text>
+                  </span>
+                ) : (
+                  <>5日累计: <Text style={{ color: kpis.totalMainNet5d >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>{(kpis.totalMainNet5d / 1e8).toFixed(2)}亿</Text></>
+                )}
               </div>
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable onClick={() => handleKpiClick('超大单净流入', 'jumbo_net_yi')}>
               <Statistic
-                title="超大单净流入"
-                value={kpis.totalJumbo / 1e8}
+                title={isShowingIntraday ? '超大单净流入（盘中）' : '超大单净流入'}
+                value={isShowingIntraday ? intradayKpis!.totalJumbo / 1e8 : kpis.totalJumbo / 1e8}
                 precision={2}
                 suffix="亿"
-                valueStyle={{ color: kpis.totalJumbo >= 0 ? RED_COLOR : GREEN_COLOR, fontSize: 18 }}
+                valueStyle={{ color: (isShowingIntraday ? intradayKpis!.totalJumbo : kpis.totalJumbo) >= 0 ? RED_COLOR : GREEN_COLOR, fontSize: 18 }}
               />
               <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                主力占比: <Text style={{ fontWeight: 500 }}>{kpis.totalMainNet !== 0 ? (kpis.totalJumbo / kpis.totalMainNet * 100).toFixed(0) : '-'}%</Text>
+                {isShowingIntraday && !kpisIsToday ? (
+                  <>昨日全天: <Text style={{ color: kpis.totalJumbo >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>{(kpis.totalJumbo / 1e8).toFixed(2)}亿</Text></>
+                ) : (
+                  <>主力占比: <Text style={{ fontWeight: 500 }}>{(isShowingIntraday ? intradayKpis!.totalMainNet : kpis.totalMainNet) !== 0 ? ((isShowingIntraday ? intradayKpis!.totalJumbo : kpis.totalJumbo) / (isShowingIntraday ? intradayKpis!.totalMainNet : kpis.totalMainNet) * 100).toFixed(0) : '-'}%</Text></>
+                )}
               </div>
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable onClick={() => handleKpiClick('大单净流入', 'block_net_yi')}>
               <Statistic
-                title="大单净流入"
-                value={kpis.totalBlock / 1e8}
+                title={isShowingIntraday ? '大单净流入（盘中）' : '大单净流入'}
+                value={isShowingIntraday ? intradayKpis!.totalBlock / 1e8 : kpis.totalBlock / 1e8}
                 precision={2}
                 suffix="亿"
-                valueStyle={{ color: kpis.totalBlock >= 0 ? RED_COLOR : GREEN_COLOR, fontSize: 18 }}
+                valueStyle={{ color: (isShowingIntraday ? intradayKpis!.totalBlock : kpis.totalBlock) >= 0 ? RED_COLOR : GREEN_COLOR, fontSize: 18 }}
               />
               <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                主力占比: <Text style={{ fontWeight: 500 }}>{kpis.totalMainNet !== 0 ? (kpis.totalBlock / kpis.totalMainNet * 100).toFixed(0) : '-'}%</Text>
+                {isShowingIntraday && !kpisIsToday ? (
+                  <>昨日全天: <Text style={{ color: kpis.totalBlock >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>{(kpis.totalBlock / 1e8).toFixed(2)}亿</Text></>
+                ) : (
+                  <>主力占比: <Text style={{ fontWeight: 500 }}>{(isShowingIntraday ? intradayKpis!.totalMainNet : kpis.totalMainNet) !== 0 ? ((isShowingIntraday ? intradayKpis!.totalBlock : kpis.totalBlock) / (isShowingIntraday ? intradayKpis!.totalMainNet : kpis.totalMainNet) * 100).toFixed(0) : '-'}%</Text></>
+                )}
               </div>
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable onClick={() => handleKpiClick('资金广度', 'positive_pct')}>
               <Statistic
-                title="资金广度"
-                value={kpis.positivePct}
+                title={isShowingIntraday ? '资金广度（盘中）' : '资金广度'}
+                value={isShowingIntraday ? intradayKpis!.positivePct : kpis.positivePct}
                 precision={1}
-                suffix={`% (${kpis.positiveCount}/${kpis.total})`}
+                suffix={`% (${isShowingIntraday ? `${intradayKpis!.positiveCount}/${intradayKpis!.total}` : `${kpis.positiveCount}/${kpis.total}`})`}
                 valueStyle={{ fontSize: 18 }}
               />
               <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                5日前: <Text style={{ fontWeight: 500 }}>{kpis.positivePct5d.toFixed(1)}%</Text>
+                {isShowingIntraday && !kpisIsToday ? (
+                  <>昨日全天: <Text style={{ fontWeight: 500 }}>{kpis.positivePct.toFixed(1)}% ({kpis.positiveCount}/{kpis.total})</Text></>
+                ) : (
+                  <>5日前: <Text style={{ fontWeight: 500 }}>{kpis.positivePct5d.toFixed(1)}%</Text></>
+                )}
               </div>
             </Card>
           </Col>
