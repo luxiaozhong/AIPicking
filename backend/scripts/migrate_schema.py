@@ -21,12 +21,15 @@ for _env_file in (".env", ".env.production"):
         load_dotenv(_path, override=True)
 
 import psycopg2
+import re
 
 DB_URL = os.getenv("SYNC_DATABASE_URL", "")
 if not DB_URL:
     print("错误: 未设置 SYNC_DATABASE_URL，请在 .env 或 .env.production 中配置")
     sys.exit(1)
 
+# 移除 SQLAlchemy 驱动前缀（+psycopg2 / +asyncpg），psycopg2 只接受纯 postgresql://
+DB_URL = re.sub(r"^postgresql\+[^:]+://", "postgresql://", DB_URL)
 conn = psycopg2.connect(DB_URL)
 cur = conn.cursor()
 
