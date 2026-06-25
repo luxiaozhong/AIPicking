@@ -508,6 +508,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
             cnt = count_daily(today_str)
             if cnt > 0:
                 print(f"✅ 今天({today_str})已有 {cnt} 条指数数据")
+                print(f"📊 指数历史更新完成！跳过 — 已有 {cnt} 条数据（覆盖 0 条）")
             else:
                 print(f"📅 盘后更新今天({today_str})，使用历史日线接口")
                 await run_history(today_str, today_str)
@@ -519,6 +520,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
         cnt = count_daily(latest)
         if cnt > 0:
             print(f"✅ 最近交易日({latest})已有 {cnt} 条指数数据，无需更新")
+            print(f"📊 指数历史更新完成！跳过 — 已有 {cnt} 条数据（覆盖 0 条）")
             return
         print(f"📅 补充最近交易日({latest})指数数据，使用历史日线接口")
         await run_history(latest, latest)

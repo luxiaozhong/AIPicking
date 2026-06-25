@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 数据同步报告脚本
-解析 update_daily.log 和 ingest.log，汇总后通过 QQ 邮箱发送 HTML 报告。
+优先读取 sync_all.py 生成的结构化摘要 JSON；JSON 不存在时回退到日志解析。
 
 用法:
   python sync_report.py                          # 自动取最新日期
@@ -23,7 +23,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import date, datetime
 from pathlib import Path
-from collections import defaultdict
+from typing import Any, Dict, Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent  # backend/
 _LOCAL_LOG_DIR = _PROJECT_ROOT.parent / "logs"           # project-root/logs/
@@ -32,7 +32,6 @@ _LOCAL_LOG_DIR = _PROJECT_ROOT.parent / "logs"           # project-root/logs/
 def _find_log_dir() -> Path:
     if "AIPICKING_LOG_DIR" in os.environ:
         return Path(os.environ["AIPICKING_LOG_DIR"])
-    # 检查服务器路径下是否有实际日志文件
     server_dir = Path("/var/log/aipicking")
     if (server_dir / "update_daily.log").exists() or (server_dir / "ingest.log").exists():
         return server_dir
@@ -42,6 +41,7 @@ LOG_DIR = _find_log_dir()
 
 UPDATE_LOG = LOG_DIR / "update_daily.log"
 INGEST_LOG = LOG_DIR / "ingest.log"
+SUMMARY_FILE = LOG_DIR / "sync_summary.json"
 
 # SMTP 配置文件：服务器路径 > 本地项目路径
 _SERVER_ENV = Path("/opt/AIpicking/backend/.sync_report_env")
@@ -60,21 +60,40 @@ def load_env():
                     os.environ[key] = val
 
 
-def parse_update_log(target_date=None):
-    """解析日线更新日志，返回最新的同步结果。"""
+# ═════════════════════════════════════════════════════════════════════════
+# 数据加载
+# ═════════════════════════════════════════════════════════════════════════
+
+def load_summary(target_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """尝试读取 sync_all.py 生成的结构化摘要 JSON。"""
+    if not SUMMARY_FILE.exists():
+        return None
+
+    try:
+        data = json.loads(SUMMARY_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if target_date:
+        target = target_date.replace("-", "")
+        if data.get("date") != target:
+            return None
+
+    return data
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 旧版日志解析（当 sync_summary.json 不存在时回退使用）
+# ═════════════════════════════════════════════════════════════════════════
+
+def _parse_update_log(target_date=None):
+    """解析 update_daily.log — 旧版回退路径。"""
     if not UPDATE_LOG.exists():
         return {"error": f"日志文件不存在: {UPDATE_LOG}"}
 
     text = UPDATE_LOG.read_text()
     lines = text.splitlines()
 
-    # 找所有 run 的边界
-    # 支持多种日期标记行：
-    #   📅 盘后更新今天(YYYYMMDD)        — update_index_daily.py / update_daily.py
-    #   ✅ 今天(YYYYMMDD)已有             — 数据完整跳过（旧格式）
-    #   ✅ 最近交易日(YYYYMMDD)已有        — 非交易日跳过（旧格式）
-    #   📅 今天(YYYYMMDD)无数据            — update_daily.py
-    #   📅 最近交易日(YYYYMMDD)无数据       — update_daily.py
     RUN_HEADER_PATTERNS = [
         re.compile(r"📅 盘后更新今天\((\d{8})\)"),
         re.compile(r"✅ 今天\((\d{8})\)已有"),
@@ -92,94 +111,52 @@ def parse_update_log(target_date=None):
             m = pat.search(line)
             if m:
                 new_date = m.group(1)
-                # 相同日期的连续行不新建 run（如 📅 + ✅ 同一天）
                 if current_date == new_date and current_start is not None:
                     break
                 if current_start is not None:
-                    runs.append({
-                        "date": current_date,
-                        "start": current_start,
-                        "end": i,
-                    })
+                    runs.append({"date": current_date, "start": current_start, "end": i})
                 current_start = i
                 current_date = new_date
                 break
 
-    # 最后一个 run
     if current_start is not None:
-        runs.append({
-            "date": current_date,
-            "start": current_start,
-            "end": len(lines),
-        })
+        runs.append({"date": current_date, "start": current_start, "end": len(lines)})
 
     if not runs:
         return {"error": "未找到任何同步记录"}
 
-    # 过滤目标日期
     if target_date:
         target = target_date.replace("-", "")
         runs = [r for r in runs if r["date"] == target]
         if not runs:
             return {"error": f"未找到 {target_date} 的同步记录"}
 
-    # 取最新日期的所有 run（同一天可能有多个 run：个股 + 指数）
     latest_date = runs[-1]["date"]
     day_runs = [r for r in runs if r["date"] == latest_date]
 
-    # 汇总
     total_records = 0
-    details = []
-    warnings = []
-    errors = []
-
     for run in day_runs:
         run_lines = lines[run["start"]:run["end"]]
         for line in run_lines:
-            # 完成行: "🎉 历史更新完成！新增/覆盖 X 条数据"
             m = re.search(r"🎉 历史更新完成！新增/覆盖 (\d+) 条", line)
             if m:
                 total_records += int(m.group(1))
-            # 警告/错误
-            if "⚠️" in line or "ERROR" in line.upper():
-                warnings.append(line.strip())
-            if "❌" in line or "FATAL" in line:
-                errors.append(line.strip())
+            m = re.search(r"📊 历史更新完成！跳过 — 已有 ([\d,]+) 条", line)
+            if m and total_records == 0:
+                total_records = int(m.group(1).replace(",", ""))
 
-        # 提取 run 类型（从完成行判断，更准确）
-        run_type = "个股日线"
-        for line in run_lines:
-            if "指数数据" in line:
-                run_type = "指数数据"
-                break
-            if "个股" in line:
-                run_type = "个股日线"
-        if run_type not in details:
-            details.append(run_type)
-
-    # 格式化日期
     display_date = f"{latest_date[:4]}-{latest_date[4:6]}-{latest_date[6:8]}"
-
-    warning_count = len(warnings)
-    return {
-        "date": display_date,
-        "records": total_records,
-        "details": details,
-        "warnings": warnings[-5:],  # 只保留最后 5 条详情
-        "warning_count": warning_count,  # 真实警告总数
-        "errors": errors,
-    }
+    return {"date": display_date, "records": total_records}
 
 
-def parse_ingest_log(target_date=None):
-    """解析 ingest.log（龙虎榜 + 市场数据），返回最新的同步结果。"""
+def _parse_ingest_log(target_date=None):
+    """解析 ingest.log — 旧版回退路径。"""
     if not INGEST_LOG.exists():
         return {"error": f"日志文件不存在: {INGEST_LOG}"}
 
     text = INGEST_LOG.read_text()
     lines = text.splitlines()
 
-    # 找所有的 "Sync YYYY-MM-DD complete:" 行来确定可用日期
     sync_dates = []
     for line in lines:
         m = re.search(r"Sync (\d{4}-\d{2}-\d{2}) complete:", line)
@@ -189,11 +166,8 @@ def parse_ingest_log(target_date=None):
     if not sync_dates:
         return {"error": "未找到市场数据同步记录"}
 
-    # 确定目标日期
     if target_date:
-        target = target_date
-        if len(target) == 8:
-            target = f"{target[:4]}-{target[4:6]}-{target[6:8]}"
+        target = target_date if len(target_date) == 10 else f"{target_date[:4]}-{target_date[4:6]}-{target_date[6:8]}"
         if target not in sync_dates:
             return {"error": f"未找到 {target} 的市场数据同步记录"}
         target_date_str = target
@@ -208,21 +182,14 @@ def parse_ingest_log(target_date=None):
         "northbound": "",
         "industries": None,
         "concepts": None,
-        "top_industry": "",
-        "top_concept": "",
-        "errors": [],
     }
 
-    # 提取龙虎榜数据: "Saved XX dragon tiger stocks for YYYY-MM-DD"
-    dt_pattern = re.compile(
-        rf"Saved (\d+) dragon tiger stocks for {target_date_str}"
-    )
+    dt_pattern = re.compile(rf"Saved (\d+) dragon tiger stocks for {target_date_str}")
     for line in lines:
         m = dt_pattern.search(line)
         if m:
             result["dragon_tiger"] = int(m.group(1))
 
-    # 提取市场数据 complete 行
     complete_pattern = re.compile(
         rf"Sync {target_date_str} complete: "
         r"stocks=(\d+) themes=(\d+) northbound=(\S+) industries=(\d+) concepts=(\d+)"
@@ -236,98 +203,208 @@ def parse_ingest_log(target_date=None):
             result["industries"] = int(m.group(4))
             result["concepts"] = int(m.group(5))
 
-    # 提取北向资金详情
-    nb_pattern = re.compile(
-        rf"Saved northbound: (.+)"
-    )
-    for line in lines:
-        m = nb_pattern.search(line)
-        if m and target_date_str in _get_context(lines, line):
-            result["northbound"] = m.group(1)
-
-    # 提取 top 板块
-    top_ind = re.compile(r"Fetched \d+ industry sectors \(top: (.+)\)")
-    top_con = re.compile(r"Fetched \d+ concept sectors \(top: (.+)\)")
-    for line in lines:
-        if target_date_str in _get_context(lines, line):
-            m = top_ind.search(line)
-            if m:
-                result["top_industry"] = m.group(1)
-            m = top_con.search(line)
-            if m:
-                result["top_concept"] = m.group(1)
-
-    # 收集错误
-    for line in lines:
-        if target_date_str in _get_context(lines, line) and "ERROR" in line:
-            result["errors"].append(line.strip())
-
     return result
 
 
-def _get_context(lines, line, radius=2):
-    """获取某行附近几行的日期上下文，用于判断行属于哪个日期。"""
-    try:
-        idx = lines.index(line) if isinstance(line, str) else next(
-            i for i, l in enumerate(lines) if line in l
-        )
-    except StopIteration:
+# ═════════════════════════════════════════════════════════════════════════
+# HTML 生成
+# ═════════════════════════════════════════════════════════════════════════
+
+def _ok(val, default="N/A"):
+    if val is None:
+        return f'<span style="color:#999">{default}</span>'
+    return str(val)
+
+
+def _num(val, suffix=""):
+    if val is None:
+        return '<span style="color:#999">N/A</span>'
+    return f"{val:,}{suffix}"
+
+
+def _job_row(label: str, job: Dict[str, Any], extra: str = "") -> str:
+    """生成单个 job 的状态行。"""
+    if not job.get("ok"):
+        err = job.get("error", "执行失败")
+        return f'<tr><td>{label}</td><td style="color:#e74c3c">✗ {err}</td></tr>'
+    if extra:
+        return f"<tr><td>{label}</td><td>{extra}</td></tr>"
+    return ""
+
+
+def _build_section(icon: str, title: str, rows: str) -> str:
+    if not rows:
         return ""
-    start = max(0, idx - radius)
-    end = min(len(lines), idx + radius + 1)
-    return "\n".join(lines[start:end])
+    return f"""
+    <h2 style="font-size:16px; color:#1a1a2e; border-bottom:2px solid #3498db; padding-bottom:8px; margin-top:24px">
+      {icon} {title}
+    </h2>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:20px">
+      <colgroup><col style="width:38%"><col style="width:62%"></colgroup>
+      {rows}
+    </table>"""
 
 
-def compose_html(daily, ingest):
-    """生成 HTML 邮件正文。"""
+def compose_html(summary: Dict[str, Any]) -> str:
+    """从结构化摘要生成 HTML 邮件正文。"""
     today = date.today().strftime("%Y-%m-%d")
+    jobs = summary.get("jobs", {})
+    data_date = summary.get("date", "N/A")
+    if len(data_date) == 8:
+        data_date = f"{data_date[:4]}-{data_date[4:6]}-{data_date[6:8]}"
 
-    def ok_badge(val):
-        if val is None:
-            return '<span style="color:#999">N/A</span>'
-        return str(val)
+    def j(key: str) -> Dict[str, Any]:
+        return jobs.get(key, {})
 
-    def num(val, suffix=""):
-        if val is None:
-            return '<span style="color:#999">N/A</span>'
-        return f"{val:,}{suffix}"
+    sections: list[str] = []
 
-    # 日线部分
-    daily_rows = ""
-    if "error" in daily:
-        daily_rows = f'<tr><td colspan="2" style="color:#e74c3c">{daily["error"]}</td></tr>'
+    # ── 1. 日K线数据 ──
+    ud = j("update_daily")
+    ud_rows = ""
+    if not ud:
+        ud_rows = '<tr><td colspan="2" style="color:#999">无数据</td></tr>'
+    elif not ud.get("ok"):
+        ud_rows = f'<tr><td colspan="2" style="color:#e74c3c">✗ {ud.get("error", "失败")}</td></tr>'
     else:
-        daily_rows = f"""
-        <tr><td>同步日期</td><td><strong>{daily['date']}</strong></td></tr>
-        <tr><td>新增/覆盖</td><td style="color:#27ae60;font-size:18px"><strong>{num(daily['records'], ' 条')}</strong></td></tr>
-        <tr><td>类型</td><td>{', '.join(daily['details'])}</td></tr>
-        """
-        if daily.get("warnings"):
-            wc = daily.get("warning_count", len(daily["warnings"]))
-            daily_rows += f"""<tr><td>⚠️ 警告</td><td style="color:#e67e22">{wc} 条</td></tr>"""
-        if daily.get("errors"):
-            daily_rows += f"""<tr><td>❌ 错误</td><td style="color:#e74c3c">{len(daily['errors'])} 条</td></tr>"""
+        mode = ud.get("mode", "unknown")
+        if mode == "history":
+            label = f"新增/覆盖 <strong>{_num(ud.get('records'), ' 条')}</strong>"
+        elif mode == "skip":
+            label = f"已有 <strong>{_num(ud.get('records'), ' 条')}</strong>（数据完整，跳过）"
+        elif mode == "intraday":
+            label = f"实时更新 <strong>{_num(ud.get('records'), ' 只')}</strong>"
+        else:
+            label = f"{_num(ud.get('records'), ' 条')}"
+        qt = ud.get("qt_fallback")
+        if qt:
+            label += f"（qt 兜底 {qt:,} 只）"
+        ud_rows = f"<tr><td>个股日线</td><td>{label}</td></tr>"
 
-    # 龙虎榜
+    sections.append(_build_section("📈", "日K线数据 & 指数", ud_rows))
+
+    # 指数日线
+    uid = j("update_index_daily")
+    uid_rows = ""
+    if uid and uid.get("ok"):
+        mode = uid.get("mode", "unknown")
+        if mode == "history":
+            uid_rows = f"<tr><td>指数日线</td><td>新增/覆盖 <strong>{_num(uid.get('records'), ' 条')}</strong></td></tr>"
+        elif mode == "skip":
+            uid_rows = f"<tr><td>指数日线</td><td>已有 <strong>{_num(uid.get('records'), ' 条')}</strong>（数据完整）</td></tr>"
+        elif mode == "intraday":
+            uid_rows = f"<tr><td>指数日线</td><td>实时更新 <strong>{_num(uid.get('records'), ' 个')}</strong> 指数</td></tr>"
+    if uid_rows:
+        # Append to the same section table
+        sections[-1] = sections[-1].replace("</table>", f"{uid_rows}</table>")
+
+    # ── 2. 龙虎榜 ──
+    dt = j("dragon_tiger")
     dt_rows = ""
-    if "error" not in ingest:
-        dt_rows = f"""
-        <tr><td>同步日期</td><td><strong>{ingest['date']}</strong></td></tr>
-        <tr><td>上榜股票</td><td>{num(ingest.get('dragon_tiger'), ' 只')}</td></tr>
-        """
+    if dt and dt.get("ok"):
+        count = dt.get("count")
+        if count:
+            dt_rows = f"<tr><td>上榜股票</td><td><strong>{_num(count, ' 只')}</strong></td></tr>"
+        else:
+            note = dt.get("note", "无数据")
+            dt_rows = f'<tr><td>上榜股票</td><td><span style="color:#999">{note}</span></td></tr>'
+    sections.append(_build_section("🐉", "龙虎榜", dt_rows))
 
-    # 市场数据
+    # ── 3. 估值数据 ──
+    val = j("valuation")
+    val_rows = ""
+    if val and val.get("ok"):
+        count = val.get("count")
+        if count:
+            val_rows = f"<tr><td>估值数据 PE/PB</td><td><strong>{_num(count, ' 条')}</strong></td></tr>"
+        else:
+            note = val.get("note", "")
+            val_rows = f'<tr><td>估值数据 PE/PB</td><td><span style="color:#999">{note or "无数据"}</span></td></tr>'
+    elif val and not val.get("ok"):
+        val_rows = f'<tr><td>估值数据 PE/PB</td><td style="color:#e74c3c">✗ {val.get("error", "失败")}</td></tr>'
+    sections.append(_build_section("📊", "估值数据", val_rows))
+
+    # ── 4. 市场信号 ──
+    md = j("market_data")
     mkt_rows = ""
-    if "error" not in ingest:
-        mkt_rows = f"""
-        <tr><td>热点股票</td><td>{num(ingest.get('hot_stocks'), ' 只')}</td></tr>
-        <tr><td>热点主题</td><td>{num(ingest.get('themes'), ' 个')}</td></tr>
-        <tr><td>北向资金</td><td>{ok_badge(ingest.get('northbound'))}</td></tr>
-        <tr><td>行业板块</td><td>{num(ingest.get('industries'), ' 个')}{' — ' + ingest['top_industry'] if ingest.get('top_industry') else ''}</td></tr>
-        <tr><td>概念板块</td><td>{num(ingest.get('concepts'), ' 个')}{' — ' + ingest['top_concept'] if ingest.get('top_concept') else ''}</td></tr>
-        """
-        if ingest.get("errors"):
-            mkt_rows += f"""<tr><td>❌ 错误</td><td style="color:#e74c3c">{len(ingest['errors'])} 条</td></tr>"""
+    if md and md.get("ok"):
+        if md.get("hot_stocks") is not None:
+            nb = md.get("northbound", "N/A")
+            if nb in ("no", "0", ""):
+                nb_badge = '<span style="color:#999">无</span>'
+            else:
+                nb_badge = f'<span style="color:#27ae60">{nb}</span>'
+            mkt_rows = f"""
+            <tr><td>热点股票</td><td>{_num(md.get('hot_stocks'), ' 只')}</td></tr>
+            <tr><td>热点主题</td><td>{_num(md.get('themes'), ' 个')}</td></tr>
+            <tr><td>北向资金</td><td>{nb_badge}</td></tr>
+            <tr><td>行业板块</td><td>{_num(md.get('industries'), ' 个')}</td></tr>
+            <tr><td>概念板块</td><td>{_num(md.get('concepts'), ' 个')}</td></tr>"""
+    sections.append(_build_section("🔥", "市场热点 & 资金流", mkt_rows))
+
+    # ── 5. 个股资金流向 ──
+    sff = j("stock_fund_flow")
+    sff_rows = ""
+    if sff and sff.get("ok"):
+        saved = sff.get("saved")
+        if saved:
+            ok_b = sff.get("batches_ok", "?")
+            fail_b = sff.get("batches_fail", 0)
+            batch_info = f"{ok_b}/{ok_b + fail_b if isinstance(ok_b, int) and isinstance(fail_b, int) else ok_b} 批次"
+            sff_rows = f"""
+            <tr><td>成功写入</td><td><strong>{_num(saved, ' 条')}</strong></td></tr>
+            <tr><td>批次</td><td>{batch_info}</td></tr>"""
+    sections.append(_build_section("💧", "个股资金流向", sff_rows))
+
+    # ── 6. 主力资金50指数 ──
+    mf = j("mainflow_index")
+    mf_rows = ""
+    if mf and mf.get("ok"):
+        status = mf.get("status", "unknown")
+        if status == "updated":
+            mf_rows = f"<tr><td>主力资金50</td><td>更新完成 — <strong>{_num(mf.get('count'), ' 只')}</strong> 成分股</td></tr>"
+        elif status == "skipped":
+            mf_rows = f'<tr><td>主力资金50</td><td><span style="color:#999">⏭ 非调仓日，已跳过</span></td></tr>'
+    sections.append(_build_section("🏆", "主力资金50指数", mf_rows))
+
+    # ── 7. 市场温度 ──
+    mt = j("market_temperature")
+    mt_rows = ""
+    if mt and mt.get("ok") and mt.get("score") is not None:
+        score = mt["score"]
+        level = mt.get("level", "?")
+        color = "#27ae60" if score < 30 else ("#e67e22" if score < 60 else "#e74c3c")
+        details = mt.get("details", {})
+        detail_str = ""
+        if details:
+            parts = []
+            for k, v in details.items():
+                label_map = {
+                    "index_decline": "指数跌幅", "volatility": "波动率",
+                    "limit_down": "跌停潮", "breadth": "下跌广度",
+                    "northbound_outflow": "北向出逃",
+                }
+                parts.append(f"{label_map.get(k, k)}: {v}")
+            detail_str = " / ".join(parts)
+        mt_rows = f"""
+        <tr><td>市场温度得分</td><td style="color:{color};font-size:18px"><strong>{score}° — {level}</strong></td></tr>
+        <tr><td>细分</td><td style="font-size:12px;color:#666">{detail_str}</td></tr>"""
+    sections.append(_build_section("🌡️", "市场温度", mt_rows))
+
+    # ── 8. 日报发送状态 ──
+    rpt = j("report")
+    rpt_rows = ""
+    if rpt and rpt.get("ok"):
+        if rpt.get("email_sent"):
+            rpt_rows = f'<tr><td>邮件发送</td><td style="color:#27ae60">✅ 已发送至 {_ok(rpt.get("email_to"), "?")}</td></tr>'
+        else:
+            rpt_rows = '<tr><td>邮件发送</td><td style="color:#e74c3c">✗ 未发送</td></tr>'
+
+    # ── 总览 footer ──
+    ok_count = summary.get("total_ok", 0)
+    fail_count = summary.get("total_fail", 0)
+    elapsed = summary.get("total_elapsed_s", 0)
+    status_color = "#27ae60" if fail_count == 0 else "#e74c3c"
+    status_text = "全部成功 ✅" if fail_count == 0 else f"{fail_count} 个失败 ⚠️"
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -338,38 +415,23 @@ def compose_html(daily, ingest):
   <!-- Header -->
   <div style="background:#1a1a2e; color:#fff; padding:24px 32px; text-align:center">
     <h1 style="margin:0; font-size:22px">📊 AIpicking 数据同步日报</h1>
-    <p style="margin:8px 0 0; opacity:0.7; font-size:13px">{today}（数据日期: {daily.get('date', ingest.get('date', 'N/A'))}）</p>
+    <p style="margin:8px 0 0; opacity:0.7; font-size:13px">{today}（数据日期: {data_date}）</p>
   </div>
 
   <div style="padding:24px 32px">
+    {''.join(sections)}
 
-    <!-- 日线数据 -->
-    <h2 style="font-size:16px; color:#1a1a2e; border-bottom:2px solid #3498db; padding-bottom:8px">
-      📈 日K线数据
+    <!-- 总览 -->
+    <h2 style="font-size:16px; color:#1a1a2e; border-bottom:2px solid #999; padding-bottom:8px; margin-top:24px">
+      📋 任务总览
     </h2>
-    <table style="width:100%; border-collapse:collapse; margin-bottom:20px">
-      <colgroup><col style="width:35%"><col style="width:65%"></colgroup>
-      {daily_rows}
+    <table style="width:100%; border-collapse:collapse; margin-bottom:8px">
+      <colgroup><col style="width:38%"><col style="width:62%"></colgroup>
+      <tr><td>任务数</td><td>{ok_count + fail_count} 个（{ok_count} 成功 / {fail_count} 失败）</td></tr>
+      <tr><td>状态</td><td style="color:{status_color}"><strong>{status_text}</strong></td></tr>
+      <tr><td>总耗时</td><td>{elapsed:.0f}s</td></tr>
     </table>
-
-    <!-- 龙虎榜 -->
-    <h2 style="font-size:16px; color:#1a1a2e; border-bottom:2px solid #e67e22; padding-bottom:8px">
-      🐉 龙虎榜
-    </h2>
-    <table style="width:100%; border-collapse:collapse; margin-bottom:20px">
-      <colgroup><col style="width:35%"><col style="width:65%"></colgroup>
-      {dt_rows if dt_rows else '<tr><td colspan="2" style="color:#e74c3c">' + ingest.get("error", "无数据") + '</td></tr>'}
-    </table>
-
-    <!-- 市场数据 -->
-    <h2 style="font-size:16px; color:#1a1a2e; border-bottom:2px solid #27ae60; padding-bottom:8px">
-      🔥 市场热点 & 资金流
-    </h2>
-    <table style="width:100%; border-collapse:collapse; margin-bottom:20px">
-      <colgroup><col style="width:35%"><col style="width:65%"></colgroup>
-      {mkt_rows if mkt_rows else '<tr><td colspan="2" style="color:#e74c3c">' + ingest.get("error", "无数据") + '</td></tr>'}
-    </table>
-
+    {rpt_rows}
   </div>
 
   <!-- Footer -->
@@ -382,6 +444,10 @@ def compose_html(daily, ingest):
 </html>"""
     return html
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# 邮件发送
+# ═════════════════════════════════════════════════════════════════════════
 
 def send_email(html_body, subject, to_addr, smtp_user, smtp_pass):
     """通过 QQ SMTP 发送邮件。"""
@@ -413,26 +479,62 @@ def main():
     if target_date:
         target_date = target_date.replace("-", "")
 
-    # 解析日志
-    print(f"📋 解析日志...")
-    daily = parse_update_log(target_date)
-    ingest = parse_ingest_log(target_date)
+    # 1. 尝试读取结构化摘要 JSON
+    print(f"📋 加载数据...")
+    summary = load_summary(target_date)
 
-    # 打印摘要
-    if "error" not in daily:
-        print(f"   日线: {daily['date']} — 新增/覆盖 {daily['records']:,} 条")
-    else:
-        print(f"   日线: ⚠️ {daily['error']}")
+    if summary:
+        # ── 新版：从 JSON 摘要生成报告 ──
+        jobs = summary.get("jobs", {})
+        print(f"   数据来源: sync_summary.json")
+        print(f"   日期: {summary.get('date', 'N/A')}")
+        print(f"   任务: {summary.get('total_ok', 0)} 成功 / {summary.get('total_fail', 0)} 失败")
+        for key, j in jobs.items():
+            desc = j.get("desc", key)
+            status = "✓" if j.get("ok") else "✗"
+            print(f"     {status} {desc} ({j.get('elapsed_s', 0):.1f}s)")
 
-    if "error" not in ingest:
-        print(f"   龙虎榜: {ingest.get('dragon_tiger', 'N/A')} 只上榜")
-        print(f"   市场数据: {ingest.get('hot_stocks', 'N/A')} 热点 / {ingest.get('themes', 'N/A')} 主题 / {ingest.get('industries', 'N/A')}+{ingest.get('concepts', 'N/A')} 板块")
+        date_label = summary.get("date", "N/A")
+        if len(date_label) == 8:
+            date_label = f"{date_label[:4]}-{date_label[4:6]}-{date_label[6:8]}"
     else:
-        print(f"   市场数据: ⚠️ {ingest['error']}")
+        # ── 旧版回退：解析原始日志 ──
+        print(f"   数据来源: 日志文件（sync_summary.json 不存在）")
+        daily = _parse_update_log(target_date)
+        ingest = _parse_ingest_log(target_date)
+
+        if "error" not in daily:
+            print(f"   日线: {daily['date']} — {daily['records']:,} 条")
+        else:
+            print(f"   日线: ⚠️ {daily['error']}")
+
+        if "error" not in ingest:
+            print(f"   龙虎榜: {ingest.get('dragon_tiger', 'N/A')} 只")
+            print(f"   市场数据: {ingest.get('hot_stocks', 'N/A')} 热点 / {ingest.get('themes', 'N/A')} 主题")
+
+        # 构造兼容旧版的 summary 结构
+        date_label = daily.get("date") or ingest.get("date") or "N/A"
+        summary = {
+            "date": date_label.replace("-", ""),
+            "total_ok": 1 if "error" not in daily else 0,
+            "total_fail": 0,
+            "total_elapsed_s": 0,
+            "jobs": {
+                "update_daily": {"ok": "error" not in daily, "mode": "history",
+                                 "records": daily.get("records", 0)},
+                "dragon_tiger": {"ok": "error" not in ingest,
+                                 "count": ingest.get("dragon_tiger")},
+                "market_data": {"ok": "error" not in ingest,
+                                "hot_stocks": ingest.get("hot_stocks"),
+                                "themes": ingest.get("themes"),
+                                "northbound": ingest.get("northbound"),
+                                "industries": ingest.get("industries"),
+                                "concepts": ingest.get("concepts")},
+            },
+        }
 
     # 生成 HTML
-    date_label = daily.get("date") or ingest.get("date") or "N/A"
-    html = compose_html(daily, ingest)
+    html = compose_html(summary)
     subject = f"📊 AIpicking 数据同步日报 — {date_label}"
 
     if args.dry_run:

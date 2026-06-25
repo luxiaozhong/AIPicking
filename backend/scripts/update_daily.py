@@ -605,6 +605,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None, index
             cnt = count_daily(today_str)
             if cnt >= MIN_DAILY_COUNT:
                 print(f"✅ 今天({today_str})已有 {cnt} 条数据，数据完整，跳过")
+                print(f"📊 历史更新完成！跳过 — 已有 {cnt} 条数据（覆盖 0 条）")
             else:
                 if cnt > 0:
                     print(f"⚠️ 今天({today_str})仅有 {cnt} 条数据（不完整，可能是盘中写入），执行完整更新")
@@ -620,6 +621,7 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None, index
         cnt = count_daily(latest)
         if cnt >= MIN_DAILY_COUNT:
             print(f"✅ 最近交易日({latest})已有 {cnt} 条数据，数据完整，无需更新")
+            print(f"📊 历史更新完成！跳过 — 已有 {cnt} 条数据（覆盖 0 条）")
             return
         if cnt > 0:
             print(f"⚠️ 最近交易日({latest})仅有 {cnt} 条数据（不完整），执行补充更新")
