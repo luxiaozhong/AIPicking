@@ -8,7 +8,7 @@ const { Text } = Typography;
 const RED_COLOR = '#cf1322';
 const GREEN_COLOR = '#3f8600';
 
-type RaceMode = 'today' | '5d';
+type RaceMode = 'today' | '3d' | '5d';
 
 interface Props {
   snapshots: SnapshotData | null;
@@ -26,9 +26,9 @@ function fmtYi(v: number): string {
 interface RaceStock {
   ts_code: string;
   stock_name: string;
-  value: number;       // total bar value (今日=main_net_flow, 5日=main_net_flow_5d)
-  prev4d?: number;     // 5d mode: 前4日累计 = 5d_total - today
-  today?: number;      // 5d mode: 今日净流入
+  value: number;       // total bar value (今日=main_net_flow, 3日=main_net_flow_3d, 5日=main_net_flow_5d)
+  prev?: number;       // 3d/5d mode: 前几日累计 (3d: prev2d, 5d: prev4d)
+  today?: number;      // 3d/5d mode: 今日净流入
 }
 
 interface RaceFrame {
@@ -38,6 +38,7 @@ interface RaceFrame {
 
 const RACE_MODE_OPTIONS: { label: string; value: RaceMode }[] = [
   { label: '今日', value: 'today' },
+  { label: '3日累计', value: '3d' },
   { label: '5日累计', value: '5d' },
 ];
 
@@ -52,28 +53,37 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
   // Pre-process frames: sort each frame by the selected mode's field, take top 15
   const frames: RaceFrame[] = useMemo(() => {
     if (!snapshots || !snapshots.snapshots || snapshots.snapshots.length === 0) return [];
-    const is5d = raceMode === '5d';
+    const isMulti = raceMode === '3d' || raceMode === '5d';
     return snapshots.snapshots.map((f: SnapshotFrame) => ({
       time: formatSnapshotTime(f.snapshot_time),
       stocks: [...f.stocks]
         .sort((a, b) => {
-          const av = is5d ? a.main_net_flow_5d : a.main_net_flow;
-          const bv = is5d ? b.main_net_flow_5d : b.main_net_flow;
+          let av: number, bv: number;
+          if (raceMode === '5d') {
+            av = a.main_net_flow_5d;
+            bv = b.main_net_flow_5d;
+          } else if (raceMode === '3d') {
+            av = a.main_net_flow_3d;
+            bv = b.main_net_flow_3d;
+          } else {
+            av = a.main_net_flow;
+            bv = b.main_net_flow;
+          }
           return bv - av;
         })
         .slice(0, 15)
         .map((s) => ({
           ts_code: s.ts_code,
           stock_name: s.stock_name,
-          value: is5d ? s.main_net_flow_5d : s.main_net_flow,
-          prev4d: is5d ? s.main_net_flow_5d - s.main_net_flow : undefined,
-          today: is5d ? s.main_net_flow : undefined,
+          value: raceMode === '5d' ? s.main_net_flow_5d : raceMode === '3d' ? s.main_net_flow_3d : s.main_net_flow,
+          prev: isMulti ? (raceMode === '5d' ? s.main_net_flow_5d - s.main_net_flow : s.main_net_flow_3d - s.main_net_flow) : undefined,
+          today: isMulti ? s.main_net_flow : undefined,
         })),
     }));
   }, [snapshots, raceMode]);
 
   const totalFrames = frames.length;
-  const modeLabel = raceMode === '5d' ? '5日累计主力净流入' : '今日主力净流入';
+  const modeLabel = raceMode === '5d' ? '5日累计主力净流入' : raceMode === '3d' ? '3日累计主力净流入' : '今日主力净流入';
 
   // Jump to latest frame when snapshots data changes (initial load / polling)
   useEffect(() => {
@@ -150,21 +160,22 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
     if (frames.length === 0 || !frames[currentFrame]) return {};
 
     const frame = frames[currentFrame];
-    const is5d = raceMode === '5d';
+    const isMulti = raceMode === '3d' || raceMode === '5d';
+    const prevLabel = raceMode === '5d' ? '前4日' : '前2日';
     // #1 ranked stock at the top
     const stocks = [...frame.stocks];
             currentStocksRef.current = stocks;
 
-    const series: any[] = is5d
+    const series: any[] = isMulti
       ? [
           {
-            name: '前4日',
+            name: prevLabel,
             type: 'bar',
             stack: 'total',
             data: stocks.map((s) => ({
-              value: s.prev4d ?? 0,
+              value: s.prev ?? 0,
               itemStyle: {
-                color: (s.prev4d ?? 0) >= 0 ? '#f5bcbf' : '#d2f0a9',
+                color: (s.prev ?? 0) >= 0 ? '#f5bcbf' : '#d2f0a9',
                 borderRadius: 0,
               },
             })),
@@ -228,8 +239,8 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
         left: 'center',
         textStyle: { fontSize: 16, fontWeight: 'bold' },
       },
-      legend: is5d ? { bottom: 0, textStyle: { fontSize: 11 } } : undefined,
-      grid: { left: 120, right: 80, top: 55, bottom: is5d ? 35 : 30 },
+      legend: isMulti ? { bottom: 0, textStyle: { fontSize: 11 } } : undefined,
+      grid: { left: 120, right: 80, top: 55, bottom: isMulti ? 35 : 30 },
       xAxis: {
         type: 'value',
         axisLabel: {
@@ -254,13 +265,13 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
           if (!Array.isArray(params) || params.length === 0) return '';
           const name = params[0].name;
           let html = `<strong>${name}</strong><br/>`;
-          if (is5d && params.length >= 2) {
-            const prev4d = params.find((p: any) => p.seriesName === '前4日')?.value ?? 0;
+          if (isMulti && params.length >= 2) {
+            const prevN = params.find((p: any) => p.seriesName === prevLabel)?.value ?? 0;
             const today = params.find((p: any) => p.seriesName === '今日')?.value ?? 0;
-            const total = prev4d + today;
-            html += `前4日累计: ${fmtYi(prev4d)}<br/>`;
+            const total = prevN + today;
+            html += `${prevLabel}累计: ${fmtYi(prevN)}<br/>`;
             html += `今日流入: ${fmtYi(today)}<br/>`;
-            html += `<b>5日合计: ${fmtYi(total)}</b>`;
+            html += `<b>${raceMode === '5d' ? '5日' : '3日'}合计: ${fmtYi(total)}</b>`;
           } else {
             html += `${modeLabel}: ${fmtYi(params[0].value)}`;
           }
@@ -321,10 +332,10 @@ const BarChartRace: React.FC<Props> = ({ snapshots, loading, isPolling, onToggle
         </Space>
       </div>
       <ReactECharts
+        key={raceMode}
         ref={chartRef}
         option={option}
         style={{ height: 500, width: '100%' }}
-        notMerge
         onEvents={{
           click: (params: any) => {
             const stock = currentStocksRef.current[params.dataIndex];

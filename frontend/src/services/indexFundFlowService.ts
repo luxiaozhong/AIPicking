@@ -140,6 +140,7 @@ export interface SnapshotStock {
   jumbo_net_flow: number;
   block_net_flow: number;
   main_net_flow_5d: number;
+  main_net_flow_3d: number;
 }
 
 export interface SnapshotFrame {

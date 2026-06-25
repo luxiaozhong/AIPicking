@@ -1369,8 +1369,6 @@ class FundFlowService:
         if not d:
             return {"trade_date": None, "snapshots": []}
 
-        s = Stock.__table__
-
         # Query snapshots filtered by index_code directly (stored at sync time)
         sql = text(
             """
@@ -1394,19 +1392,59 @@ class FundFlowService:
             "trade_date": d,
         })
 
+        # Collect all rows and unique ts_codes
+        all_rows = list(result.mappings().all())
+        ts_codes = list(set(r["ts_code"] for r in all_rows))
+
+        # Compute 3-day cumulative: sum of last 2 completed trading days'
+        # main_net_flow from daily data + current intraday main_net_flow.
+        # This way the 3d total changes as today's intraday flow accumulates.
+        prev_2d_flow: dict[str, float] = {}
+        if ts_codes:
+            f = DailyStockFundFlow.__table__
+            # Find the 2 most recent trading days strictly before the snapshot date
+            prev_dates_stmt = (
+                select(f.c.trade_date)
+                .where(f.c.trade_date < d, f.c.ts_code.in_(ts_codes))
+                .distinct()
+                .order_by(f.c.trade_date.desc())
+                .limit(2)
+            )
+            prev_dates_result = await db.execute(prev_dates_stmt)
+            prev_dates = [r[0] for r in prev_dates_result.all()]
+            if prev_dates:
+                prev_sum_stmt = (
+                    select(
+                        f.c.ts_code,
+                        func.coalesce(func.sum(f.c.main_net_flow), 0).label("flow_2d"),
+                    )
+                    .where(f.c.ts_code.in_(ts_codes), f.c.trade_date.in_(prev_dates))
+                    .group_by(f.c.ts_code)
+                )
+                prev_sum_result = await db.execute(prev_sum_stmt)
+                prev_2d_flow = {
+                    r["ts_code"]: float(r["flow_2d"] or 0)
+                    for r in prev_sum_result.mappings().all()
+                }
+
         # Group by snapshot_time
         frames: dict[str, list] = {}
-        for r in result.mappings().all():
+        for r in all_rows:
             st = str(r["snapshot_time"])
             if st not in frames:
                 frames[st] = []
+            ts = r["ts_code"]
+            main_net = float(r["main_net_flow"] or 0)
+            # 3d = 前2日累计（日末数据）+ 当日盘中主力净流入
+            main_net_flow_3d = prev_2d_flow.get(ts, 0) + main_net
             frames[st].append({
-                "ts_code": r["ts_code"],
+                "ts_code": ts,
                 "stock_name": r["stock_name"] or "",
-                "main_net_flow": float(r["main_net_flow"] or 0),
+                "main_net_flow": main_net,
                 "jumbo_net_flow": float(r["jumbo_net_flow"] or 0),
                 "block_net_flow": float(r["block_net_flow"] or 0),
                 "main_net_flow_5d": float(r["main_net_flow_5d"] or 0),
+                "main_net_flow_3d": main_net_flow_3d,
             })
 
         snapshots = [
