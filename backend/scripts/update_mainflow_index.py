@@ -485,6 +485,28 @@ def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
     return len(stocks)
 
 
+def purge_removed_constituents(conn, keep_codes: list[str]) -> int:
+    """删除 900001 中不在当前成分股列表里的历史记录。
+
+    900001 每期整批写入同一 eff_date，被剔除的股票不会获得新 eff_date，
+    但旧记录仍保留在表中。load_index_stocks() 使用 DISTINCT ON (ts_code)
+    会把这些已剔除的股票也捞出来，导致成分股随时间不断累积。
+
+    此函数在每期写入后清理：删除 index_code=900001 且 ts_code 不在
+    当前批次中的全部记录，确保 load_index_stocks() 只返回当前成分股。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM index_constituents WHERE index_code = %s AND ts_code != ALL(%s)",
+            (INDEX_CODE, keep_codes),
+        )
+        deleted = cur.rowcount
+    conn.commit()
+    if deleted:
+        logging.info("已清理 %d 只被剔除的历史成分股记录", deleted)
+    return deleted
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Verify
 # ═════════════════════════════════════════════════════════════════════════
@@ -596,6 +618,10 @@ def run(eff_date: str, top_n: int = DEFAULT_TOP_N, dry_run: bool = False, force:
         # 6. 写入
         upsert_index_info(conn, eff_date, len(stocks))
         upsert_constituents(conn, stocks, eff_date)
+
+        # 6.5 清理被剔除成分股的历史记录
+        keep_codes = [s["ts_code"] for s in stocks]
+        purge_removed_constituents(conn, keep_codes)
 
         # 7. 验证
         verify(conn, eff_date)
