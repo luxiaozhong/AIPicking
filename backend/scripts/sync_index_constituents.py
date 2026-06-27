@@ -45,6 +45,33 @@ log = logging.getLogger("sync_index_constituents")
 #   akshare.index_detail_cni         — 国证指数（有权重/行业/市值）
 #   akshare.index_stock_cons_weight_csindex — 中证指数（有权重，无行业/市值）
 #   akshare.index_stock_cons         — 深证指数（无权重/行业/市值，仅名单）
+def _infer_exchange(code: str) -> str:
+    """根据股票代码前缀推断交易所后缀。
+
+    600xxx/601xxx/603xxx/605xxx/9xxxxx → SH
+    000xxx/001xxx/002xxx/003xxx/300xxx → SZ
+    8xxxxx/4xxxxx → BJ
+    """
+    if len(code) != 6 or not code.isdigit():
+        return "SZ"  # fallback
+    prefix = int(code)
+    if 600000 <= prefix < 700000 or 900000 <= prefix < 1000000:
+        return "SH"
+    elif 0 <= prefix < 400000 or 200000 <= prefix < 300000:
+        return "SZ"
+    elif 800000 <= prefix < 900000 or 400000 <= prefix < 500000:
+        return "BJ"
+    return "SZ"
+
+
+def _normalize_ts_code(code: str) -> str:
+    """确保 ts_code 带交易所后缀，如 002558 → 002558.SZ"""
+    code = str(code).strip()
+    if "." in code:
+        return code
+    return f"{code}.{_infer_exchange(code)}"
+
+
 KNOWN_INDICES: Dict[str, Dict[str, Any]] = {
     # ── 国证 ──
     "980080": {
@@ -192,7 +219,7 @@ def fetch_constituents(index_code: str) -> list[dict]:
     for _, row in df.iterrows():
         records.append({
             "eff_date": str(row["日期"]),
-            "ts_code": str(row["样本代码"]),
+            "ts_code": _normalize_ts_code(str(row["样本代码"])),
             "stock_name": str(row["样本简称"]),
             "industry": str(row.get("所属行业", "")),
             "market_cap": float(row["总市值"]) if row["总市值"] else None,
@@ -235,7 +262,7 @@ def fetch_constituents_csi(index_code: str) -> list[dict]:
     for _, row in df.iterrows():
         records.append({
             "eff_date": _csi_fmt_date(row["日期"]),
-            "ts_code": str(row["成分券代码"]).zfill(6),
+            "ts_code": _normalize_ts_code(str(row["成分券代码"]).zfill(6)),
             "stock_name": str(row["成分券名称"]),
             "industry": str(row.get("所属行业", "")),
             "market_cap": None,  # 中证 API 无市值
@@ -275,7 +302,7 @@ def fetch_constituents_sz(index_code: str) -> list[dict]:
     for _, row in df.iterrows():
         records.append({
             "eff_date": today,
-            "ts_code": str(row["品种代码"]).zfill(6),
+            "ts_code": _normalize_ts_code(str(row["品种代码"]).zfill(6)),
             "stock_name": str(row["品种名称"]),
             "industry": "",
             "market_cap": None,
