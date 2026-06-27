@@ -44,7 +44,7 @@ npm run test:e2e                     # Playwright E2E tests
 5. **部署方式**: 代码变更必须通过 git push → 服务器 git pull，**禁止** scp/sftp 直接拷贝文件到服务器。服务器上跑脚本、查日志等运维命令可以直接 SSH。详见 `docs/deployment.md`
 6. **分支规范**: 任何文档设计新建和改动前都必须在 **feature branch** 上进行，**禁止**直接提交到 `main` 分支。**在写第一行代码之前就要创建并切换到 feature branch**，不是 commit 前才切。分支命名：`feat/<描述>`、`fix/<描述>`、`refactor/<描述>`。工作流：切分支 → 写代码 → commit → push → PR/merge → 切回 main → git pull → 同步到服务器
 7. 所有日期格式都遵循数据库日期格式 ‘YYYY-MM-DD‘
-8. 我提出的问题， 永远只查本地， 除非我有支出要查服务器
+8. 我提出的问题， 永远只查本地， 除非我有指出要查服务器/Production
 
 ### 路由定义顺序
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -31,7 +32,18 @@ _UPDATE_DAILY_LOG = SCRIPT_DIR.parent.parent / "logs" / "update_daily.log"
 # 服务器路径（cron 环境）
 _SERVER_LOG = Path("/var/log/aipicking/update_daily.log")
 # 结构化摘要输出（供 sync_report.py 消费）
-_SUMMARY_DIR = _SERVER_LOG.parent if _SERVER_LOG.parent.exists() else (_UPDATE_DAILY_LOG.parent)
+# 优先用项目目录（本地可写），服务器上 /var/log/aipicking 存在且可写时用服务器路径
+def _find_summary_dir() -> Path:
+    """Pick a writable directory for sync_summary.json."""
+    for candidate in (_UPDATE_DAILY_LOG.parent, _SERVER_LOG.parent):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            if candidate.is_dir() and os.access(candidate, os.W_OK):
+                return candidate
+        except (OSError, PermissionError):
+            continue
+    return _UPDATE_DAILY_LOG.parent  # 最后的 fallback
+_SUMMARY_DIR = _find_summary_dir()
 _SUMMARY_FILE = _SUMMARY_DIR / "sync_summary.json"
 
 # 按依赖顺序排列：日线 → 指数 → 龙虎榜 → 估值 → 市场信号 → 日报
@@ -141,7 +153,7 @@ def parse_job_result(log_key: str, stdout: str, ok: bool, elapsed: float) -> Dic
                 result["records"] = int(m.group(1).replace(",", ""))
                 result["mode"] = "skip"
             else:
-                m = re.search(r"📊 实时更新完成！成功 ([\d,]+) 只", out)
+                m = re.search(r"🎉 实时更新完成！成功 ([\d,]+) 只", out)
                 if m:
                     result["records"] = int(m.group(1))
                     result["mode"] = "intraday"

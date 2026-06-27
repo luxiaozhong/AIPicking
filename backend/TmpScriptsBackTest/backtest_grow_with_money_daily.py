@@ -10,6 +10,7 @@ grow_with_money · 每日调仓回测 · 980080
 用法：
     python TmpScriptsBackTest/backtest_grow_with_money_daily.py
     python TmpScriptsBackTest/backtest_grow_with_money_daily.py --top 3 5 10 --stop-loss
+    python TmpScriptsBackTest/backtest_grow_with_money_daily.py --bt-start 2025-06-01 --data-start 2025-04-01
 """
 
 from __future__ import annotations
@@ -36,22 +37,27 @@ def _pg():
 ST, CM = 0.001, 0.0003
 SELL_C = ST+CM; BUY_C = CM
 
-def run(top_n, lookback, stop_loss_pct=0):
+def run(top_n, lookback, index_code="980080", stop_loss_pct=0,
+        bt_start="2025-01-01", bt_end="2026-06-19",
+        data_start="2024-12-01", data_end="2026-06-30"):
     conn = _pg(); cur = conn.cursor()
 
-    cur.execute("SELECT ts_code FROM index_constituents WHERE index_code='980080'")
+    cur.execute("SELECT ts_code FROM index_constituents WHERE index_code=%s", (index_code,))
     raw_set = {r[0] for r in cur.fetchall()}
 
-    cur.execute("SELECT DISTINCT trade_date FROM daily WHERE trade_date>='2024-12-01' AND trade_date<='2026-06-30' ORDER BY trade_date")
+    cur.execute("SELECT DISTINCT trade_date FROM daily WHERE trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
+                (data_start, data_end))
     all_td = [r[0] for r in cur.fetchall()]
 
     cur.execute("""SELECT DISTINCT sff.ts_code FROM daily_stock_fund_flow sff
         JOIN stocks s ON s.ts_code=sff.ts_code
-        WHERE sff.trade_date>='2024-12-01' AND sff.trade_date<='2026-06-30'
-        AND s.type='stock' AND s.name NOT LIKE '%%ST%%'""")
+        WHERE sff.trade_date>=%s AND sff.trade_date<=%s
+        AND s.type='stock' AND s.name NOT LIKE '%%ST%%'""",
+        (data_start, data_end))
     match_ts = [r[0] for r in cur.fetchall() if r[0].split(".")[0] in raw_set]
 
-    cur.execute("SELECT ts_code,trade_date,close FROM daily WHERE ts_code=ANY(%s) AND trade_date>='2024-12-01' AND trade_date<='2026-06-30' ORDER BY ts_code,trade_date",(match_ts,))
+    cur.execute("SELECT ts_code,trade_date,close FROM daily WHERE ts_code=ANY(%s) AND trade_date>=%s AND trade_date<=%s ORDER BY ts_code,trade_date",
+                (match_ts, data_start, data_end))
     pr = {}
     for c,d,v in cur.fetchall(): pr.setdefault(d,{})[c]=v
 
@@ -71,17 +77,18 @@ def run(top_n, lookback, stop_loss_pct=0):
                 is_tradable[td_][c] = False
             # else: not listed yet — remains missing
 
-    cur.execute("SELECT ts_code,trade_date,main_net_flow FROM daily_stock_fund_flow WHERE ts_code=ANY(%s) AND trade_date>='2024-12-01' AND trade_date<='2026-06-30'",(match_ts,))
+    cur.execute("SELECT ts_code,trade_date,main_net_flow FROM daily_stock_fund_flow WHERE ts_code=ANY(%s) AND trade_date>=%s AND trade_date<=%s",
+                (match_ts, data_start, data_end))
     ff = {}
     for c,d,v in cur.fetchall(): ff.setdefault(d,{})[c]=float(v or 0)
     conn.close()
 
     nav, cash = 1000.0, 0.0
     holdings = {}; cost_basis = {}; points = []; stop_cnt = 0; last_nav = nav
-    bt = [d for d in all_td if "2025-01-01"<=d<="2026-06-19"]
+    bt = [d for d in all_td if bt_start<=d<=bt_end]
     sl = stop_loss_pct>0
 
-    label = f"grow_with_money · 980080 · M={lookback} · Top {top_n} · 每日调仓"
+    label = f"grow_with_money · {index_code} · M={lookback} · Top {top_n} · 每日调仓"
     if sl: label += f" · 止损{stop_loss_pct*100:.0f}%"
     print(f"\n{'='*100}\n  {label}\n{'='*100}")
     print(f"{'日期':<12} {'净值':>10} {'日收益':>8} {'持仓':>5} {'保留':>5} {'卖出':>5} {'买入':>5} {'换手%':>7} {'费用':>8}")
@@ -181,6 +188,12 @@ def main():
     p.add_argument("--lookback",type=int,default=5)
     p.add_argument("--stop-loss",action="store_true")
     p.add_argument("--stop-loss-pct",type=float,default=0.08)
+    p.add_argument("--rebase-date",type=str,default=None,help="基准日，如 2025-04-07")
+    p.add_argument("--index",type=str,default="980080",help="指数代码，如 980080（国证成长100）")
+    p.add_argument("--bt-start",type=str,default="2025-01-01",help="回测起始日")
+    p.add_argument("--bt-end",type=str,default="2026-06-19",help="回测截止日")
+    p.add_argument("--data-start",type=str,default="2024-12-01",help="数据加载起始日")
+    p.add_argument("--data-end",type=str,default="2026-06-30",help="数据加载截止日")
     args = p.parse_args()
 
     all_r = {}
@@ -189,10 +202,14 @@ def main():
 
     for n in args.top:
         print(f"\n{'─'*60}\n  Top {n} (无止损)\n{'─'*60}")
-        all_r[str(n)] = run(n, args.lookback)
+        all_r[str(n)] = run(n, args.lookback, args.index,
+                            bt_start=args.bt_start, bt_end=args.bt_end,
+                            data_start=args.data_start, data_end=args.data_end)
         if args.stop_loss:
             print(f"\n{'─'*60}\n  Top {n} (止损 {args.stop_loss_pct*100:.0f}%)\n{'─'*60}")
-            all_r[f"{n}_sl"] = run(n, args.lookback, args.stop_loss_pct)
+            all_r[f"{n}_sl"] = run(n, args.lookback, args.index, args.stop_loss_pct,
+                                   bt_start=args.bt_start, bt_end=args.bt_end,
+                                   data_start=args.data_start, data_end=args.data_end)
 
     if len(all_r)<=1: return
 
@@ -214,7 +231,7 @@ def main():
             k2=f"{n}_sl"
             if k2 in all_r: fns[k2]=all_r[k2][-1]["nav"]
 
-    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money · 980080 · 日频</title>
+    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money · {args.index} · 日频</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#1a1a2e;font-family:-apple-system,sans-serif}}
 .container{{max-width:1400px;margin:0 auto;padding:24px}}h1{{color:#e0e0e0;text-align:center;font-size:22px;margin-bottom:6px}}
@@ -222,8 +239,8 @@ def main():
 .stats{{display:grid;grid-template-columns:repeat({len(fns)},1fr);gap:16px;margin-top:20px}}
 .card{{background:#16213e;border-radius:10px;padding:20px;text-align:center}}.card h3{{color:#888;font-size:13px;margin-bottom:8px}}
 .card .val{{font-size:32px;font-weight:bold}}.card .pct{{font-size:14px;margin-top:4px}}</style></head><body><div class="container">
-<h1>grow_with_money · 980080（国证成长100）· 每日调仓 · M={args.lookback}</h1>
-<div class="sub">2025-01 ~ 2026-06 · {len(dates)} 个交易日 · 同股不动 · 已扣交易费用</div>
+<h1>grow_with_money · {args.index} · 每日调仓 · M={args.lookback}</h1>
+<div class="sub">{args.bt_start[:7]} ~ {args.bt_end[:7]} · {len(dates)} 个交易日 · 同股不动 · 已扣交易费用</div>
 <div id="chart"></div><div class="stats" id="stats"></div></div>
 <script>var dates={json.dumps(dates)};var sd={json.dumps(series)};var fn={json.dumps(fns)};
 var c=echarts.init(document.getElementById('chart'));
@@ -242,9 +259,76 @@ if(k.indexOf('3')==0)cl='#ff6b6b';else if(k.indexOf('5')==0)cl='#ffd93d';else if
 ss.innerHTML+='<div class="card"><h3>'+k.replace('_sl',' 止损')+'</h3><div class="val" style="color:'+cl+'">'+v.toFixed(2)+'</div><div class="pct" style="color:'+cl+'">'+(p>=0?'+':'')+p+'%</div></div>'}});
 window.addEventListener('resize',function(){{c.resize()}});</script></body></html>"""
 
-    out = Path(__file__).resolve().parent/"backtest_grow_with_money_daily.html"
+    idx_slug = args.index.replace(".","_")
+    out = Path(__file__).resolve().parent/f"backtest_grow_with_money_{idx_slug}_daily.html"
     with open(out,'w') as f: f.write(html)
     print(f"\n✅ HTML: {out}")
+
+    # ── Rebase 报告（可选） ──────────────────────────────────────────
+    if args.rebase_date:
+        rebased = {}
+        for k, pts in all_r.items():
+            base_nav = None; base_pt_date = None
+            for pp in pts:
+                if pp["date"] == args.rebase_date:
+                    base_nav = pp["nav"]; base_pt_date = pp["date"]; break
+            if base_nav is None:
+                base_d = datetime.strptime(args.rebase_date, "%Y-%m-%d")
+                best = min(pts, key=lambda pp: abs((datetime.strptime(pp["date"], "%Y-%m-%d") - base_d).days))
+                base_nav = best["nav"]; base_pt_date = best["date"]
+                print(f"  ⚠️ {k}: 基准日 {args.rebase_date} 无数据点，用最近日 {base_pt_date} NAV={base_nav:.2f}")
+            factor = 1000.0 / base_nav
+            rebased[k] = [{"date": pp["date"], "nav": round(pp["nav"] * factor, 2)} for pp in pts]
+
+        rb_series = []
+        for n in args.top:
+            k = str(n)
+            if k in rebased: rb_series.append({"name": f"Top {n}", "data": [pp["nav"] for pp in rebased[k]], "color": CO.get(n), "dashed": False})
+        if args.stop_loss:
+            for n in args.top:
+                k = f"{n}_sl"
+                if k in rebased: rb_series.append({"name": f"Top {n} 止损", "data": [pp["nav"] for pp in rebased[k]], "color": CS.get(n), "dashed": True})
+
+        rb_dates = [pp["date"] for pp in list(rebased.values())[0]]
+        rb_fns = {}
+        for n in args.top:
+            k = str(n)
+            if k in rebased: rb_fns[k] = rebased[k][-1]["nav"]
+            if args.stop_loss:
+                k2 = f"{n}_sl"
+                if k2 in rebased: rb_fns[k2] = rebased[k2][-1]["nav"]
+
+        rb_html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money · {args.index} · 日频 · Rebase</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#1a1a2e;font-family:-apple-system,sans-serif}}
+.container{{max-width:1400px;margin:0 auto;padding:24px}}h1{{color:#e0e0e0;text-align:center;font-size:22px;margin-bottom:6px}}
+.sub{{color:#888;text-align:center;font-size:13px;margin-bottom:20px}}#chart{{width:100%;height:700px;background:#16213e;border-radius:12px}}
+.stats{{display:grid;grid-template-columns:repeat({len(rb_fns)},1fr);gap:16px;margin-top:20px}}
+.card{{background:#16213e;border-radius:10px;padding:20px;text-align:center}}.card h3{{color:#888;font-size:13px;font-weight:normal;margin-bottom:8px}}
+.card .val{{font-size:32px;font-weight:bold}}.card .pct{{font-size:14px;margin-top:4px}}</style></head><body><div class="container">
+<h1>grow_with_money · {args.index} · 每日调仓 · M={args.lookback} · 基准日 {args.rebase_date}=1000</h1>
+<div class="sub">{args.bt_start[:7]} ~ {args.bt_end[:7]} · {len(rb_dates)} 个交易日 · 同股不动 · 已扣交易费用 · 净值归一化到 {args.rebase_date}</div>
+<div id="chart"></div><div class="stats" id="stats"></div></div>
+<script>var dates={json.dumps(rb_dates)};var sd={json.dumps(rb_series)};var fn={json.dumps(rb_fns)};
+var c=echarts.init(document.getElementById('chart'));
+c.setOption({{color:sd.map(function(s){{return s.color}}),
+tooltip:{{trigger:'axis',backgroundColor:'rgba(22,33,62,0.95)',borderColor:'#333',textStyle:{{color:'#e0e0e0',fontSize:13}},
+formatter:function(p){{var s='<b>'+p[0].axisValue+'</b><br/>';p.forEach(function(x){{s+='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+x.color+';margin-right:6px"></span>'+x.seriesName+': <b>'+x.value.toFixed(2)+'</b> ('+((x.value-1000)/10).toFixed(1)+'%)<br/>'}});return s}}}},
+legend:{{data:sd.map(function(s){{return s.name}}),top:10,textStyle:{{color:'#aaa',fontSize:14}},itemWidth:30,itemHeight:3}},
+grid:{{left:60,right:40,top:60,bottom:40}},
+xAxis:{{type:'category',data:dates,axisLine:{{lineStyle:{{color:'#333'}}}},axisLabel:{{color:'#888',fontSize:10,rotate:45,formatter:function(v){{return v.slice(5)}},interval:Math.floor(dates.length/30)}},splitLine:{{show:false}}}},
+yAxis:{{type:'value',name:'净值 (基准日=1000)',nameTextStyle:{{color:'#888',fontSize:12}},axisLabel:{{color:'#888',fontSize:12}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}},min:function(v){{return Math.floor(v.min/100)*100}}}},
+series:sd.map(function(s){{return{{name:s.name,type:'line',data:s.data,smooth:true,symbol:'none',lineStyle:{{width:s.dashed?1.5:2,color:s.color,type:s.dashed?'dashed':'solid'}},itemStyle:{{color:s.color}},
+markLine:{{silent:true,symbol:'none',lineStyle:{{color:'#666',type:'dashed',width:1}},data:[{{yAxis:1000,label:{{formatter:'基准 1000',color:'#888',fontSize:11}}}}]}}}}}})
+}});
+var ss=document.getElementById('stats');
+Object.keys(fn).forEach(function(k){{var v=fn[k],p=((v-1000)/10).toFixed(1);var cl='#aaa';
+if(k.indexOf('3')==0)cl='#ff6b6b';else if(k.indexOf('5')==0)cl='#ffd93d';else if(k.indexOf('10')==0)cl='#6bcb77';
+ss.innerHTML+='<div class="card"><h3>'+k.replace('_sl',' 止损')+'</h3><div class="val" style="color:'+cl+'">'+v.toFixed(2)+'</div><div class="pct" style="color:'+cl+'">'+(p>=0?'+':'')+p+'%</div></div>'}});
+window.addEventListener('resize',function(){{c.resize()}});</script></body></html>"""
+        rb_out = Path(__file__).resolve().parent/f"backtest_grow_with_money_{idx_slug}_daily_rebase.html"
+        with open(rb_out, 'w') as f: f.write(rb_html)
+        print(f"✅ Rebase HTML: {rb_out}")
 
 
 if __name__=="__main__": main()

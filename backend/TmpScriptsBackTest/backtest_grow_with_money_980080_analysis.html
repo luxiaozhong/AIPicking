@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
+<title>grow_with_money 因子分析 · 980080</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;font-family:-apple-system,sans-serif;color:#e0e0e0;padding:24px}
+.container{max-width:1400px;margin:0 auto}
+h1{text-align:center;font-size:22px;margin-bottom:4px}
+h2{font-size:18px;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid #333}
+.sub{color:#888;text-align:center;font-size:13px;margin-bottom:24px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.chart{width:100%;height:500px;background:#16213e;border-radius:12px}
+.chart-full{width:100%;height:500px;background:#16213e;border-radius:12px;margin-bottom:20px}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat-card{background:#16213e;border-radius:10px;padding:16px;text-align:center}
+.stat-card .label{color:#888;font-size:12px;margin-bottom:4px}
+.stat-card .val{font-size:28px;font-weight:bold}
+.stat-card .sub{color:#888;font-size:11px;margin-top:2px}
+table{width:100%;border-collapse:collapse;margin:12px 0 24px;font-size:13px}
+th{background:#1a3a5c;padding:10px 12px;text-align:center;font-weight:600}
+td{padding:8px 12px;text-align:center;border-bottom:1px solid #222}
+tr:hover td{background:rgba(255,255,255,0.03)}
+.pos{color:#ff6b6b} .neg{color:#6bcb77}
+.insight{background:#16213e;border-left:3px solid #ffd93d;padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0;font-size:14px;line-height:1.8}
+</style></head><body><div class="container">
+<h1>grow_with_money 选股因子分析</h1>
+<div class="sub">980080 · Top 20 · M=5 · 2025-06-03 ~ 2025-06-10 · 120 条选股记录 · 数据: 2025-04-01~2025-06-30</div>
+
+<div class="stats-grid">
+<div class="stat-card"><div class="label">分数-收益相关性</div><div class="val" style="color:#ff6b6b">0.3612020497381111</div><div class="sub">Pearson r: score vs 5d ret</div></div>
+<div class="stat-card"><div class="label">市值-收益相关性</div><div class="val" style="color:#ff6b6b">0.33441259178748645</div><div class="sub">Pearson r: cap vs 5d ret</div></div>
+<div class="stat-card"><div class="label">R² (分数→收益)</div><div class="val">0.1305</div><div class="sub">线性回归决定系数</div></div>
+<div class="stat-card"><div class="label">有效样本</div><div class="val">120</div><div class="sub">有5日前向收益</div></div>
+</div>
+
+<h2>一、主力资金流分数 vs 前向收益</h2>
+<div class="chart-full" id="chart-score-scatter"></div>
+
+<div class="row">
+<div class="chart" id="chart-score-decile"></div>
+<div class="chart" id="chart-rank-line"></div>
+</div>
+
+<div class="insight">
+<strong>📊 解读</strong><br>
+• <strong>散点图</strong>：每个点代表一次选股，X=累计主力净流入（分数），Y=5日前向收益（%）。红线为线性回归趋势线。<br>
+• <strong>十分位柱状图</strong>：将选股按分数从低到高分成10组，D1=最低分，D10=最高分。柱高=组内平均5日收益。<br>
+• <strong>排名折线</strong>：Rank 1=当日资金流入最强股，Rank 20=第20名。观察收益是否随排名下降而衰减。
+</div>
+
+<table>
+<tr><th>分位</th><th>分数范围</th><th>样本</th><th>1日均收益</th><th>5日均收益</th><th>20日均收益</th><th>1日胜率</th><th>5日胜率</th></tr>
+<tr><td>Q1</td><td>708万 ~ 2877万</td><td>30</td><td class="pos">+1.06%</td><td class="pos">+1.35%</td><td class="neg">N/A</td><td>63.3%</td><td>60.0%</td></tr><tr><td>Q2</td><td>2891万 ~ 4009万</td><td>30</td><td class="neg">-0.24%</td><td class="pos">+1.46%</td><td class="neg">N/A</td><td>40.0%</td><td>63.3%</td></tr><tr><td>Q3</td><td>4039万 ~ 7763万</td><td>30</td><td class="pos">+0.65%</td><td class="pos">+0.55%</td><td class="neg">N/A</td><td>43.3%</td><td>33.3%</td></tr><tr><td>Q4</td><td>7855万 ~ 8.7亿</td><td>30</td><td class="pos">+0.56%</td><td class="pos">+4.79%</td><td class="neg">N/A</td><td>46.7%</td><td>63.3%</td></tr>
+</table>
+
+<h2>二、市值 vs 前向收益</h2>
+<div class="row">
+<div class="chart" id="chart-cap-scatter"></div>
+<div class="chart" id="chart-cap-decile"></div>
+</div>
+
+<div class="insight">
+<strong>📊 解读</strong><br>
+• <strong>市值散点图</strong>：X=流通市值（元），Y=5日前向收益（%）。观察市值大小与收益的分布关系。<br>
+• <strong>市值十分位</strong>：D1=最小盘，D10=最大盘。看资金流策略在不同市值区间的有效性。
+</div>
+
+<table>
+<tr><th>分位</th><th>市值范围</th><th>样本</th><th>1日均收益</th><th>5日均收益</th><th>20日均收益</th><th>1日胜率</th><th>5日胜率</th></tr>
+<tr><td>Q1</td><td>37.5亿 ~ 85.5亿</td><td>30</td><td class="pos">+0.63%</td><td class="pos">+2.09%</td><td class="neg">N/A</td><td>46.7%</td><td>60.0%</td></tr><tr><td>Q2</td><td>92.1亿 ~ 130.2亿</td><td>30</td><td class="neg">-0.17%</td><td class="neg">-0.97%</td><td class="neg">N/A</td><td>46.7%</td><td>43.3%</td></tr><tr><td>Q3</td><td>131.2亿 ~ 300.5亿</td><td>30</td><td class="pos">+0.55%</td><td class="pos">+1.11%</td><td class="neg">N/A</td><td>36.7%</td><td>50.0%</td></tr><tr><td>Q4</td><td>302.8亿 ~ 1187.7亿</td><td>30</td><td class="pos">+1.02%</td><td class="pos">+5.92%</td><td class="neg">N/A</td><td>63.3%</td><td>66.7%</td></tr>
+</table>
+
+<h2>三、分数 × 市值 交互效应</h2>
+<div class="chart-full" id="chart-heatmap"></div>
+<div class="insight">
+<strong>📊 解读</strong><br>
+• <strong>热力图</strong>：行=分数四分位（Q1低分→Q4高分），列=市值四分位（Q1小盘→Q4大盘）。颜色越红=5日均收益越高。<br>
+• 如果热力图右上角（高分+大盘）或左上角（高分+小盘）有明显的红色聚集，说明存在交互效应。
+</div>
+
+</div>
+
+<script>
+var c_ss = echarts.init(document.getElementById('chart-score-scatter'));
+c_ss.setOption({
+    tooltip: {{trigger:'item',formatter:function(p){{return p.data.name+'<br/>'+p.data.date+'<br/>分数: '+p.data[0].toFixed(0)+'<br/>5日收益: '+p.data[1].toFixed(2)+'%'}}}},
+    grid: {{left:80,right:40,top:20,bottom:50}},
+    xAxis: {{type:'value',name:'累计主力净流入',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return (v/1e4).toFixed(0)+'万'}}}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}}}},
+    yAxis: {{type:'value',name:'5日前向收益 (%)',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return v.toFixed(0)+'%'}}}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}}}},
+    series: [
+        {{type:'scatter',data:{json.dumps([[p["x"],p["y"]] for p in scatter_points])},symbolSize:4,itemStyle:{{color:'rgba(100,180,255,0.4)'}}}},
+        {{type:'line',data:{json.dumps([[p["x"],p["y"]] for p in reg_line])},lineStyle:{{color:'#ff6b6b',width:2,type:'solid'}},symbol:'none',name:'趋势线'}}
+    ]
+}});
+
+var c_sd = echarts.init(document.getElementById('chart-score-decile'));
+c_sd.setOption({{
+    tooltip: {{trigger:'axis'}},
+    grid: {{left:50,right:50,top:20,bottom:40}},
+    xAxis: {{type:'category',data:{json.dumps([d["label"] for d in decile_bars])},axisLabel:{{color:'#888'}}}},
+    yAxis: {{type:'value',name:'5日均收益 (%)',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return v.toFixed(1)+'%'}}}}}},
+    series: [
+        {{type:'bar',data:{json.dumps([d["avg_ret"] for d in decile_bars])},
+         itemStyle:{{color:function(p){{return p.value>=0?'#ff6b6b':'#6bcb77'}}}},
+         markLine:{{silent:true,symbol:'none',lineStyle:{{color:'#666',type:'dashed'}},data:[{{yAxis:0}}]}}}}
+    ]
+}});
+
+var c_rank = echarts.init(document.getElementById('chart-rank-line'));
+c_rank.setOption({{
+    tooltip: {{trigger:'axis'}},
+    grid: {{left:50,right:50,top:20,bottom:40}},
+    xAxis: {{type:'category',data:{json.dumps([r["rank"] for r in rank_stats])},name:'排名',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888'}}}},
+    yAxis: {{type:'value',name:'5日均收益 (%)',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return v.toFixed(1)+'%'}}}}}},
+    series: [
+        {{type:'line',data:{json.dumps([r["avg_ret"] for r in rank_stats])},smooth:true,lineStyle:{{color:'#ffd93d',width:2}},symbol:'circle',symbolSize:4,itemStyle:{{color:'#ffd93d'}},name:'平均收益'}},
+        {{type:'line',data:{json.dumps([r["winrate"] for r in rank_stats])},smooth:true,lineStyle:{{color:'#6bcb77',width:2}},symbol:'diamond',symbolSize:4,itemStyle:{{color:'#6bcb77'}},name:'胜率 (%)'}}
+    ]
+}});
+
+var c_cs = echarts.init(document.getElementById('chart-cap-scatter'));
+c_cs.setOption({
+    tooltip: {{trigger:'item',formatter:function(p){{return p.data.name+'<br/>'+p.data.date+'<br/>市值: '+(p.data[0]/1e8).toFixed(1)+'亿<br/>5日收益: '+p.data[1].toFixed(2)+'%'}}}},
+    grid: {{left:80,right:40,top:20,bottom:50}},
+    xAxis: {{type:'value',name:'流通市值',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return (v/1e8).toFixed(0)+'亿'}}}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}}}},
+    yAxis: {{type:'value',name:'5日前向收益 (%)',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return v.toFixed(0)+'%'}}}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}}}},
+    series: [{{type:'scatter',data:{json.dumps([[p["x"],p["y"]] for p in cap_scatter])},symbolSize:4,itemStyle:{{color:'rgba(255,180,100,0.4)'}}}}]
+}});
+
+var c_cd = echarts.init(document.getElementById('chart-cap-decile'));
+c_cd.setOption({{
+    tooltip: {{trigger:'axis'}},
+    grid: {{left:50,right:50,top:20,bottom:40}},
+    xAxis: {{type:'category',data:{json.dumps([d["label"] for d in cap_decile_bars])},axisLabel:{{color:'#888'}}}},
+    yAxis: {{type:'value',name:'5日均收益 (%)',nameTextStyle:{{color:'#888'}},axisLabel:{{color:'#888',formatter:function(v){{return v.toFixed(1)+'%'}}}}}},
+    series: [
+        {{type:'bar',data:{json.dumps([d["avg_ret"] for d in cap_decile_bars])},
+         itemStyle:{{color:function(p){{return p.value>=0?'#ff6b6b':'#6bcb77'}}}},
+         markLine:{{silent:true,symbol:'none',lineStyle:{{color:'#666',type:'dashed'}},data:[{{yAxis:0}}]}}}}
+    ]
+}});
+
+var c_hm = echarts.init(document.getElementById('chart-heatmap'));
+var hm_data = {json.dumps(hm_data)};
+c_hm.setOption({{
+    tooltip: {{trigger:'item',formatter:function(p){{return '分数 '+['Q1','Q2','Q3','Q4'][p.data[0]]+' × 市值 '+['Q1','Q2','Q3','Q4'][p.data[1]]+'<br/>5日均收益: '+(p.data[2]*100).toFixed(2)+'%<br/>胜率: '+(p.data[3]*100).toFixed(1)+'%<br/>样本: '+p.data[4]}}}},
+    grid: {{left:100,right:80,top:20,bottom:40}},
+    xAxis: {{type:'category',data:['Q1 小盘','Q2 中小盘','Q3 中大盘','Q4 大盘'],position:'top',axisLabel:{{color:'#888',fontSize:13}}}},
+    yAxis: {{type:'category',data:['Q4 高分','Q3 中高分','Q2 中低分','Q1 低分'],axisLabel:{{color:'#888',fontSize:13}}}},
+    visualMap: {{min:-3,max:3,calculable:true,orient:'vertical',right:0,top:'center',inRange:{{color:['#6bcb77','#222','#ff6b6b']}},text:['高','低'],textStyle:{{color:'#888'}}}},
+    series: [{{
+        type:'heatmap',
+        data: hm_data.map(function(d){{return [d.cap_q, d.score_q, Math.max(-5, Math.min(5, d.avg*100))]}}),
+        label: {{show:true,formatter:function(p){{var d=hm_data[p.data[0]*4+p.data[1]];return (d.avg*100).toFixed(2)+'%\n'+d.count+'个'}},fontSize:13,color:'#e0e0e0'}},
+        emphasis: {{itemStyle:{{shadowBlur:10,shadowColor:'rgba(0,0,0,0.5)'}}}}
+    }}]
+}});
+
+window.addEventListener('resize',function(){{c_ss.resize();c_sd.resize();c_rank.resize();c_cs.resize();c_cd.resize();c_hm.resize()}});
+</script></body></html>

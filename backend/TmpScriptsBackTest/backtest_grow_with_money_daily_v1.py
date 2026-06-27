@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """
-grow_with_money · 周频调仓回测 · 980080
+grow_with_money · 每日调仓回测 · T+1 开盘价版本（V1）
 
-策略：每周五从国证成长100成分股中按过去 M 日主力净流入排名取 Top N，
+与 base 版本的区别：调仓以 T+1 开盘价成交，而非 T+0 收盘价。
+- 当日收盘后根据资金流排名决定调仓
+- 次日开盘价买入/卖出
+
+策略：每个交易日从指数成分股中按过去 M 日主力净流入排名取 Top N，
 等权买入。已在持仓且未跌出前 N 不动（省换手）。
 
 支持 --stop-loss：每日检查，个股跌破成本价 -8% 则止损卖出。
 
 用法：
-    python TmpScriptsBackTest/backtest_grow_with_money.py
-    python TmpScriptsBackTest/backtest_grow_with_money.py --top 3 5 10 --stop-loss
-    python TmpScriptsBackTest/backtest_grow_with_money.py --bt-start 2025-06-01 --data-start 2025-04-01
+    python TmpScriptsBackTest/backtest_grow_with_money_daily_v1.py
+    python TmpScriptsBackTest/backtest_grow_with_money_daily_v1.py --top 3 5 10 --stop-loss
+    python TmpScriptsBackTest/backtest_grow_with_money_daily_v1.py --bt-start 2025-06-01 --data-start 2025-04-01
 """
 
 from __future__ import annotations
-import argparse, json, os, sys
-from datetime import datetime, timedelta
+import argparse, json, os
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
-import psycopg2, psycopg2.extras
+import psycopg2
 from dotenv import load_dotenv
 
 _ENV_DIR = Path(__file__).resolve().parent.parent
@@ -35,73 +38,40 @@ def _pg():
     r = urlparse(u)
     return psycopg2.connect(host=r.hostname or "localhost",port=r.port or 5432,user=r.username or "aipicking",password=r.password or "",dbname=r.path.lstrip("/") or "aipicking")
 
-HOLIDAYS = {
-    2025: {"0101","0128","0129","0130","0131","0203","0204","0404","0405","0406","0501","0502","0503","0504","0505","0531","0601","0602","1001","1002","1003","1004","1005","1006","1007","1008"},
-    2026: {"0101","0217","0218","0219","0220","0221","0222","0223","0405","0406","0407","0501","0502","0503","0504","0505","0625","0626","0627","0929","0930","1001","1002","1003","1004","1005","1006","1007"},
-}
 ST, CM = 0.001, 0.0003
-SELL_C = ST + CM; BUY_C = CM
-
-def _td(d): return not (d.weekday()>=5 or d.strftime("%m%d") in HOLIDAYS.get(d.year,set()))
-
-def gen_fridays(s,e):
-    d = datetime.strptime(s,"%Y-%m-%d")
-    while d.weekday()!=4: d+=timedelta(days=1)
-    end = datetime.strptime(e,"%Y-%m-%d")
-    out = []
-    while d<=end:
-        if _td(d): out.append(d.strftime("%Y-%m-%d"))
-        else:
-            nd=d+timedelta(days=1)
-            for _ in range(7):
-                if _td(nd): out.append(nd.strftime("%Y-%m-%d")); break
-                nd+=timedelta(days=1)
-        d+=timedelta(days=7)
-    return out
+SELL_C = ST+CM; BUY_C = CM
 
 def run(top_n, lookback, index_code="980080", stop_loss_pct=0,
         bt_start="2025-01-01", bt_end="2026-06-19",
         data_start="2024-12-01", data_end="2026-06-30"):
-    conn = _pg()
-    cur = conn.cursor()
+    conn = _pg(); cur = conn.cursor()
 
-    rebal_dates = gen_fridays(bt_start, bt_end)
-    # index raw codes
     cur.execute("SELECT ts_code FROM index_constituents WHERE index_code=%s", (index_code,))
     raw_set = {r[0] for r in cur.fetchall()}
 
-    # All trading days
     cur.execute("SELECT DISTINCT trade_date FROM daily WHERE trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
                 (data_start, data_end))
     all_td = [r[0] for r in cur.fetchall()]
 
-    # Map rebal dates to actual trading days
-    def nxt(tgt):
-        for t in all_td:
-            if t>=tgt: return t
-        return None
-    rebal_td_set = set()
-    for rd in rebal_dates:
-        nt = nxt(rd)
-        if nt: rebal_td_set.add(nt)
-
-    # Find matching ts_codes
-    cur.execute("""
-        SELECT DISTINCT sff.ts_code FROM daily_stock_fund_flow sff
+    cur.execute("""SELECT DISTINCT sff.ts_code FROM daily_stock_fund_flow sff
         JOIN stocks s ON s.ts_code=sff.ts_code
         WHERE sff.trade_date>=%s AND sff.trade_date<=%s
-          AND s.type='stock' AND s.name NOT LIKE '%%ST%%'
-    """, (data_start, data_end))
-    all_fc = [r[0] for r in cur.fetchall()]
-    match_ts = [t for t in all_fc if t.split(".")[0] in raw_set]
+        AND s.type='stock' AND s.name NOT LIKE '%%ST%%'""",
+        (data_start, data_end))
+    match_ts = [r[0] for r in cur.fetchall() if r[0].split(".")[0] in raw_set]
 
-    # Load all prices
-    cur.execute("SELECT ts_code,trade_date,close FROM daily WHERE ts_code=ANY(%s) AND trade_date>=%s AND trade_date<=%s ORDER BY ts_code,trade_date",
-                (match_ts, data_start, data_end))
-    pr = {}
-    for c,d,v in cur.fetchall(): pr.setdefault(d,{})[c]=v
+    # ── Load close + open prices ──────────────────────────────
+    cur.execute(
+        "SELECT ts_code,trade_date,open,close FROM daily "
+        "WHERE ts_code=ANY(%s) AND trade_date>=%s AND trade_date<=%s "
+        "ORDER BY ts_code,trade_date",
+        (match_ts, data_start, data_end))
+    pr = {}; pr_open = {}
+    for c,d,o,v in cur.fetchall():
+        pr.setdefault(d,{})[c]=v
+        pr_open.setdefault(d,{})[c]=o
 
-    # ── Forward-fill prices + tradability marker ──────────────────
+    # ── Forward-fill close + tradability ──────────────────────
     is_tradable = {}
     last_px = {}
     for td_ in all_td:
@@ -115,124 +85,146 @@ def run(top_n, lookback, index_code="980080", stop_loss_pct=0,
                 pr.setdefault(td_, {})[c] = last_px[c]
                 is_tradable[td_][c] = False
 
-    # Load all fund flow
-    cur.execute("SELECT ts_code,trade_date,main_net_flow FROM daily_stock_fund_flow WHERE ts_code=ANY(%s) AND trade_date>=%s AND trade_date<=%s",
-                (match_ts, data_start, data_end))
+    # ── Forward-fill open prices ──────────────────────────────
+    last_open = {}
+    for td_ in all_td:
+        op_day = pr_open.get(td_, {})
+        for c in match_ts:
+            if c in op_day:
+                last_open[c] = op_day[c]
+            elif c in last_open:
+                pr_open.setdefault(td_, {})[c] = last_open[c]
+
+    # ── Fund flow ─────────────────────────────────────────────
+    cur.execute(
+        "SELECT ts_code,trade_date,main_net_flow FROM daily_stock_fund_flow "
+        "WHERE ts_code=ANY(%s) AND trade_date>=%s AND trade_date<=%s",
+        (match_ts, data_start, data_end))
     ff = {}
     for c,d,v in cur.fetchall(): ff.setdefault(d,{})[c]=float(v or 0)
     conn.close()
 
     nav, cash = 1000.0, 0.0
-    holdings = {}   # {code: shares}
-    cost_basis = {} # {code: price}
-    points = []
-    stop_cnt = 0
-    last_nav = nav
-
+    holdings = {}; cost_basis = {}; points = []; stop_cnt = 0; last_nav = nav
     bt = [d for d in all_td if bt_start<=d<=bt_end]
+    if len(bt) < 2:
+        print("❌ 回测区间至少需要 2 个交易日（T+1 需要次日开盘价）")
+        return []
     sl = stop_loss_pct>0
 
-    label = f"grow_with_money · {index_code} · M={lookback} · Top {top_n} · 每周五"
+    label = f"grow_with_money V1 · {index_code} · M={lookback} · Top {top_n} · T+1开盘"
     if sl: label += f" · 止损{stop_loss_pct*100:.0f}%"
     print(f"\n{'='*100}\n  {label}\n{'='*100}")
-    print(f"{'日期':<12} {'净值':>10} {'周收益':>8} {'持仓':>5} {'保留':>5} {'卖出':>5} {'买入':>5} {'换手%':>7} {'费用':>8}")
+    print(f"{'日期':<12} {'净值':>10} {'日收益':>8} {'持仓':>5} {'保留':>5} {'卖出':>5} {'买入':>5} {'换手%':>7} {'费用':>8}")
 
-    for td in bt:
-        px = pr.get(td,{})
-        if not px: continue
-        is_reb = td in rebal_td_set
+    pending_ranking = None  # 当日收盘后计算的排名，次日开盘执行
 
-        # ── Daily stop-loss check (skip if suspended) ────────
+    for i, td in enumerate(bt):
+        px_close = pr.get(td, {})     # 当日收盘价 → NAV
+        px_open = pr_open.get(td, {}) # 当日开盘价 → 执行昨日决策
+        if not px_close: continue
         tradable = is_tradable.get(td, {})
+
+        # ── 执行昨日决策（当日开盘价）──────────────────────
+        sold_today = 0; kept_suspended = 0; bought_today = 0
+        keep_c = set()
+        tv = 0.0; ct = 0.0
+
+        if pending_ranking is not None:
+            tgt = {s["ts_code"] for s in pending_ranking}
+            old = set(holdings.keys())
+
+            if not holdings:
+                # 首次建仓（当日开盘价买入）
+                tradable_ranking = [s for s in pending_ranking
+                                    if tradable.get(s["ts_code"]) and px_open.get(s["ts_code"], 0) > 0]
+                if tradable_ranking:
+                    n = len(tradable_ranking); w = 1.0/n
+                    for s in tradable_ranking:
+                        p = px_open[s["ts_code"]]
+                        holdings[s["ts_code"]] = (1000.0 * w * (1 - BUY_C)) / p
+                        cost_basis[s["ts_code"]] = p
+                        ct += 1000.0 * w * BUY_C
+                    cash = 0
+                    bought_today = len(tradable_ranking)
+                    tv = 1000.0
+            else:
+                # 调仓
+                sell_c = old - tgt; buy_c = tgt - old; keep_c = old & tgt
+
+                # 卖出
+                sg = 0
+                for c in list(sell_c):
+                    if not tradable.get(c):
+                        kept_suspended += 1; keep_c.add(c); continue
+                    p = px_open.get(c, 0)
+                    if p > 0:
+                        sg += holdings[c] * p
+                        del holdings[c]
+                        if c in cost_basis: del cost_basis[c]
+                        sold_today += 1
+                cash += sg * (1 - SELL_C)
+                ct += sg * SELL_C
+
+                # 买入
+                bct = 0.0
+                actual_buys = [c for c in buy_c if tradable.get(c) and px_open.get(c, 0) > 0]
+                if actual_buys and cash > 0:
+                    ca = cash / len(actual_buys)
+                    for c in actual_buys:
+                        p = px_open[c]
+                        holdings[c] = (ca * (1 - BUY_C)) / p
+                        cost_basis[c] = p
+                        bct += ca * BUY_C; cash -= ca
+                        bought_today += 1
+                ct += bct
+                tv = sg + (cash + bct if actual_buys else 0)
+
+        # ── 止损检查（当日收盘价）─────────────────────────
         if sl and holdings:
             for code, sh in list(holdings.items()):
                 if not tradable.get(code): continue
-                p = px.get(code,0)
-                cb = cost_basis.get(code,0)
-                if p>0 and cb>0 and (p/cb-1)<-stop_loss_pct:
-                    cash += sh*p*(1-SELL_C)
+                p = px_close.get(code, 0); cb = cost_basis.get(code, 0)
+                if p > 0 and cb > 0 and (p/cb - 1) < -stop_loss_pct:
+                    cash += sh * p * (1 - SELL_C)
                     del holdings[code], cost_basis[code]
                     stop_cnt += 1
 
-        # NAV update
-        sv = sum(holdings[c]*px.get(c,0) for c in holdings if px.get(c,0)>0)
+        # ── 当日收盘净值 ──────────────────────────────────
+        sv = sum(holdings[c] * px_close.get(c, 0) for c in holdings if px_close.get(c, 0) > 0)
+        prev_nav = nav
         nav = sv + cash
 
-        if not is_reb:
-            if td==bt[-1]: points.append({"date":td,"nav":round(nav,2)})
-            continue
-
-        # ── Rebalance ──────────────────────────────────────
+        # ── 计算次日排名 ──────────────────────────────────
         idx = all_td.index(td)
-        pre = all_td[max(0,idx-lookback+1):idx+1]
-        if len(pre)<lookback: continue
+        pre = all_td[max(0, idx - lookback + 1):idx + 1]
+        if len(pre) >= lookback:
+            fs = {}
+            for pd_ in pre:
+                for c, v in ff.get(pd_, {}).items():
+                    fs[c] = fs.get(c, 0) + v
+            pending_ranking = sorted(
+                [{"ts_code": k, "flow_m": v} for k, v in fs.items() if v > 0],
+                key=lambda x: x["flow_m"], reverse=True)[:top_n]
+        else:
+            pending_ranking = None
 
-        fs = {}
-        for pd_ in pre:
-            for c,v in ff.get(pd_,{}).items(): fs[c]=fs.get(c,0)+v
-        ranking = sorted([{"ts_code":k,"flow_m":v} for k,v in fs.items() if v>0],key=lambda x:x["flow_m"],reverse=True)[:top_n]
-        if not ranking: continue
-        tgt = {s["ts_code"] for s in ranking}
+        # ── 输出 ──────────────────────────────────────────
+        dr = (nav / last_nav - 1) * 100 if last_nav > 0 and last_nav != nav else 0
+        is_fri = datetime.strptime(td, "%Y-%m-%d").weekday() == 4
 
-        if not holdings and cash==0:
-            # Initial — use fixed 1000 as starting capital
-            start_nav = 1000.0
-            tradable_ranking = [s for s in ranking if tradable.get(s["ts_code"])]
-            if not tradable_ranking: continue
-            n = len(tradable_ranking); w = 1.0/n
-            for s in tradable_ranking:
-                p = px.get(s["ts_code"],0)
-                if p>0:
-                    holdings[s["ts_code"]] = (start_nav*w)/p
-                    cost_basis[s["ts_code"]] = p
-            cash = 0; nav = start_nav
-            print(f"{td:<12} {nav:>10.2f} {'—':>8} {len(holdings):>5} {'—':>5} {'—':>5} {len(holdings):>5} {'—':>7} {'—':>8}")
-            points.append({"date":td,"nav":round(nav,2)}); last_nav=nav
-            continue
+        if i == 0:
+            print(f"{td:<12} {nav:>10.2f} {'—':>8} {0:>5} {'—':>5} {'—':>5} {'—':>5} {'—':>7} {'—':>8}")
+        elif is_fri or i <= 4:
+            to = (tv / (prev_nav) * 100) if prev_nav > 0 and tv > 0 else 0
+            print(f"{td:<12} {nav:>10.2f} {dr:>7.2f}% {len(holdings):>5} {len(keep_c):>5} {sold_today:>5} {bought_today:>5} {to:>6.1f}% {ct:>8.2f}")
 
-        old = set(holdings.keys())
-        sell_c = old - tgt; buy_c = tgt - old; keep_c = old & tgt
-        sold_today = 0; kept_suspended = 0
+        points.append({"date": td, "nav": round(nav, 2)})
+        last_nav = nav
 
-        # Sell removed (skip if suspended — can't sell a halted stock)
-        sg = 0
-        for c in list(sell_c):
-            if not tradable.get(c):
-                kept_suspended += 1
-                keep_c.add(c)
-                continue
-            p = px.get(c,0)
-            if p>0: sg += holdings[c]*p
-            del holdings[c]
-            if c in cost_basis: del cost_basis[c]
-            sold_today += 1
-        cash += sg*(1-SELL_C)
-
-        # Buy new (skip if suspended, redistribute cash to tradable targets)
-        bct = 0.0
-        actual_buys = [c for c in buy_c if tradable.get(c)]
-        if actual_buys and cash>0:
-            ca = cash/len(actual_buys)
-            for c in actual_buys:
-                p = px.get(c,0)
-                if p>0:
-                    holdings[c] = (ca*(1-BUY_C))/p
-                    cost_basis[c] = p
-                    bct += ca*BUY_C
-                    cash -= ca
-
-        nav = sum(holdings[c]*px.get(c,0) for c in holdings if px.get(c,0)>0) + cash
-        tv = sg + (cash+bct if actual_buys else 0)
-        to = (tv/(sv+cash)*100) if (sv+cash)>0 else 0
-        ct = sg*SELL_C + bct
-        wr = (nav/last_nav-1)*100 if last_nav>0 else 0
-
-        print(f"{td:<12} {nav:>10.2f} {wr:>7.2f}% {len(holdings):>5} {len(keep_c):>5} {sold_today:>5} {len(actual_buys):>5} {to:>6.1f}% {ct:>8.2f}")
-        points.append({"date":td,"nav":round(nav,2)}); last_nav=nav
-
-    tr = (nav/1000-1)*100
+    tr = (nav / 1000 - 1) * 100
     print(f"\n  📊 结果: {bt[0]} ~ {bt[-1]}")
-    print(f"  起始: 1000.00 → 截止: {nav:.2f}  |  总收益: {tr:+.2f}%  |  调仓: {len(points)-1} 次")
+    print(f"  起始: 1000.00 → 截止: {nav:.2f}  |  总收益: {tr:+.2f}%  |  交易日: {len(points)}")
     if sl: print(f"  止损触发: {stop_cnt} 次")
     return points
 
@@ -280,22 +272,22 @@ def main():
 
     fns = {}
     for n in args.top:
-        k=str(n)
+        k=str(n);
         if k in all_r: fns[k]=all_r[k][-1]["nav"]
         if args.stop_loss:
             k2=f"{n}_sl"
             if k2 in all_r: fns[k2]=all_r[k2][-1]["nav"]
 
-    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money · {args.index} · 周频</title>
+    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money V1 · {args.index} · 日频</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#1a1a2e;font-family:-apple-system,sans-serif}}
 .container{{max-width:1400px;margin:0 auto;padding:24px}}h1{{color:#e0e0e0;text-align:center;font-size:22px;margin-bottom:6px}}
 .sub{{color:#888;text-align:center;font-size:13px;margin-bottom:20px}}#chart{{width:100%;height:700px;background:#16213e;border-radius:12px}}
 .stats{{display:grid;grid-template-columns:repeat({len(fns)},1fr);gap:16px;margin-top:20px}}
-.card{{background:#16213e;border-radius:10px;padding:20px;text-align:center}}.card h3{{color:#888;font-size:13px;font-weight:normal;margin-bottom:8px}}
+.card{{background:#16213e;border-radius:10px;padding:20px;text-align:center}}.card h3{{color:#888;font-size:13px;margin-bottom:8px}}
 .card .val{{font-size:32px;font-weight:bold}}.card .pct{{font-size:14px;margin-top:4px}}</style></head><body><div class="container">
-<h1>grow_with_money · {args.index} · 每周五调仓 · M={args.lookback}</h1>
-<div class="sub">{args.bt_start[:7]} ~ {args.bt_end[:7]} · {len(dates)} 个数据点 · 同股不动 · 已扣交易费用</div>
+<h1>grow_with_money V1 · T+1开盘 · {args.index} · 每日调仓 · M={args.lookback}</h1>
+<div class="sub">{args.bt_start[:7]} ~ {args.bt_end[:7]} · {len(dates)} 个交易日 · 同股不动 · 已扣交易费用 · T+1开盘价成交</div>
 <div id="chart"></div><div class="stats" id="stats"></div></div>
 <script>var dates={json.dumps(dates)};var sd={json.dumps(series)};var fn={json.dumps(fns)};
 var c=echarts.init(document.getElementById('chart'));
@@ -304,7 +296,7 @@ tooltip:{{trigger:'axis',backgroundColor:'rgba(22,33,62,0.95)',borderColor:'#333
 formatter:function(p){{var s='<b>'+p[0].axisValue+'</b><br/>';p.forEach(function(x){{s+='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+x.color+';margin-right:6px"></span>'+x.seriesName+': <b>'+x.value.toFixed(2)+'</b> ('+((x.value-1000)/10).toFixed(1)+'%)<br/>'}});return s}}}},
 legend:{{data:sd.map(function(s){{return s.name}}),top:10,textStyle:{{color:'#aaa',fontSize:14}},itemWidth:30,itemHeight:3}},
 grid:{{left:60,right:40,top:60,bottom:40}},
-xAxis:{{type:'category',data:dates,axisLine:{{lineStyle:{{color:'#333'}}}},axisLabel:{{color:'#888',fontSize:10,rotate:45,formatter:function(v){{return v.slice(5)}},interval:Math.floor(dates.length/25)}},splitLine:{{show:false}}}},
+xAxis:{{type:'category',data:dates,axisLine:{{lineStyle:{{color:'#333'}}}},axisLabel:{{color:'#888',fontSize:10,rotate:45,formatter:function(v){{return v.slice(5)}},interval:Math.floor(dates.length/30)}},splitLine:{{show:false}}}},
 yAxis:{{type:'value',name:'净值',nameTextStyle:{{color:'#888',fontSize:12}},axisLabel:{{color:'#888',fontSize:12}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}},min:function(v){{return Math.floor(v.min/100)*100}}}},
 series:sd.map(function(s){{return{{name:s.name,type:'line',data:s.data,smooth:true,symbol:'none',lineStyle:{{width:s.dashed?1.5:2,color:s.color,type:s.dashed?'dashed':'solid'}},itemStyle:{{color:s.color}}}}}})
 }});
@@ -315,7 +307,7 @@ ss.innerHTML+='<div class="card"><h3>'+k.replace('_sl',' 止损')+'</h3><div cla
 window.addEventListener('resize',function(){{c.resize()}});</script></body></html>"""
 
     idx_slug = args.index.replace(".","_")
-    out = Path(__file__).resolve().parent/f"backtest_grow_with_money_{idx_slug}.html"
+    out = Path(__file__).resolve().parent / f"backtest_grow_with_money_{idx_slug}_daily_v1.html"
     with open(out,'w') as f: f.write(html)
     print(f"\n✅ HTML: {out}")
 
@@ -331,7 +323,7 @@ window.addEventListener('resize',function(){{c.resize()}});</script></body></htm
                 base_d = datetime.strptime(args.rebase_date, "%Y-%m-%d")
                 best = min(pts, key=lambda pp: abs((datetime.strptime(pp["date"], "%Y-%m-%d") - base_d).days))
                 base_nav = best["nav"]; base_pt_date = best["date"]
-                print(f"  ⚠️ {k}: 基准日 {args.rebase_date} 无周频数据点，用最近日 {base_pt_date} NAV={base_nav:.2f}")
+                print(f"  ⚠️ {k}: 基准日 {args.rebase_date} 无数据点，用最近日 {base_pt_date} NAV={base_nav:.2f}")
             factor = 1000.0 / base_nav
             rebased[k] = [{"date": pp["date"], "nav": round(pp["nav"] * factor, 2)} for pp in pts]
 
@@ -353,7 +345,7 @@ window.addEventListener('resize',function(){{c.resize()}});</script></body></htm
                 k2 = f"{n}_sl"
                 if k2 in rebased: rb_fns[k2] = rebased[k2][-1]["nav"]
 
-        rb_html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money · {args.index} · 周频 · Rebase</title>
+        rb_html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>grow_with_money V1 · {args.index} · 日频 · Rebase</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#1a1a2e;font-family:-apple-system,sans-serif}}
 .container{{max-width:1400px;margin:0 auto;padding:24px}}h1{{color:#e0e0e0;text-align:center;font-size:22px;margin-bottom:6px}}
@@ -361,8 +353,8 @@ window.addEventListener('resize',function(){{c.resize()}});</script></body></htm
 .stats{{display:grid;grid-template-columns:repeat({len(rb_fns)},1fr);gap:16px;margin-top:20px}}
 .card{{background:#16213e;border-radius:10px;padding:20px;text-align:center}}.card h3{{color:#888;font-size:13px;font-weight:normal;margin-bottom:8px}}
 .card .val{{font-size:32px;font-weight:bold}}.card .pct{{font-size:14px;margin-top:4px}}</style></head><body><div class="container">
-<h1>grow_with_money · {args.index} · 每周五调仓 · M={args.lookback} · 基准日 {args.rebase_date}=1000</h1>
-<div class="sub">{args.bt_start[:7]} ~ {args.bt_end[:7]} · {len(rb_dates)} 个数据点 · 同股不动 · 已扣交易费用 · 净值归一化到 {args.rebase_date}</div>
+<h1>grow_with_money V1 · T+1开盘 · {args.index} · 每日调仓 · M={args.lookback} · 基准日 {args.rebase_date}=1000</h1>
+<div class="sub">{args.bt_start[:7]} ~ {args.bt_end[:7]} · {len(rb_dates)} 个交易日 · 同股不动 · 已扣交易费用 · T+1开盘价成交 · 净值归一化到 {args.rebase_date}</div>
 <div id="chart"></div><div class="stats" id="stats"></div></div>
 <script>var dates={json.dumps(rb_dates)};var sd={json.dumps(rb_series)};var fn={json.dumps(rb_fns)};
 var c=echarts.init(document.getElementById('chart'));
@@ -371,7 +363,7 @@ tooltip:{{trigger:'axis',backgroundColor:'rgba(22,33,62,0.95)',borderColor:'#333
 formatter:function(p){{var s='<b>'+p[0].axisValue+'</b><br/>';p.forEach(function(x){{s+='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+x.color+';margin-right:6px"></span>'+x.seriesName+': <b>'+x.value.toFixed(2)+'</b> ('+((x.value-1000)/10).toFixed(1)+'%)<br/>'}});return s}}}},
 legend:{{data:sd.map(function(s){{return s.name}}),top:10,textStyle:{{color:'#aaa',fontSize:14}},itemWidth:30,itemHeight:3}},
 grid:{{left:60,right:40,top:60,bottom:40}},
-xAxis:{{type:'category',data:dates,axisLine:{{lineStyle:{{color:'#333'}}}},axisLabel:{{color:'#888',fontSize:10,rotate:45,formatter:function(v){{return v.slice(5)}},interval:Math.floor(dates.length/25)}},splitLine:{{show:false}}}},
+xAxis:{{type:'category',data:dates,axisLine:{{lineStyle:{{color:'#333'}}}},axisLabel:{{color:'#888',fontSize:10,rotate:45,formatter:function(v){{return v.slice(5)}},interval:Math.floor(dates.length/30)}},splitLine:{{show:false}}}},
 yAxis:{{type:'value',name:'净值 (基准日=1000)',nameTextStyle:{{color:'#888',fontSize:12}},axisLabel:{{color:'#888',fontSize:12}},splitLine:{{lineStyle:{{color:'#222',type:'dashed'}}}},min:function(v){{return Math.floor(v.min/100)*100}}}},
 series:sd.map(function(s){{return{{name:s.name,type:'line',data:s.data,smooth:true,symbol:'none',lineStyle:{{width:s.dashed?1.5:2,color:s.color,type:s.dashed?'dashed':'solid'}},itemStyle:{{color:s.color}},
 markLine:{{silent:true,symbol:'none',lineStyle:{{color:'#666',type:'dashed',width:1}},data:[{{yAxis:1000,label:{{formatter:'基准 1000',color:'#888',fontSize:11}}}}]}}}}}})
@@ -381,7 +373,7 @@ Object.keys(fn).forEach(function(k){{var v=fn[k],p=((v-1000)/10).toFixed(1);var 
 if(k.indexOf('3')==0)cl='#ff6b6b';else if(k.indexOf('5')==0)cl='#ffd93d';else if(k.indexOf('10')==0)cl='#6bcb77';
 ss.innerHTML+='<div class="card"><h3>'+k.replace('_sl',' 止损')+'</h3><div class="val" style="color:'+cl+'">'+v.toFixed(2)+'</div><div class="pct" style="color:'+cl+'">'+(p>=0?'+':'')+p+'%</div></div>'}});
 window.addEventListener('resize',function(){{c.resize()}});</script></body></html>"""
-        rb_out = Path(__file__).resolve().parent/f"backtest_grow_with_money_{idx_slug}_rebase.html"
+        rb_out = Path(__file__).resolve().parent / f"backtest_grow_with_money_{idx_slug}_daily_v1_rebase.html"
         with open(rb_out, 'w') as f: f.write(rb_html)
         print(f"✅ Rebase HTML: {rb_out}")
 

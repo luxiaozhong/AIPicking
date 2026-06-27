@@ -1,0 +1,112 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
+<title>M=5 Top3 V1 · 2026 · 逐笔交易分析</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;font-family:-apple-system,sans-serif;color:#e0e0e0;padding:24px}
+.container{max-width:1400px;margin:0 auto}
+h1{text-align:center;font-size:22px;margin-bottom:4px}
+h2{font-size:18px;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid #333}
+.sub{color:#888;text-align:center;font-size:13px;margin-bottom:24px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.chart{width:100%;height:500px;background:#16213e;border-radius:12px}
+.chart-full{width:100%;height:500px;background:#16213e;border-radius:12px;margin-bottom:20px}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat-card{background:#16213e;border-radius:10px;padding:16px;text-align:center}
+.stat-card .label{color:#888;font-size:12px;margin-bottom:4px}
+.stat-card .val{font-size:28px;font-weight:bold}
+.stat-card .sub{color:#888;font-size:11px;margin-top:2px}
+table{width:100%;border-collapse:collapse;margin:12px 0 24px;font-size:13px}
+th{background:#1a3a5c;padding:10px 12px;text-align:center;font-weight:600}
+td{padding:8px 12px;text-align:center;border-bottom:1px solid #222}
+tr:hover td{background:rgba(255,255,255,0.03)}
+.pos{color:#ff6b6b} .neg{color:#6bcb77}
+</style></head><body><div class="container">
+<h1>M=5 Top3 V1 (T+1 开盘) · 2026 逐笔交易分析</h1>
+<div class="sub">980080 · 2026-01-01 ~ 2026-06-26 · 143 笔交易 · 平均收益 +2.71% · 胜率 56.6%</div>
+
+<div class="stats-grid">
+<div class="stat-card"><div class="label">总交易笔数</div><div class="val">143</div></div>
+<div class="stat-card"><div class="label">胜率</div><div class="val" style="color:#ff6b6b">56.6%</div></div>
+<div class="stat-card"><div class="label">平均收益</div><div class="val" style="color:#ff6b6b">+2.71%</div></div>
+<div class="stat-card"><div class="label">盈亏比</div><div class="val">7.7% / -3.8%</div></div>
+</div>
+
+<h2>一、分数 vs 收益率 散点图</h2>
+<div class="chart-full" id="chart-scatter"></div>
+
+<h2>二、分数五分位 收益 & 胜率</h2>
+<div class="row">
+<div class="chart" id="chart-decile-bar"></div>
+<div class="chart" id="chart-decile-winrate"></div>
+</div>
+
+<h2>三、分数分布直方图（含各区间平均收益）</h2>
+<div class="chart-full" id="chart-hist"></div>
+
+<table>
+<tr><th>分位</th><th>分数范围</th><th>笔数</th><th>平均收益</th><th>胜率</th></tr>
+<tr><td>D1</td><td>20883万 ~ 46272万</td><td>28</td><td class="pos">+1.40%</td><td>57.1%</td></tr><tr><td>D2</td><td>46753万 ~ 66588万</td><td>28</td><td class="pos">+2.34%</td><td>50.0%</td></tr><tr><td>D3</td><td>67260万 ~ 88214万</td><td>28</td><td class="pos">+3.29%</td><td>57.1%</td></tr><tr><td>D4</td><td>88420万 ~ 108594万</td><td>28</td><td class="pos">+2.94%</td><td>60.7%</td></tr><tr><td>D5</td><td>120069万 ~ 592741万</td><td>31</td><td class="pos">+3.50%</td><td>58.1%</td></tr>
+</table>
+
+</div>
+<script>
+// Scatter
+var c1 = echarts.init(document.getElementById('chart-scatter'));
+c1.setOption({
+    tooltip: {trigger:'item',formatter:function(p){return p.data.name+'<br/>入场: '+p.data.entry+'<br/>出场: '+p.data.exit+'<br/>分数: '+(p.data[0]/1e4).toFixed(0)+'万<br/>收益: '+p.data[1].toFixed(2)+'%'}},
+    grid: {left:80,right:40,top:20,bottom:50},
+    xAxis: {type:'value',name:'累计主力净流入 (万)',nameTextStyle:{color:'#888'},axisLabel:{color:'#888',formatter:function(v){return (v/1e4).toFixed(0)}}},
+    yAxis: {type:'value',name:'收益率 (%)',nameTextStyle:{color:'#888'},axisLabel:{color:'#888',formatter:function(v){return v.toFixed(0)+'%'}}},
+    series: [{
+        type:'scatter',
+        data:[[208834273.39, 0.69], [216141454.17, -0.9], [236007956.64000002, 7.02], [264592963.12000003, -1.83], [288715217.56, -5.71], [297916144.99999994, -2.34], [315214584.13, 4.54], [322101602.09000003, 1.97], [323328607.68999994, -2.02], [330721737.91999996, -1.65], [331209760.59, 3.79], [334087400.56, -7.22], [351546695.28000003, 1.46], [354704282.75, 25.34], [362777581.14, 4.92], [362888896.61, -0.9], [369391933.1000001, -1.32], [378640155.35000014, 1.58], [379879116.04, -1.18], [411069723.95, -1.03], [413694330.47, 10.34], [422252791.41, 1.06], [444327963.14999986, 1.66], [451646300.05, 1.65], [452814159.45, 3.03], [457837820.0, 2.0], [461735809.6, -5.99], [462721177.11, 0.33], [467527910.53, -0.42], [472721854.33, -2.91], [478383690.52, 6.32], [483615373.78, -8.82], [484137734.06, 12.49], [498460747.15, 42.86], [506582214.1500001, -0.73], [514234328.28, -0.53], [526641712.11, 13.26], [532041862.54999995, 6.58], [535204164.37999994, -1.0], [535747202.07, -8.66], [554752005.7, 9.29], [555682687.9399999, -3.39], [562699691.0, 8.41], [566158221.23, -7.09], [573660947.2, 0.15], [583717276.7900001, -7.68], [585432724.2400001, -1.23], [591692597.22, 7.03], [591962293.6800001, 2.24], [612115197.09, 9.78], [622688671.19, -6.58], [629882338.01, 0.25], [639525026.0999999, -0.13], [641113058.62, 4.42], [650142725.9599999, 2.44], [665876696.5799999, -10.91], [672598946.87, 0.96], [676424516.0, 9.83], [691655062.0699999, 17.23], [706858589.8499999, -3.43], [718011414.6, -0.19], [732504566.87, -5.85], [744036946.6, 3.52], [759248680.3199999, 1.57], [766754849.5, 6.11], [770368503.0799997, 0.95], [772562150.3299999, 4.53], [781550594.3499999, -9.99], [800833672.51, -2.17], [813799557.3, 22.32], [821115935.41, 15.72], [823668808.79, -3.3], [825087924.32, 12.9], [841936002.3899999, -0.03], [847467486.2499999, 14.25], [856460709.66, -3.24], [856660102.7499999, -0.17], [857817424.4900002, -0.86], [858366293.88, 5.89], [858389864.87, -6.91], [866072596.12, 3.5], [876675029.0, -2.71], [880051445.63, 1.19], [882144305.7399999, 10.62], [884203261.79, 4.65], [889644761.6399999, -0.18], [894295123.48, -3.96], [894327852.12, 13.67], [894569597.9300001, 4.9], [897446848.7899997, -0.27], [901856614.96, 5.74], [904284881.87, -5.2], [917163875.0, 12.55], [918535886.11, 6.43], [930769243.24, 4.19], [953588894.34, -4.72], [956189368.29, 8.71], [971560282.1800001, 10.7], [984730701.3, 0.22], [993386454.35, -6.81], [1019384033.3599999, -11.49], [1021964091.8299999, 1.29], [1025808069.45, -9.06], [1030312953.3599999, 19.64], [1032839601.87, -3.0], [1047834652.04, -6.61], [1060869811.8500001, -5.63], [1061005267.04, 16.89], [1070110581.3100001, 6.57], [1075933126.6, 7.76], [1081755308.26, 1.97], [1085936283.1000001, 13.43], [1200694126.3799999, 12.17], [1204133660.4, 0.24], [1205835354.85, -1.53], [1239598937.04, -2.59], [1253832486.9899998, 37.75], [1382027630.68, 12.8], [1422200883.5900002, 2.46], [1425579406.1499999, -0.5], [1438390206.8, -8.02], [1446169035.71, 3.87], [1498035761.0600002, 1.91], [1506329255.54, -1.99], [1533575218.21, 14.84], [1591801538.24, 1.52], [1670371266.7800002, 1.26], [1694283665.69, -5.12], [1786124561.6899998, 2.73], [1801550068.2900002, 15.38], [1806993865.0500002, -2.95], [1813548100.17, -5.96], [1965108866.58, 1.41], [2064185575.7199998, 2.63], [2071304435.2299998, -3.27], [2186761903.51, 2.46], [2549754283.66, 22.98], [2806225027.82, -6.31], [4022151159.92, 13.25], [4382309667.299999, -3.05], [4486004696.73, -4.41], [4653412692.72, 8.6], [5927411632.68, -3.96]],
+        symbolSize: function(data) { return Math.max(6, Math.min(16, Math.abs(data[1]) * 2 + 4)); },
+        itemStyle: {color: function(p) { return (p.data[1]>=0 ? 'rgba(255,107,107,0.7)' : 'rgba(107,203,119,0.7)'); }},
+    }]
+});
+
+// Decile bar
+var c2 = echarts.init(document.getElementById('chart-decile-bar'));
+c2.setOption({
+    tooltip: {trigger:'axis'},
+    grid: {left:50,right:40,top:20,bottom:40},
+    xAxis: {type:'category',data:["D1", "D2", "D3", "D4", "D5"],axisLabel:{color:'#888'},name:'分数分位 (D1=最低,D5=最高)',nameTextStyle:{color:'#888'}},
+    yAxis: {type:'value',name:'平均收益 (%)',nameTextStyle:{color:'#888'},axisLabel:{color:'#888',formatter:function(v){return v.toFixed(1)+'%'}}},
+    series: [{
+        type:'bar', data:[1.4, 2.34, 3.29, 2.94, 3.5],
+        itemStyle: {color: function(p) { return p.value>=0 ? '#ff6b6b' : '#6bcb77'; }},
+        markLine: {silent:true,symbol:'none',lineStyle:{color:'#666',type:'dashed'},data:[{yAxis:0}]}
+    }]
+});
+
+// Winrate line
+var c3 = echarts.init(document.getElementById('chart-decile-winrate'));
+c3.setOption({
+    tooltip: {trigger:'axis'},
+    grid: {left:50,right:40,top:20,bottom:40},
+    xAxis: {type:'category',data:["D1", "D2", "D3", "D4", "D5"],axisLabel:{color:'#888'},name:'分数分位',nameTextStyle:{color:'#888'}},
+    yAxis: {type:'value',name:'胜率 (%)',nameTextStyle:{color:'#888'},axisLabel:{color:'#888',formatter:function(v){return v.toFixed(0)+'%'}},min:0,max:100},
+    series: [{
+        type:'line', data:[57.14285714285714, 50.0, 57.14285714285714, 60.71428571428571, 58.06451612903226], smooth:true,
+        lineStyle: {color:'#ffd93d',width:2}, symbol:'circle', symbolSize:8, itemStyle:{color:'#ffd93d'},
+        markLine: {silent:true,symbol:'none',lineStyle:{color:'#666',type:'dashed'},data:[{yAxis:50,label:{formatter:'50%',color:'#888'}}]}
+    }]
+});
+
+// Histogram
+var c4 = echarts.init(document.getElementById('chart-hist'));
+c4.setOption({
+    tooltip: {trigger:'axis',formatter:function(p){var d=p[0].data;return '分数: '+(d[0]/1e4).toFixed(0)+'万 ~ '+(d[1]/1e4).toFixed(0)+'万<br/>笔数: '+d[2]+'<br/>平均收益: '+d[3].toFixed(2)+'%<br/>胜率: '+d[4].toFixed(1)+'%'}},
+    grid: {left:60,right:40,top:20,bottom:50},
+    xAxis: {type:'category',data:["20883\u4e07", "49476\u4e07", "78069\u4e07", "106662\u4e07", "135255\u4e07", "163848\u4e07", "192441\u4e07", "249627\u4e07", "278219\u4e07", "392591\u4e07", "421184\u4e07", "449777\u4e07", "564148\u4e07"],axisLabel:{color:'#888',rotate:45,fontSize:10},name:'分数区间',nameTextStyle:{color:'#888'}},
+    yAxis: {type:'value',name:'笔数',nameTextStyle:{color:'#888'},axisLabel:{color:'#888'}},
+    series: [{
+        type:'bar',
+        data:[[208834273.39, 494763141.3545, 33, 1.39, 54.5], [494763141.3545, 780692009.319, 34, 2.76, 58.8], [780692009.319, 1066620877.2835, 41, 2.68, 51.2], [1066620877.2835001, 1352549745.2480001, 9, 8.42, 77.8], [1352549745.2480001, 1638478613.2125, 9, 2.99, 66.7], [1638478613.2125, 1924407481.177, 6, 0.89, 50.0], [1924407481.177, 2210336349.1415, 4, 0.81, 75.0], [2496265217.106, 2782194085.0705, 1, 22.98, 100.0], [2782194085.0705, 3068122953.035, 1, -6.31, 0.0], [3925909556.9285, 4211838424.893, 1, 13.25, 100.0], [4211838424.893, 4497767292.8575, 2, -3.73, 0.0], [4497767292.8575, 4783696160.8220005, 1, 8.6, 100.0], [5641482764.715501, 5927411632.680001, 1, -3.96, 0.0]],
+        itemStyle: {color: function(p) { var avg = p.data[3]; return avg>=0 ? 'rgba(255,107,107,0.7)' : 'rgba(107,203,119,0.7)'; }},
+    }]
+});
+
+window.addEventListener('resize',function(){c1.resize();c2.resize();c3.resize();c4.resize()});
+</script></body></html>

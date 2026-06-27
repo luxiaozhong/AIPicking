@@ -279,8 +279,18 @@ DATA_END   = "20260215"   # 15 天缓冲（保证前向价格可查）
 | `oversold-bounce-performance-report.md` | 超跌反弹策略 2026 表现分析 Markdown 报告 |
 | `trend-upstart-flow-report202601-05.html` | Trend Upstart Flow 批量回测报告 |
 | `trend-upstart-flow-report.html` | Trend Upstart Flow 批量回测报告（旧版） |
+| `backtest_grow_with_money.py` | 主力资金流选股 · 周频调仓回测脚本（支持 `--index` 参数指定指数） |
+| `backtest_grow_with_money_daily.py` | 主力资金流选股 · 日频调仓回测脚本（支持 `--index` 参数指定指数） |
+| `backtest_grow_with_money_*.html` | 主力资金流策略 HTML 报告（文件名含指数代码，如 `_980080_`） |
+| `backtest_divergence_strategy.py` | 背离策略回测脚本 |
+| `backtest_divergence_strategy.html` | 背离策略 HTML 回测报告 |
 
 **策略文件位置**：`backend/app/strategies/examples/oversold_bounce.py`
+
+**补充文档**：
+| 文档 | 说明 |
+|------|------|
+| [`docs/grow-with-money-backtest.md`](docs/grow-with-money-backtest.md) | grow_with_money 策略回测完整文档 |
 
 ---
 

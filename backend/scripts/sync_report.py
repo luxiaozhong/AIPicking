@@ -141,9 +141,12 @@ def _parse_update_log(target_date=None):
             m = re.search(r"🎉 历史更新完成！新增/覆盖 (\d+) 条", line)
             if m:
                 total_records += int(m.group(1))
-            m = re.search(r"📊 历史更新完成！跳过 — 已有 ([\d,]+) 条", line)
+            m = re.search(r"🎉 历史更新完成！跳过 — 已有 ([\d,]+) 条", line)
             if m and total_records == 0:
                 total_records = int(m.group(1).replace(",", ""))
+            m = re.search(r"🎉 实时更新完成！成功 (\d+) 只", line)
+            if m and total_records == 0:
+                total_records = int(m.group(1))
 
     display_date = f"{latest_date[:4]}-{latest_date[4:6]}-{latest_date[6:8]}"
     return {"date": display_date, "records": total_records}
