@@ -155,24 +155,33 @@ def upsert_constituents(conn, stocks: list[dict], eff_date: str) -> int:
     return len(stocks)
 
 
+def _bare_code(ts_code: str) -> str:
+    """去掉交易所后缀，返回纯数字代码（用于去重比较）"""
+    return ts_code.replace(".SZ", "").replace(".SH", "").replace(".BJ", "")
+
+
 def run(dry_run: bool = False) -> dict:
     """主流程"""
     conn = get_conn()
     try:
         # 1. 从三个源指数拉取成分股
-        all_stocks: dict[str, dict] = {}  # ts_code -> merged info
+        all_stocks: dict[str, dict] = {}  # bare_code -> merged info
 
         for src in SOURCE_INDICES:
             stocks = fetch_source_constituents(conn, src)
             logging.info("源指数 %s: %d 只成分股", src, len(stocks))
             for s in stocks:
                 code = s["ts_code"]
-                if code in all_stocks:
-                    # 已存在：保留来源信息
-                    all_stocks[code]["source"] = (all_stocks[code].get("source", "") + f",{src}")
+                bare = _bare_code(code)
+                if bare in all_stocks:
+                    existing = all_stocks[bare]
+                    existing["source"] = (existing.get("source", "") + f",{src}")
+                    # 优先使用带后缀的 ts_code
+                    if "." in code and "." not in existing["ts_code"]:
+                        existing["ts_code"] = code
                 else:
                     s["source"] = src
-                    all_stocks[code] = s
+                    all_stocks[bare] = s
 
         merged = list(all_stocks.values())
         # 按 ts_code 排序便于查看
