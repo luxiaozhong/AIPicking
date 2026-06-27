@@ -159,7 +159,7 @@ export const useIndexFundFlowStore = create<IndexFundFlowState>((set, get) => ({
     set((s) => ({ loading: { ...s.loading, constituentFlow: true }, error: null }));
     try {
       const data = await indexFundFlowService.getConstituentFlow(
-        code, date, sort || get().sortField, 100
+        code, date, sort || get().sortField, 200
       );
       set({
         constituentFlow: data.items,
