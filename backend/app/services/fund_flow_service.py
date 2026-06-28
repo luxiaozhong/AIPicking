@@ -51,6 +51,23 @@ def _index_ts_codes_subq():
     return select(IndexInfo.ts_code).where(IndexInfo.ts_code.isnot(None))
 
 
+def _latest_eff_subq(index_code: str):
+    """返回每个 ts_code 最新 eff_date 的子查询（aliased）。
+
+    替代全局 MAX(eff_date)，对 900002 等手动维护的指数也正确：
+    每只股票独立取最新 eff_date，而非要求所有成分股同属一个调样批次。
+    """
+    ic = IndexConstituent.__table__
+    return (
+        select(
+            ic.c.ts_code,
+            func.max(ic.c.eff_date).label("max_eff_date"),
+        )
+        .where(ic.c.index_code == index_code)
+        .group_by(ic.c.ts_code)
+    ).alias("_latest_eff")
+
+
 class FundFlowService:
     """个股资金流聚合查询"""
 
@@ -834,20 +851,22 @@ class FundFlowService:
         s = Stock.__table__
         f = DailyStockFundFlow.__table__
 
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"items": []}
 
         # Extend cutoff by 20 extra days for the 15d rolling window warm-up
         cutoff = (date.today() - timedelta(days=days + 25)).strftime("%Y-%m-%d")
 
-        # Get all constituent stock codes
+        # Get all constituent stock codes (latest eff_date per stock)
         code_stmt = (
             select(s.c.ts_code, s.c.name.label("stock_name"))
-            .select_from(ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code)))
-            .where(ic.c.index_code == index_code, ic.c.eff_date == latest_eff)
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
+            )
+            .where(ic.c.index_code == index_code)
         )
         code_result = await db.execute(code_stmt)
         stocks = [(r["ts_code"], r["stock_name"] or "") for r in code_result.mappings().all()]
@@ -948,10 +967,9 @@ class FundFlowService:
         s = Stock.__table__
         f = DailyStockFundFlow.__table__
 
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"items": []}
 
         cutoff = (date.today() - timedelta(days=days + 5)).strftime("%Y-%m-%d")
@@ -967,11 +985,11 @@ class FundFlowService:
             )
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
                 ic.c.index_code == index_code,
-                ic.c.eff_date == latest_eff,
                 f.c.trade_date >= cutoff,
             )
             .group_by(f.c.trade_date)
@@ -1050,12 +1068,10 @@ class FundFlowService:
         }
         order_by = sort_map.get(sort, sort_map["main_net"])
 
-        # Get latest eff_date for this index
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-
-        if not latest_eff:
+        # Get latest eff_date per stock for this index
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"trade_date": d, "items": []}
 
         stmt = (
@@ -1080,12 +1096,12 @@ class FundFlowService:
             )
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
                 .join(f, f.c.ts_code == s.c.ts_code)
                 .join(dl, (dl.c.ts_code == s.c.ts_code) & (dl.c.trade_date == f.c.trade_date), isouter=True)
             )
             .where(
                 ic.c.index_code == index_code,
-                ic.c.eff_date == latest_eff,
                 f.c.trade_date == d,
             )
             .order_by(order_by)
@@ -1145,11 +1161,10 @@ class FundFlowService:
         s = Stock.__table__
         f = DailyStockFundFlow.__table__
 
-        # Get latest eff_date
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
+        # Get latest eff_date per stock for this index
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"trade_date": "", "days": days, "stocks": []}
 
         # Get latest trade_date
@@ -1165,11 +1180,11 @@ class FundFlowService:
             )
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
                 ic.c.index_code == index_code,
-                ic.c.eff_date == latest_eff,
                 f.c.trade_date == d,
             )
             .order_by(f.c.main_net_flow.desc().nulls_last())
@@ -1247,10 +1262,9 @@ class FundFlowService:
         s = Stock.__table__
         f = DailyStockFundFlow.__table__
 
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"trade_date": d, "items": []}
 
         stmt = (
@@ -1264,11 +1278,11 @@ class FundFlowService:
             )
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
                 ic.c.index_code == index_code,
-                ic.c.eff_date == latest_eff,
                 f.c.trade_date == d,
                 s.c.industry_l1.isnot(None),
                 s.c.industry_l1 != "",
@@ -1309,10 +1323,9 @@ class FundFlowService:
         s = Stock.__table__
         f = DailyStockFundFlow.__table__
 
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"trade_date": d, "items": []}
 
         stmt = (
@@ -1329,11 +1342,11 @@ class FundFlowService:
             )
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
                 .join(f, f.c.ts_code == s.c.ts_code)
             )
             .where(
                 ic.c.index_code == index_code,
-                ic.c.eff_date == latest_eff,
                 f.c.trade_date == d,
             )
             .order_by(f.c.main_net_flow.desc().nulls_last())
