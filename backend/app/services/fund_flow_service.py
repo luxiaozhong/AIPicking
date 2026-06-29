@@ -1377,21 +1377,42 @@ class FundFlowService:
         index_code: str,
         trade_date: Optional[str] = None,
     ) -> dict:
-        """查询 intraday_fund_snapshot，按 snapshot_time 分组返回"""
+        """查询 intraday_fund_snapshot，按 snapshot_time 分组返回
+
+        对于复合指数（如 900009），其成分股快照数据存储在
+        intraday_fund_snapshot 中但 index_code 字段为源指数代码。
+        因此按成分股 ts_code 匹配，而非按 index_code 过滤。
+        """
+        # 1. 获取指数成分股 ts_code 列表
+        ic = IndexConstituent.__table__
+        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
+        eff_result = await db.execute(eff_stmt)
+        latest_eff = eff_result.scalar()
+        if not latest_eff:
+            return {"trade_date": None, "snapshots": []}
+
+        s = Stock.__table__
+        const_stmt = (
+            select(s.c.ts_code)
+            .select_from(
+                ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+            )
+            .where(ic.c.index_code == index_code, ic.c.eff_date == latest_eff)
+        )
+        const_result = await db.execute(const_stmt)
+        const_codes = [r[0] for r in const_result.all()]
+        if not const_codes:
+            return {"trade_date": None, "snapshots": []}
+
+        # 2. 确定查询日期
         if trade_date:
             d = trade_date
         else:
-            # 优先取该指数自身最新快照日期，避免全局最新日期导致新指数查不到
-            sql_date = text(
-                "SELECT MAX(trade_date) FROM intraday_fund_snapshot "
-                "WHERE index_code = :index_code"
-            )
-            date_result = await db.execute(sql_date, {"index_code": index_code})
-            d = date_result.scalar()
+            d = await FundFlowService._get_latest_snapshot_date(db)
         if not d:
             return {"trade_date": None, "snapshots": []}
 
-        # Query snapshots filtered by index_code directly (stored at sync time)
+        # 3. 按成分股 ts_code 查询快照（不限 index_code）
         sql = text(
             """
             SELECT
@@ -1405,12 +1426,12 @@ class FundFlowService:
             FROM intraday_fund_snapshot sn
             JOIN stocks s2 ON sn.ts_code = s2.ts_code
             WHERE sn.trade_date = :trade_date
-              AND sn.index_code = :index_code
+              AND sn.ts_code = ANY(:ts_codes)
             ORDER BY sn.snapshot_time ASC, sn.main_net_flow DESC
             """
         )
         result = await db.execute(sql, {
-            "index_code": index_code,
+            "ts_codes": const_codes,
             "trade_date": d,
         })
 
@@ -1449,17 +1470,31 @@ class FundFlowService:
                     for r in prev_sum_result.mappings().all()
                 }
 
-        # Group by snapshot_time
-        frames: dict[str, list] = {}
+        # Group by snapshot_time, rounded to 3-minute buckets.
+        # Cron runs every 3 minutes; stocks from different source indices
+        # are saved within seconds of each other → merge into one frame.
+        from datetime import datetime as _dt
+
+        bucket_stocks: dict[str, dict[str, dict]] = {}
         for r in all_rows:
-            st = str(r["snapshot_time"])
-            if st not in frames:
-                frames[st] = []
+            raw_ts = r["snapshot_time"]
+            if isinstance(raw_ts, str):
+                parsed = _dt.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            else:
+                parsed = raw_ts
+            minute = parsed.minute // 3 * 3
+            bucket = parsed.replace(second=0, microsecond=0, minute=minute)
+            bucket_key = bucket.isoformat()
+
+            if bucket_key not in bucket_stocks:
+                bucket_stocks[bucket_key] = {}
+
             ts = r["ts_code"]
             main_net = float(r["main_net_flow"] or 0)
-            # 3d = 前2日累计（日末数据）+ 当日盘中主力净流入
             main_net_flow_3d = prev_2d_flow.get(ts, 0) + main_net
-            frames[st].append({
+
+            # Dedup within bucket: keep latest value per ts_code
+            bucket_stocks[bucket_key][ts] = {
                 "ts_code": ts,
                 "stock_name": r["stock_name"] or "",
                 "main_net_flow": main_net,
@@ -1467,11 +1502,18 @@ class FundFlowService:
                 "block_net_flow": float(r["block_net_flow"] or 0),
                 "main_net_flow_5d": float(r["main_net_flow_5d"] or 0),
                 "main_net_flow_3d": main_net_flow_3d,
-            })
+            }
 
         snapshots = [
-            {"snapshot_time": st, "stocks": stocks}
-            for st, stocks in frames.items()
+            {
+                "snapshot_time": bucket_key,
+                "stocks": sorted(
+                    stocks.values(),
+                    key=lambda x: x["main_net_flow"],
+                    reverse=True,
+                ),
+            }
+            for bucket_key, stocks in sorted(bucket_stocks.items())
         ]
 
         return {"trade_date": FundFlowService._normalize_date(d), "snapshots": snapshots}
