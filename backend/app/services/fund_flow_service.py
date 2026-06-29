@@ -1378,7 +1378,16 @@ class FundFlowService:
         trade_date: Optional[str] = None,
     ) -> dict:
         """查询 intraday_fund_snapshot，按 snapshot_time 分组返回"""
-        d = trade_date or await FundFlowService._get_latest_snapshot_date(db)
+        if trade_date:
+            d = trade_date
+        else:
+            # 优先取该指数自身最新快照日期，避免全局最新日期导致新指数查不到
+            sql_date = text(
+                "SELECT MAX(trade_date) FROM intraday_fund_snapshot "
+                "WHERE index_code = :index_code"
+            )
+            date_result = await db.execute(sql_date, {"index_code": index_code})
+            d = date_result.scalar()
         if not d:
             return {"trade_date": None, "snapshots": []}
 

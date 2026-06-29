@@ -4,9 +4,10 @@
 
 用法：
     cd backend && source venv/bin/activate
-    python TmpScriptsBackTest/run_daily_backtests.py              # 今天
+    python TmpScriptsBackTest/run_daily_backtests.py              # 今天，全部策略
     python TmpScriptsBackTest/run_daily_backtests.py 2026-06-05   # 指定日期
-    python TmpScriptsBackTest/run_daily_backtests.py -q           # 安静模式，只打印最终摘要
+    python TmpScriptsBackTest/run_daily_backtests.py -q           # 安静模式
+    python TmpScriptsBackTest/run_daily_backtests.py -s "Trend Upstart Flow"  # 仅单个策略
 
 依赖：后端需在 localhost:8000 运行，仅使用 Python 标准库。
 """
@@ -20,7 +21,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 API = "http://localhost:8000/api/v1"
-STRATEGY_NAMES = [
+ALL_STRATEGY_NAMES = [
     "laoyatou",
     "Oversold Bounce",
     "Oversold Bounce SS",
@@ -65,7 +66,7 @@ def find_strategy_ids(token):
         if not items:
             break
         for s in items:
-            if s["name"] in STRATEGY_NAMES:
+            if s["name"] in ALL_STRATEGY_NAMES:
                 name_to_id[s["name"]] = s["id"]
         if page >= resp.get("total", 0) // 100 + 1:
             break
@@ -116,13 +117,31 @@ def main():
         "-q", "--quiet", action="store_true",
         help="安静模式，只打印最终摘要",
     )
+    parser.add_argument(
+        "-s", "--strategy", action="append", default=None,
+        help="只运行指定策略（可多次指定，如 -s 'Trend Upstart Flow'）。默认运行全部四个策略。",
+    )
     args = parser.parse_args()
 
     cutoff = args.date or date.today().strftime("%Y-%m-%d")
     quiet = args.quiet
 
+    # 确定要运行的策略列表
+    if args.strategy:
+        strategy_names = []
+        for s in args.strategy:
+            if s in ALL_STRATEGY_NAMES:
+                strategy_names.append(s)
+            else:
+                print(f"⚠️  未知策略 '{s}'，已跳过。可选: {ALL_STRATEGY_NAMES}")
+        if not strategy_names:
+            print("❌ 没有有效的策略名称，退出。")
+            sys.exit(1)
+    else:
+        strategy_names = list(ALL_STRATEGY_NAMES)
+
     print(f"📅 回测截止日: {cutoff}")
-    print(f"📊 策略: {', '.join(STRATEGY_NAMES)}")
+    print(f"📊 策略: {', '.join(strategy_names)}")
     print(f"🔁 模式: 串行（逐个执行，避免并发 OOM）")
     print()
 
@@ -133,7 +152,7 @@ def main():
 
     # 2. 查找策略 ID
     name_to_id = find_strategy_ids(token)
-    missing = [n for n in STRATEGY_NAMES if n not in name_to_id]
+    missing = [n for n in strategy_names if n not in name_to_id]
     if missing:
         print(f"❌ 未找到策略: {missing}")
         sys.exit(1)
@@ -141,9 +160,9 @@ def main():
     # 3. 串行执行：提交一个 → 等待完成 → 提交下一个
     results = {}  # name → backtest dict
 
-    for i, name in enumerate(STRATEGY_NAMES, 1):
+    for i, name in enumerate(strategy_names, 1):
         sid = name_to_id[name]
-        print(f"[{i}/{len(STRATEGY_NAMES)}] 🚀 {name} ...", end=" ", flush=True)
+        print(f"[{i}/{len(strategy_names)}] 🚀 {name} ...", end=" ", flush=True)
 
         bid = submit_one(token, sid, name, cutoff)
         print(f"id={bid}", end="", flush=True)
@@ -166,7 +185,7 @@ def main():
     print(header)
     print("-" * 74)
 
-    for name in STRATEGY_NAMES:
+    for name in strategy_names:
         data = results.get(name)
         if data is None:
             print(f"  {name:<25s} {'未执行':<10s}")
