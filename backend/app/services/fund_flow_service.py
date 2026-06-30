@@ -1383,21 +1383,21 @@ class FundFlowService:
         intraday_fund_snapshot 中但 index_code 字段为源指数代码。
         因此按成分股 ts_code 匹配，而非按 index_code 过滤。
         """
-        # 1. 获取指数成分股 ts_code 列表
-        ic = IndexConstituent.__table__
-        eff_stmt = select(func.max(ic.c.eff_date)).where(ic.c.index_code == index_code)
-        eff_result = await db.execute(eff_stmt)
-        latest_eff = eff_result.scalar()
-        if not latest_eff:
+        # 1. 获取指数成分股 ts_code 列表（每只股票独立取最新 eff_date）
+        latest_subq = _latest_eff_subq(index_code)
+        check = await db.execute(select(func.count()).select_from(latest_subq))
+        if not check.scalar():
             return {"trade_date": None, "snapshots": []}
 
+        ic = IndexConstituent.__table__
         s = Stock.__table__
         const_stmt = (
             select(s.c.ts_code)
             .select_from(
                 ic.join(s, s.c.ts_code.like(func.concat(ic.c.ts_code, ".%")) | (s.c.ts_code == ic.c.ts_code))
+                .join(latest_subq, (ic.c.ts_code == latest_subq.c.ts_code) & (ic.c.eff_date == latest_subq.c.max_eff_date))
             )
-            .where(ic.c.index_code == index_code, ic.c.eff_date == latest_eff)
+            .where(ic.c.index_code == index_code)
         )
         const_result = await db.execute(const_stmt)
         const_codes = [r[0] for r in const_result.all()]

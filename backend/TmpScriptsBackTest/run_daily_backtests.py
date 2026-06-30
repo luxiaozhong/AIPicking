@@ -26,6 +26,7 @@ ALL_STRATEGY_NAMES = [
     "Oversold Bounce",
     "Oversold Bounce SS",
     "Trend Upstart Flow",
+    "grow_with_money",
 ]
 TRACK_DAYS = [3, 7, 15]
 POLL_INTERVAL = 5    # seconds between status checks
