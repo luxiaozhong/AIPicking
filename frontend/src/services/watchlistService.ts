@@ -36,6 +36,9 @@ const watchlistService = {
 
   async removeStock(tsCode: string): Promise<{ removed: boolean; ts_code: string }> {
     const res = await api.delete(`/watchlist/stocks/${encodeURIComponent(tsCode)}`);
+    if (res.data.code !== 0) {
+      throw new Error(res.data.message || '移除失败');
+    }
     return res.data.data;
   },
 };

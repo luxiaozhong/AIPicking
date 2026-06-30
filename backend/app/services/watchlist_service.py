@@ -173,6 +173,8 @@ async def remove_stock(db: AsyncSession, ts_code: str) -> dict:
 
     ts_code 可以是完整格式（000001.SZ）或原始代码（000001）。
 
+    同时尝试原始代码和完整 ts_code，兼容 index_constituents 中两种格式并存的情况。
+
     Returns:
         {"removed": bool, "ts_code": str}
     """
@@ -180,9 +182,10 @@ async def remove_stock(db: AsyncSession, ts_code: str) -> dict:
 
     result = await db.execute(
         text(
-            "DELETE FROM index_constituents WHERE index_code = :code AND ts_code = :raw"
+            "DELETE FROM index_constituents "
+            "WHERE index_code = :code AND (ts_code = :raw OR ts_code = :full)"
         ),
-        {"code": INDEX_CODE, "raw": raw_code},
+        {"code": INDEX_CODE, "raw": raw_code, "full": ts_code},
     )
     removed = result.rowcount > 0
     await db.commit()
