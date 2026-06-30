@@ -1504,16 +1504,30 @@ class FundFlowService:
                 "main_net_flow_3d": main_net_flow_3d,
             }
 
+        # Forward-fill: carry last known values into buckets where a stock
+        # has no fresh snap. This prevents stocks from disappearing between
+        # sync cycles — e.g. a stock only in 900002 won't vanish at 10:39
+        # while waiting for 900002's own sync, because its 10:36 snap from
+        # the previous cycle carries forward.
+        sorted_buckets = sorted(bucket_stocks.keys())
+        prev: dict[str, dict] = {}
+        for bk in sorted_buckets:
+            current = bucket_stocks[bk]
+            for ts, data in prev.items():
+                if ts not in current:
+                    current[ts] = dict(data)  # shallow copy, values are all immutable
+            prev.update(current)
+
         snapshots = [
             {
                 "snapshot_time": bucket_key,
                 "stocks": sorted(
-                    stocks.values(),
+                    bucket_stocks[bucket_key].values(),
                     key=lambda x: x["main_net_flow"],
                     reverse=True,
                 ),
             }
-            for bucket_key, stocks in sorted(bucket_stocks.items())
+            for bucket_key in sorted_buckets
         ]
 
         return {"trade_date": FundFlowService._normalize_date(d), "snapshots": snapshots}
