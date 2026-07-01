@@ -103,6 +103,14 @@ KNOWN_INDICES: Dict[str, Dict[str, Any]] = {
         "constituent_count": 30,
         "data_source": "akshare.index_stock_cons_weight_csindex",
     },
+    # ── 中证（深市代码） ──
+    "399966": {
+        "index_name": "800证保",
+        "full_name": "中证800证券保险指数",
+        "publisher": "中证",
+        "constituent_count": 50,
+        "data_source": "akshare.index_stock_cons_weight_csindex",
+    },
     # ── 深证 ──
     "399673": {
         "index_name": "创业板50",
