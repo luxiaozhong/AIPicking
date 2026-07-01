@@ -27,6 +27,9 @@ const { Title, Text } = Typography;
 const RED_COLOR = '#cf1322';
 const GREEN_COLOR = '#3f8600';
 
+// 关注的指数排前面
+const PREFERRED_INDICES = ['980080', '900001', '900002', '399667', '900009', '399966'];
+
 function fmtYi(v: number): string {
   const abs = Math.abs(v);
   if (abs >= 10000) return (v / 10000).toFixed(2) + ' 万亿';
@@ -399,10 +402,16 @@ const IndexFundFlow: React.FC = () => {
             filterOption={(input, option) =>
               (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
             }
-            options={store.indices.map((idx) => ({
-              label: `${idx.full_name || idx.index_name} (${idx.index_code})`,
-              value: idx.index_code,
-            }))}
+            options={[...store.indices]
+              .sort((a, b) => {
+                const aPref = PREFERRED_INDICES.includes(a.index_code) ? 0 : 1;
+                const bPref = PREFERRED_INDICES.includes(b.index_code) ? 0 : 1;
+                return aPref - bPref;
+              })
+              .map((idx) => ({
+                label: `${idx.full_name || idx.index_name} (${idx.index_code})`,
+                value: idx.index_code,
+              }))}
           />
           <DatePicker
             value={store.selectedDate ? dayjs(store.selectedDate) : null}
