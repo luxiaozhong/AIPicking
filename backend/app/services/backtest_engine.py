@@ -436,19 +436,23 @@ class BacktestEngine:
         stocks_data = loaded["stocks"]
         daily_data = loaded["daily"]
 
+        start_fmt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
+        end_fmt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
         trading_days = sorted(set(
             row["trade_date"] for rows in daily_data.values() for row in rows
-            if start_date <= row["trade_date"] <= end_date
+            if start_fmt <= row["trade_date"] <= end_fmt
         ))
 
         ts_code = (self.config or {}).get("ts_code", "").strip()
         results = []
 
         for cutoff_date in trading_days:
-            cutoff_date_fmt = datetime.strptime(cutoff_date, "%Y%m%d").strftime("%Y-%m-%d")
+            cutoff_date_fmt = cutoff_date  # trading_days 已是 YYYY-MM-DD 格式
+            # _track_performance 和 strategy_input["cutoff_date"] 需要 YYYYMMDD 格式
+            cutoff_date_ymd = cutoff_date.replace("-", "")
             daily_result = {
-                "cutoff_date": cutoff_date,
-                "input": {"cutoff_date": cutoff_date, "config": self.config or {}},
+                "cutoff_date": cutoff_date_ymd,
+                "input": {"cutoff_date": cutoff_date_ymd, "config": self.config or {}},
             }
             try:
                 sliced_daily = {}
@@ -474,7 +478,7 @@ class BacktestEngine:
                 sliced_fund_flow = [r for r in loaded.get("fund_flow", []) if r.get("trade_date") and r["trade_date"] <= cutoff_date_fmt]
 
                 strategy_input = {
-                    "cutoff_date": cutoff_date,
+                    "cutoff_date": cutoff_date_ymd,
                     "stocks": filtered_stocks,
                     "daily": sliced_daily,
                     "daily_sector_flow": loaded["daily_sector_flow"],
@@ -499,7 +503,7 @@ class BacktestEngine:
                 # 截断前统计
                 total_qualifying = len(recommendations)
                 recommendations = recommendations[:MAX_RECOMMENDATIONS]
-                recommendations = self._track_performance(recommendations, cutoff_date, track_days)
+                recommendations = self._track_performance(recommendations, cutoff_date_ymd, track_days)
                 summary = self._calculate_summary(recommendations, track_days)
 
                 summary["total_qualifying"] = total_qualifying
