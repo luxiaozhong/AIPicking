@@ -54,7 +54,7 @@ def run(data):
     # ── 1. 获取指数成分股原始代码集合 ──────────────────────────
     constituents = data.get("index_constituents", [])
     target_raw_codes = set(
-        c["ts_code"] for c in constituents
+        c["ts_code"][:6] for c in constituents
         if c.get("index_code") == index_code
     )
 
