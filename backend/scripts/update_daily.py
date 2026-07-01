@@ -230,7 +230,7 @@ def count_daily(trade_date: str) -> int:
 
 
 # ── 历史/盘后日线接口 ──────────────────────────────────────────────────────
-async def download_one(session, ts_code, symbol, start_date, end_date, fetch_extra_days=7):
+async def download_one(session, ts_code, symbol, start_date, end_date, fetch_extra_days=2):
     """拉取单只股票指定范围日线（前复权），返回 records 列表或 None
 
     fetch_extra_days: 在 start_date 之前多拉取的天数，用于获取 pre_close。
