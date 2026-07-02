@@ -159,6 +159,19 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
                 pr.setdefault(td_, {})[c] = last_px[c]
                 is_tradable[td_][c] = False
 
+    # ── Index benchmark ─────────────────────────────────────
+    idx_ts = f"{index_code}.SZ"
+    cur.execute("SELECT trade_date, close FROM daily WHERE ts_code=%s AND trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
+                (idx_ts, data_start, data_end))
+    idx_rows = cur.fetchall()
+    if not idx_rows:
+        # Try .SH
+        cur.execute("SELECT trade_date, close FROM daily WHERE ts_code=%s AND trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
+                    (f"{index_code}.SH", data_start, data_end))
+        idx_rows = cur.fetchall()
+    idx_prices = {r[0]: float(r[1]) for r in idx_rows}
+    print(f"指数基准数据: {len(idx_prices)} 条 (ts_code={idx_ts if idx_rows else f'{index_code}.SH'})")
+
     conn.close()
 
     # ── Portfolio simulation ────────────────────────────────
@@ -293,7 +306,30 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
     tr = (nav / INITIAL_CAPITAL - 1) * 100
     print(f"\n  📊 结果: {bt[0]} ~ {bt[-1]}")
     print(f"  起始: {INITIAL_CAPITAL:,.0f} → 截止: {nav:,.0f}  |  总收益: {tr:+.2f}%  |  调仓: {len(points)-1} 次")
-    return points
+
+    # ── Index benchmark NAV ──────────────────────────────────
+    bench_points = []
+    if idx_prices:
+        first_date = bt[0] if bt else None
+        base_close = idx_prices.get(first_date) if first_date else None
+        if not base_close and first_date:
+            # find closest non-null
+            for d in sorted(idx_prices.keys()):
+                if d <= first_date:
+                    base_close = idx_prices[d]
+        if base_close and base_close > 0:
+            for d in [p["date"] for p in points]:
+                close = idx_prices.get(d)
+                if close is not None and close > 0:
+                    bench_points.append({
+                        "date": d, "nav": round(INITIAL_CAPITAL * close / base_close, 2)
+                    })
+        if bench_points:
+            bench_tr = (bench_points[-1]["nav"] / INITIAL_CAPITAL - 1) * 100
+            idx_name = f"{index_code} 指数"
+            print(f"  指数基准: {INITIAL_CAPITAL:,.0f} → {bench_points[-1]['nav']:,.0f}  |  总收益: {bench_tr:+.2f}%")
+
+    return points, bench_points, idx_name if bench_points else None
 
 
 def main():
@@ -307,14 +343,19 @@ def main():
     args = p.parse_args()
 
     CO = {5: '#ff6b6b', 10: '#6bcb77', 15: '#4ecdc4'}
-    CS = {5: '#ff9999', 10: '#99dd99', 15: '#7eddd6'}
     all_r = {}
+    all_bench = {}
+    idx_name = None
 
     for n in args.top:
         print(f"\n{'─'*60}\n  Top {n}\n{'─'*60}")
-        all_r[str(n)] = run(n, args.index,
-                            bt_start=args.bt_start, bt_end=args.bt_end,
-                            data_start=args.data_start, data_end=args.data_end)
+        pts, bench, name = run(n, args.index,
+                               bt_start=args.bt_start, bt_end=args.bt_end,
+                               data_start=args.data_start, data_end=args.data_end)
+        all_r[str(n)] = pts
+        if bench and not all_bench:
+            all_bench = bench
+            idx_name = name
 
     if len(all_r) <= 1:
         return
@@ -326,7 +367,13 @@ def main():
         if k in all_r:
             series.append({"name": f"Top {n}", "data": [pp["nav"] for pp in all_r[k]], "color": CO.get(n, '#aaa'), "dashed": False})
 
+    # Add benchmark series
+    if all_bench:
+        series.append({"name": idx_name or "指数基准", "data": [pp["nav"] for pp in all_bench], "color": "#f0c040", "dashed": True})
+
     fns = {str(n): all_r[str(n)][-1]["nav"] for n in args.top}
+    if all_bench:
+        fns[idx_name] = all_bench[-1]["nav"]
 
     html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>动量轮动 · {args.index} · 周频</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
@@ -352,7 +399,7 @@ series:sd.map(function(s){{return{{name:s.name,type:'line',data:s.data,smooth:tr
 }});
 var ss=document.getElementById('stats');
 Object.keys(fn).forEach(function(k){{var v=fn[k],p=((v-1000000)/10000).toFixed(1);var cl='#aaa';
-if(k=='5')cl='#ff6b6b';else if(k=='10')cl='#6bcb77';
+if(k=='5')cl='#ff6b6b';else if(k=='10')cl='#6bcb77';else cl='#f0c040';
 ss.innerHTML+='<div class="card"><h3>'+k+'</h3><div class="val" style="color:'+cl+'">'+v.toLocaleString()+'</div><div class="pct" style="color:'+cl+'">'+(p>=0?'+':'')+p+'%</div></div>'}});
 window.addEventListener('resize',function(){{c.resize()}});</script></body></html>"""
 
