@@ -1,0 +1,27 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>动量轮动 · 399673 · 周频</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#1a1a2e;font-family:-apple-system,sans-serif}
+.container{max-width:1400px;margin:0 auto;padding:24px}h1{color:#e0e0e0;text-align:center;font-size:22px;margin-bottom:6px}
+.sub{color:#888;text-align:center;font-size:13px;margin-bottom:20px}#chart{width:100%;height:700px;background:#16213e;border-radius:12px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:20px}
+.card{background:#16213e;border-radius:10px;padding:20px;text-align:center}.card h3{color:#888;font-size:13px;font-weight:normal;margin-bottom:8px}
+.card .val{font-size:32px;font-weight:bold}.card .pct{font-size:14px;margin-top:4px}</style></head><body><div class="container">
+<h1>动量轮动 · 399673 · 每周五调仓 · 量价动量</h1>
+<div class="sub">2026-01 ~ 2026-07 · 27 个周频数据点 · 同股不动 · 已扣交易费用 · 起始 100万</div>
+<div id="chart"></div><div class="stats" id="stats"></div></div>
+<script>var dates=["2026-01-05", "2026-01-09", "2026-01-16", "2026-01-23", "2026-01-30", "2026-02-06", "2026-02-13", "2026-02-24", "2026-02-27", "2026-03-06", "2026-03-13", "2026-03-20", "2026-03-27", "2026-04-03", "2026-04-10", "2026-04-17", "2026-04-24", "2026-05-06", "2026-05-08", "2026-05-15", "2026-05-22", "2026-05-29", "2026-06-05", "2026-06-12", "2026-06-22", "2026-06-29", "2026-07-01"];var sd=[{"name": "Top 5", "data": [1000000.0, 1067709.39, 1111285.59, 1287341.26, 1249331.05, 1191312.11, 1208082.82, 1176390.39, 1158802.42, 1021896.46, 1025880.0, 1037277.81, 980465.0, 916041.94, 1057442.83, 1149567.2, 1159789.51, 1247983.89, 1233704.89, 1289024.41, 1297361.76, 1263047.83, 1178925.6, 1098956.09, 1277711.48, 1260687.13, 1284288.71], "color": "#ff6b6b", "dashed": false}, {"name": "Top 10", "data": [1000000.0, 1042335.94, 1106771.51, 1196597.53, 1191067.66, 1146502.89, 1207964.41, 1212667.53, 1252608.92, 1116926.02, 1100857.36, 1068943.51, 1027955.04, 950300.22, 1063435.76, 1174196.52, 1153620.57, 1219613.77, 1206694.54, 1221212.67, 1212057.25, 1192837.52, 1152344.74, 1084292.6, 1228603.35, 1261814.75, 1279050.91], "color": "#6bcb77", "dashed": false}];var fn={"5": 1284288.71, "10": 1279050.91};
+var c=echarts.init(document.getElementById('chart'));
+c.setOption({color:sd.map(function(s){return s.color}),
+tooltip:{trigger:'axis',backgroundColor:'rgba(22,33,62,0.95)',borderColor:'#333',textStyle:{color:'#e0e0e0',fontSize:13},
+formatter:function(p){var s='<b>'+p[0].axisValue+'</b><br/>';p.forEach(function(x){var pct=((x.value-1000000)/10000).toFixed(1);s+='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+x.color+';margin-right:6px"></span>'+x.seriesName+': <b>'+x.value.toLocaleString()+'</b> ('+(pct>=0?'+':'')+pct+'%)<br/>'});return s}},
+legend:{data:sd.map(function(s){return s.name}),top:10,textStyle:{color:'#aaa',fontSize:14},itemWidth:30,itemHeight:3},
+grid:{left:80,right:40,top:60,bottom:40},
+xAxis:{type:'category',data:dates,axisLine:{lineStyle:{color:'#333'}},axisLabel:{color:'#888',fontSize:10,rotate:45,formatter:function(v){return v.slice(5)},interval:Math.floor(dates.length/25)},splitLine:{show:false}},
+yAxis:{type:'value',name:'净值',nameTextStyle:{color:'#888',fontSize:12},axisLabel:{color:'#888',fontSize:12},splitLine:{lineStyle:{color:'#222',type:'dashed'}}},
+series:sd.map(function(s){return{name:s.name,type:'line',data:s.data,smooth:true,symbol:'none',lineStyle:{width:s.dashed?1.5:2,color:s.color,type:s.dashed?'dashed':'solid'},itemStyle:{color:s.color}}})
+});
+var ss=document.getElementById('stats');
+Object.keys(fn).forEach(function(k){var v=fn[k],p=((v-1000000)/10000).toFixed(1);var cl='#aaa';
+if(k=='5')cl='#ff6b6b';else if(k=='10')cl='#6bcb77';
+ss.innerHTML+='<div class="card"><h3>'+k+'</h3><div class="val" style="color:'+cl+'">'+v.toLocaleString()+'</div><div class="pct" style="color:'+cl+'">'+(p>=0?'+':'')+p+'%</div></div>'});
+window.addEventListener('resize',function(){c.resize()});</script></body></html>

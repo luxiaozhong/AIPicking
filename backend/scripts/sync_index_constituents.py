@@ -89,6 +89,13 @@ KNOWN_INDICES: Dict[str, Dict[str, Any]] = {
         "data_source": "akshare.index_detail_cni",
     },
     # ── 中证 ──
+    "000905": {
+        "index_name": "中证500",
+        "full_name": "中证500指数",
+        "publisher": "中证",
+        "constituent_count": 500,
+        "data_source": "akshare.index_stock_cons_weight_csindex",
+    },
     "931643": {
         "index_name": "科创创业50",
         "full_name": "中证科创创业50",
