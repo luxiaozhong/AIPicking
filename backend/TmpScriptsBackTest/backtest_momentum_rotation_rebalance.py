@@ -83,7 +83,8 @@ def momentum_score(closes, vols, mom_fast=20, mom_slow=60, mom_fast_weight=0.6,
 def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
         data_start="2024-09-01", data_end="2026-07-01",
         mom_fast=20, mom_slow=60, mom_fast_weight=0.6,
-        vol_short=5, vol_long=20, volume_weight=0.4):
+        vol_short=5, vol_long=20, volume_weight=0.4,
+        stop_loss=0.08, verbose=False):
     """Run weekly rebalance backtest."""
 
     conn = _pg()
@@ -119,6 +120,12 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
     all_stocks = {r[0] for r in cur.fetchall()}
     match_ts = sorted(t for t in all_stocks if t.split(".")[0] in raw_set)
     print(f"匹配股票: {len(match_ts)}")
+
+    if verbose:
+        cur.execute("SELECT ts_code, name FROM stocks WHERE ts_code=ANY(%s)", (match_ts,))
+        _name_map = {r[0]: r[1] for r in cur.fetchall()}
+    else:
+        _name_map = {}
 
     # ── Load daily OHLCV ────────────────────────────────────
     cur.execute("""
@@ -184,7 +191,7 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
     min_bars = max(mom_slow, vol_long)
     label = f"动量轮动 · {index_code} · Top {top_n} · 每周五"
     print(f"\n{'='*100}\n  {label}\n{'='*100}")
-    print(f"{'日期':<12} {'净值':>12} {'周收益':>8} {'持仓':>5} {'保留':>5} {'卖出':>5} {'买入':>5} {'换手%':>7} {'费用':>8}")
+    print(f"{'日期':<12} {'净值':>12} {'周收益':>8} {'持仓':>5} {'保留':>5} {'卖出':>5} {'买入':>5} {'换手%':>7} {'费用':>8} {'止损':>4}")
 
     bt = [d for d in all_td if bt_start<=d<=bt_end]
     last_nav = INITIAL_CAPITAL
@@ -255,7 +262,7 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
                     cost_basis[s["ts_code"]] = p
             cash = 0
             nav = sum(holdings[c]*px.get(c,0) for c in holdings)
-            print(f"{td:<12} {nav:>12,.0f} {'—':>8} {len(holdings):>5} {'—':>5} {'—':>5} {len(holdings):>5} {'—':>7} {'—':>8}")
+            print(f"{td:<12} {nav:>12,.0f} {'—':>8} {len(holdings):>5} {'—':>5} {'—':>5} {len(holdings):>5} {'—':>7} {'—':>8} {'—':>4}")
             points.append({"date": td, "nav": round(nav, 2)})
             last_nav = nav
             continue
@@ -266,6 +273,17 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
         buy_c = tgt - old
         keep_c = old & tgt
         sold_today = 0
+        stop_sold = 0
+
+        # Stop-loss: force-sell kept stocks that have lost > stop_loss from cost
+        if stop_loss > 0:
+            for c in list(keep_c):
+                p = px.get(c, 0)
+                cb = cost_basis.get(c, 0)
+                if p > 0 and cb > 0 and (p / cb - 1) < -stop_loss:
+                    keep_c.discard(c)
+                    sell_c.add(c)
+                    stop_sold += 1
 
         # Sell removed
         sg = 0.0
@@ -299,7 +317,14 @@ def run(top_n, index_code="980080", bt_start="2025-01-01", bt_end="2026-07-01",
         ct = sg * SELL_C + bct
         wr = (nav / last_nav - 1) * 100 if last_nav > 0 else 0
 
-        print(f"{td:<12} {nav:>12,.0f} {wr:>7.2f}% {len(holdings):>5} {len(keep_c):>5} {sold_today:>5} {len(actual_buys):>5} {to:>6.1f}% {ct:>8.2f}")
+        print(f"{td:<12} {nav:>12,.0f} {wr:>7.2f}% {len(holdings):>5} {len(keep_c):>5} {sold_today:>5} {len(actual_buys):>5} {to:>6.1f}% {ct:>8.2f} {stop_sold:>4}")
+        if verbose:
+            def _n(code): return f"{_name_map.get(code, code)}({code.split('.')[0]})"
+            sold_codes = [c for c in old if c not in holdings]
+            if sold_codes:
+                print(f"          🔴 卖出: {', '.join(_n(c) for c in sold_codes)}")
+            if actual_buys:
+                print(f"          🟢 买入: {', '.join(_n(c) for c in actual_buys)}")
         points.append({"date": td, "nav": round(nav, 2)})
         last_nav = nav
 
@@ -340,6 +365,8 @@ def main():
     p.add_argument("--bt-end", type=str, default="2026-07-01")
     p.add_argument("--data-start", type=str, default="2024-09-01")
     p.add_argument("--data-end", type=str, default="2026-07-01")
+    p.add_argument("--stop-loss", type=float, default=0.08, help="止损阈值，默认 8%%，0 表示不止损")
+    p.add_argument("--verbose", action="store_true", help="打印每次调仓的买卖明细")
     args = p.parse_args()
 
     CO = {5: '#ff6b6b', 10: '#6bcb77', 15: '#4ecdc4'}
@@ -351,7 +378,8 @@ def main():
         print(f"\n{'─'*60}\n  Top {n}\n{'─'*60}")
         pts, bench, name = run(n, args.index,
                                bt_start=args.bt_start, bt_end=args.bt_end,
-                               data_start=args.data_start, data_end=args.data_end)
+                               data_start=args.data_start, data_end=args.data_end,
+                               stop_loss=args.stop_loss, verbose=args.verbose)
         all_r[str(n)] = pts
         if bench and not all_bench:
             all_bench = bench
