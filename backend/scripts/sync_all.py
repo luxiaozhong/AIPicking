@@ -46,7 +46,7 @@ def _find_summary_dir() -> Path:
 _SUMMARY_DIR = _find_summary_dir()
 _SUMMARY_FILE = _SUMMARY_DIR / "sync_summary.json"
 
-# 按依赖顺序排列：日线 → 指数 → 龙虎榜 → 估值 → 市场信号 → 日报
+# 按依赖顺序排列：日线 → 指数 → 估值 → 市场信号 → 日报
 JOBS = [
     {
         "script": "update_daily.py",
@@ -59,11 +59,6 @@ JOBS = [
         "desc": "指数日线",
         "log_key": "update_index_daily",
         "force_today": True,
-    },
-    {
-        "script": "sync_dragon_tiger.py",
-        "desc": "龙虎榜",
-        "log_key": "dragon_tiger",
     },
     {
         "script": "sync_valuation.py",
