@@ -236,14 +236,24 @@ async def download_one(session, ts_code, symbol, start_date, end_date, fetch_ext
     fetch_extra_days: 在 start_date 之前多拉取的天数，用于获取 pre_close。
     腾讯前复权数据在同一 API 响应中使用相同的复权因子，因此用前一天收盘价
     作为 pre_close 可以保证涨跌幅计算正确。
+
+    只返回 start_date ~ end_date 范围内的记录，扩展日期的数据仅用于 pre_close
+    计算，不会写入数据库。
     """
     from datetime import datetime as dt, timedelta as td
+    start_dt = dt.strptime(_fmt_date(start_date), "%Y-%m-%d")
+    end_dt = dt.strptime(_fmt_date(end_date), "%Y-%m-%d")
+
     # 扩展起始日期以获取 pre_close（同一复权因子）
-    expanded_start = dt.strptime(_fmt_date(start_date), "%Y-%m-%d") - td(days=fetch_extra_days)
+    expanded_start = start_dt - td(days=fetch_extra_days)
     expanded_start_str = expanded_start.strftime("%Y-%m-%d")
 
+    # 动态计算 API 需要的记录数（避免 count=40 返回冗余数据）
+    date_range_days = (end_dt - start_dt).days
+    max_count = fetch_extra_days + date_range_days + 5  # +5 buffer for weekends/holidays
+
     url = (f"{TENCENT_API}?param={symbol},day,"
-           f"{expanded_start_str},{_fmt_date(end_date)},40,qfq")
+           f"{expanded_start_str},{end_dt.strftime('%Y-%m-%d')},{max_count},qfq")
     try:
         async with session.get(url, timeout=TIMEOUT) as resp:
             text = await resp.text()
@@ -280,8 +290,13 @@ async def download_one(session, ts_code, symbol, start_date, end_date, fetch_ext
             low_p   = float(row[4])
             vol     = float(row[5])
             amount  = vol * close_p * 100
-            records.append((ts_code, trade_date, open_p, high_p, low_p,
-                             close_p, prev_close, vol, amount, close_p))
+
+            # 始终追踪 pre_close（扩展日期的收盘价用于目标范围首条记录）
+            # 只将目标范围内的记录写入数据库
+            row_date = dt.strptime(trade_date, "%Y-%m-%d")
+            if start_dt <= row_date <= end_dt:
+                records.append((ts_code, trade_date, open_p, high_p, low_p,
+                                 close_p, prev_close, vol, amount, close_p))
             prev_close = close_p
         except (ValueError, IndexError):
             continue
