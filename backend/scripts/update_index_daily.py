@@ -250,14 +250,22 @@ def _publisher(market: str) -> str:
 
 # ── 历史 K 线接口（指数专用：读取 .day 而非 .qfqday）──────────────────────
 
-async def download_one_index(session, idx: dict, start_date: str, end_date: str):
+async def download_one_index(session, idx: dict, start_date: str, end_date: str, fetch_extra_days: int = 2):
     """
     拉取单只指数指定范围的历史日线。
     指数数据位于 data.{symbol}.day（个股是 .qfqday）。
     返回 records 列表或 None。
+
+    fetch_extra_days: 起始日向前扩展天数。腾讯 fqkline 接口在
+    start_date == end_date（单日请求）时会返回 0 行，故默认向前扩 2 天，
+    用多日区间请求后再按 [start_date, end_date] 过滤，避免漏拉当天数据。
     """
+    # 扩展起始日，规避单日区间（start==end）请求返回空的问题
+    start_dt = datetime.strptime(_fmt_date(start_date), "%Y-%m-%d")
+    expanded_start = (start_dt - timedelta(days=fetch_extra_days)).strftime("%Y-%m-%d")
+
     url = (f"{TENCENT_API}?param={idx['symbol']},day,"
-           f"{_fmt_date(start_date)},{_fmt_date(end_date)},20,day")
+           f"{expanded_start},{_fmt_date(end_date)},20,day")
     try:
         async with session.get(url, timeout=TIMEOUT) as resp:
             text = await resp.text()
@@ -275,12 +283,18 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str)
     if not day_list:
         return None
 
+    range_start = _fmt_date(start_date)
+    range_end = _fmt_date(end_date)
+
     records = []
     for row in day_list:
         if len(row) < 6:
             continue
         try:
             trade_date = row[0]  # 腾讯接口已返回 YYYY-MM-DD
+            # 按目标区间过滤，扩展日前几天的数据不写入
+            if trade_date < range_start or trade_date > range_end:
+                continue
             # 腾讯 K 线字段顺序: [日期, 开盘, 收盘, 最高, 最低, 成交量]
             open_p  = float(row[1])
             close_p = float(row[2])
@@ -293,7 +307,7 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str)
                             close_p, vol, amount, close_p))
         except (ValueError, IndexError):
             continue
-    return records
+    return records if records else None
 
 
 # ── 实时行情接口（指数专用：s_ 前缀 + 不同字段位置）───────────────────────
