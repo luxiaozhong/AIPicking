@@ -504,7 +504,10 @@ async def main(force=False, target_date=None, intraday=False, pg_url=None):
                 await run_intraday(date_str)
             else:
                 print(f"🕒 当前盘后，使用历史日线接口拉取今天({date_str})")
-                await run_history(date_str, date_str)
+                records = await run_history(date_str, date_str)
+                if records == 0:
+                    print(f"⚠️  历史接口无数据，使用实时接口兜底...")
+                    await run_intraday(date_str)
         else:
             print(f"📅 历史日期({date_str})，使用历史日线接口")
             await run_history(date_str, date_str)
