@@ -125,6 +125,33 @@ def run_job(script: str, date_arg: Optional[str],
         return True, elapsed, stdout
 
 
+def _extract_trade_date_from_stdout(stdout: str) -> Optional[str]:
+    """从脚本 stdout 中提取实际同步的交易日期（YYYYMMDD）。
+
+    优先级：
+    1. 历史日线模式的 end_date：🚀 历史日线模式：20260715 ~ 20260715
+    2. 日期标记：📅 盘后更新今天(20260715)
+    3. 实时更新日期：📅 今天(20260715)无数据 / ✅ 今天(20260715)已有
+    """
+    # 历史日线模式：start ~ end
+    m = re.search(r"🚀 历史日线模式：(\d{8}) ~ (\d{8})", stdout)
+    if m:
+        return m.group(2)  # end_date
+    # 日期标记（盘后更新今天）
+    m = re.search(r"📅 盘后更新今天\((\d{8})\)", stdout)
+    if m:
+        return m.group(1)
+    # 实时更新相关日期
+    m = re.search(r"📅 今天\((\d{8})\)", stdout)
+    if m:
+        return m.group(1)
+    # 最近交易日
+    m = re.search(r"📅 最近交易日\((\d{8})\)", stdout)
+    if m:
+        return m.group(1)
+    return None
+
+
 def parse_job_result(log_key: str, stdout: str, ok: bool, elapsed: float) -> Dict[str, Any]:
     """从 job stdout 中提取关键指标，返回结构化 dict。"""
     result: Dict[str, Any] = {"ok": ok, "elapsed_s": round(elapsed, 1)}
@@ -137,6 +164,11 @@ def parse_job_result(log_key: str, stdout: str, ok: bool, elapsed: float) -> Dic
 
     # ── update_daily ──
     if log_key == "update_daily":
+        # 提取实际同步的交易日
+        trade_date = _extract_trade_date_from_stdout(out)
+        if trade_date:
+            result["trade_date"] = trade_date
+
         # 🎉 历史更新完成！新增/覆盖 X 条数据
         m = re.search(r"🎉 历史更新完成！新增/覆盖 ([\d,]+) 条", out)
         if m:
@@ -161,6 +193,11 @@ def parse_job_result(log_key: str, stdout: str, ok: bool, elapsed: float) -> Dic
 
     # ── update_index_daily ──
     elif log_key == "update_index_daily":
+        # 提取实际同步的交易日
+        trade_date = _extract_trade_date_from_stdout(out)
+        if trade_date:
+            result["trade_date"] = trade_date
+
         m = re.search(r"🎉 历史更新完成！新增/覆盖 ([\d,]+) 条指数数据", out)
         if m:
             result["records"] = int(m.group(1).replace(",", ""))
@@ -348,10 +385,13 @@ def main():
     _write_report_marker()
 
     # 写入结构化摘要 JSON（供 sync_report.py 消费）
-    today = datetime.now().strftime("%Y%m%d")
+    # date 优先取 update_daily 实际同步的交易日，其次 update_index_daily，最后用系统日期
+    ud_result = jobs_results.get("update_daily", {})
+    idx_result = jobs_results.get("update_index_daily", {})
+    sync_date = ud_result.get("trade_date") or idx_result.get("trade_date") or datetime.now().strftime("%Y%m%d")
     summary = {
         "run_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "date": today,
+        "date": sync_date,
         "total_ok": total_ok,
         "total_fail": total_fail,
         "total_elapsed_s": round(total_elapsed, 1),

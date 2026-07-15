@@ -712,43 +712,45 @@ class FundFlowService:
         dl = Daily.__table__
 
         sort_cols = {
-            "main_net": f.c.main_net_flow.desc(),
-            "main_net_asc": f.c.main_net_flow.asc(),
+            "main_net": f.c.main_net_flow.desc().nulls_last(),
+            "main_net_asc": f.c.main_net_flow.asc().nulls_last(),
             "inflow_rate": f.c.main_inflow_circ_rate.desc().nulls_last(),
-            "jumbo": f.c.jumbo_net_flow.desc(),
-            "block": f.c.block_net_flow.desc(),
-            "mid": f.c.mid_net_flow.desc(),
-            "small": f.c.small_net_flow.desc(),
+            "jumbo": f.c.jumbo_net_flow.desc().nulls_last(),
+            "block": f.c.block_net_flow.desc().nulls_last(),
+            "mid": f.c.mid_net_flow.desc().nulls_last(),
+            "small": f.c.small_net_flow.desc().nulls_last(),
         }
         order_by = sort_cols.get(sort, sort_cols["main_net"])
 
+        # 以 stocks 为驱动表 left join daily_stock_fund_flow + daily，
+        # 确保即使当天资金流数据尚未同步，行业下所有股票也能列出
         stmt = (
             select(
-                f.c.ts_code,
+                s.c.ts_code,
                 s.c.name.label("stock_name"),
                 s.c.industry_l1.label("industry_name"),
-                f.c.main_net_flow,
-                f.c.jumbo_net_flow,
-                f.c.block_net_flow,
-                f.c.mid_net_flow,
-                f.c.small_net_flow,
-                f.c.main_in_flow,
-                f.c.main_out_flow,
-                f.c.retail_in_flow,
-                f.c.retail_out_flow,
+                func.coalesce(f.c.main_net_flow, 0).label("main_net_flow"),
+                func.coalesce(f.c.jumbo_net_flow, 0).label("jumbo_net_flow"),
+                func.coalesce(f.c.block_net_flow, 0).label("block_net_flow"),
+                func.coalesce(f.c.mid_net_flow, 0).label("mid_net_flow"),
+                func.coalesce(f.c.small_net_flow, 0).label("small_net_flow"),
+                func.coalesce(f.c.main_in_flow, 0).label("main_in_flow"),
+                func.coalesce(f.c.main_out_flow, 0).label("main_out_flow"),
+                func.coalesce(f.c.retail_in_flow, 0).label("retail_in_flow"),
+                func.coalesce(f.c.retail_out_flow, 0).label("retail_out_flow"),
                 f.c.main_inflow_circ_rate,
                 f.c.main_inflow_rank,
                 f.c.close_price,
                 dl.c.pre_close,
             )
             .select_from(
-                f.join(s, f.c.ts_code == s.c.ts_code)
-                .outerjoin(dl, (f.c.ts_code == dl.c.ts_code) & (dl.c.trade_date == d))
+                s.outerjoin(f, (s.c.ts_code == f.c.ts_code) & (f.c.trade_date == d))
+                .outerjoin(dl, (s.c.ts_code == dl.c.ts_code) & (dl.c.trade_date == d))
             )
-            .where(f.c.trade_date == d, s.c.type == "stock")
+            .where(s.c.type == "stock")
         )
         if board and board in BOARD_REGEX:
-            stmt = stmt.where(f.c.ts_code.regexp_match(BOARD_REGEX[board]))
+            stmt = stmt.where(s.c.ts_code.regexp_match(BOARD_REGEX[board]))
         if sector_name:
             if sector_type == "concept":
                 stmt = stmt.where(
