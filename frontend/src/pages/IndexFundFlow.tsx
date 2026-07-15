@@ -28,7 +28,7 @@ const RED_COLOR = '#cf1322';
 const GREEN_COLOR = '#3f8600';
 
 // 关注的指数排前面
-const PREFERRED_INDICES = ['980080', '900001', '900002', '399667', '900009', '399966'];
+const PREFERRED_INDICES = ['980080', '900001', '900002', '399667', '900009', '399966', '931152'];
 
 function fmtYi(v: number): string {
   const abs = Math.abs(v);

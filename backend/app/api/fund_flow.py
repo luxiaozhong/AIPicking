@@ -83,6 +83,18 @@ async def get_heatmap(
     return {"code": 0, "message": "ok", "data": data}
 
 
+@router.get("/sector-ranking-trend")
+async def get_sector_ranking_trend(
+    days: int = Query(30, ge=5, le=60, description="回溯交易日数"),
+    sector_type: str = Query("industry", pattern="^(industry|concept)$", description="分类: industry=行业, concept=题材"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """板块主力资金流 5日排名变化追踪 — 过去 N 日每个板块的排名变化"""
+    data = await FundFlowService.get_sector_ranking_trend(db, sector_type, days)
+    return {"code": 0, "message": "ok", "data": data}
+
+
 @router.get("/stocks")
 async def get_stock_ranking(
     trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
@@ -94,6 +106,24 @@ async def get_stock_ranking(
 ):
     """个股资金流排名（支持按板块过滤）"""
     data = await FundFlowService.get_stock_ranking(db, trade_date, sort, limit, board)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/stocks/sector-ranking")
+async def get_sector_stock_ranking(
+    sector_name: str = Query(..., min_length=1, description="行业/题材名称"),
+    sector_type: str = Query("industry", pattern="^(industry|concept)$", description="分类: industry=行业, concept=题材"),
+    trade_date: Optional[str] = Query(None, description="交易日 YYYY-MM-DD，默认最新"),
+    sort: str = Query("main_net", description="排序字段: main_net, main_net_asc, inflow_rate, jumbo, block"),
+    limit: int = Query(20, ge=5, le=100, description="返回条数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按行业/题材名查询该板块下个股资金流排名（含当日涨跌幅）"""
+    data = await FundFlowService.get_stock_ranking(
+        db, trade_date, sort, limit,
+        sector_name=sector_name, sector_type=sector_type,
+    )
     return {"code": 0, "message": "ok", "data": data}
 
 

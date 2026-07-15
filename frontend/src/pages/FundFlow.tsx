@@ -15,6 +15,8 @@ import { fundFlowService } from '@/services/fundFlowService';
 import type { ColumnsType } from 'antd/es/table';
 import StockSearchLookup from '@/components/shared/StockSearchLookup';
 import StockFundFlowDetail from '@/components/shared/StockFundFlowDetail';
+import SectorFlowLineChart from '@/components/fund-flow/SectorFlowLineChart';
+import RankingTrend from '@/components/index-fund-flow/RankingTrend';
 
 const { Title, Text } = Typography;
 
@@ -69,77 +71,6 @@ function pivotBoardHistory(
   };
 }
 
-// ── 图表 option 构建（复用） ──
-function buildOrderFlowChart(days: Array<{
-  trade_date: string;
-  jumbo_net_flow: number;
-  block_net_flow: number;
-  mid_net_flow: number;
-  small_net_flow: number;
-}>) {
-  const dates = days.map((d) => d.trade_date);
-  return {
-    tooltip: { trigger: 'axis' as const },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 75 },
-    xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-    yAxis: { type: 'value' as const, name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
-    series: [
-      {
-        name: '超大单', type: 'bar' as const,
-        data: days.map((d) => d.jumbo_net_flow),
-        itemStyle: { color: '#cf1322' },
-      },
-      {
-        name: '大单', type: 'bar' as const,
-        data: days.map((d) => d.block_net_flow),
-        itemStyle: { color: '#fa8c16' },
-      },
-      {
-        name: '中单', type: 'bar' as const,
-        data: days.map((d) => d.mid_net_flow),
-        itemStyle: { color: '#1677ff' },
-      },
-      {
-        name: '小单', type: 'bar' as const,
-        data: days.map((d) => d.small_net_flow),
-        itemStyle: { color: '#3f8600' },
-      },
-    ],
-  };
-}
-
-function buildCumTrendChart(days: Array<{ trade_date: string; main_net_flow_5d: number; main_net_flow_10d: number; main_net_flow_20d: number }>) {
-  const dates = days.map((d) => d.trade_date);
-  return {
-    tooltip: { trigger: 'axis' as const },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 10, bottom: 75 },
-    xAxis: { type: 'category' as const, data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-    yAxis: { type: 'value' as const, name: '元', axisLabel: { formatter: (v: number) => (v / 1e8).toFixed(0) + '亿' } },
-    series: [
-      {
-        name: '5日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
-        data: days.map((d) => d.main_net_flow_5d),
-        itemStyle: { color: '#fa8c16' },
-        lineStyle: { color: '#fa8c16', width: 1.5 },
-      },
-      {
-        name: '10日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
-        data: days.map((d) => d.main_net_flow_10d),
-        itemStyle: { color: '#1677ff' },
-        lineStyle: { color: '#1677ff', width: 1.5 },
-      },
-      {
-        name: '20日累计', type: 'line' as const, smooth: true, symbol: 'none' as const,
-        data: days.map((d) => d.main_net_flow_20d),
-        itemStyle: { color: '#722ed1' },
-        lineStyle: { color: '#722ed1', width: 1.5 },
-      },
-    ],
-  };
-}
-
 // ═══════════════════════════════════════════════════════════════
 // FundFlow Page
 // ═══════════════════════════════════════════════════════════════
@@ -147,22 +78,9 @@ function buildCumTrendChart(days: Array<{ trade_date: string; main_net_flow_5d: 
 const FundFlow: React.FC = () => {
   const store = useFundFlowStore();
 
-  // 个股搜索
-  const [stockSearchValue, setStockSearchValue] = useState('');
-  const [searchedStock, setSearchedStock] = useState<string | null>(null);  // ts_code
-
-  const handleStockSelect = (tsCode: string) => {
-    if (!tsCode) return;
-    setSearchedStock(tsCode);
-    setStockSearchValue(tsCode);
-    store.fetchStockTrend(tsCode, 30);
-  };
-
-  const handleClearStock = () => {
-    setSearchedStock(null);
-    setStockSearchValue('');
-    store.setSelectedStock(null);
-  };
+  // 折线图 / 趋势追踪 交互状态
+  const [lineTopN, setLineTopN] = useState<number>(15);
+  const [lineMode, setLineMode] = useState<'daily' | 'cum'>('cum');
 
   // Drawer 个股搜索（顶部）
   const [drawerStock, setDrawerStock] = useState<string | null>(null);
@@ -212,6 +130,35 @@ const FundFlow: React.FC = () => {
     setBoardOutflow([]);
   };
 
+  // ── 板块（行业/题材）个股排行 Drawer ──
+  const [selectedSector, setSelectedSector] = useState<string | null>(null);
+  const [sectorStocks, setSectorStocks] = useState<StockFlowItem[]>([]);
+  const [sectorDrawerLoading, setSectorDrawerLoading] = useState(false);
+
+  const handleSectorClick = async (sectorName: string) => {
+    setSelectedSector(sectorName);
+    setSectorDrawerLoading(true);
+    try {
+      const result = await fundFlowService.getSectorStocks(
+        sectorName,
+        store.sectorType,
+        store.selectedDate,
+        'main_net',
+        20,
+      );
+      setSectorStocks(result.items);
+    } catch {
+      setSectorStocks([]);
+    } finally {
+      setSectorDrawerLoading(false);
+    }
+  };
+
+  const handleCloseSectorDrawer = () => {
+    setSelectedSector(null);
+    setSectorStocks([]);
+  };
+
   // 初始化
   useEffect(() => {
     store.fetchAvailableDates();
@@ -221,8 +168,8 @@ const FundFlow: React.FC = () => {
     store.fetchBreadthHistory(30);
     store.fetchIndustryFlow();
     store.fetchConceptFlow();
-    store.fetchHeatmap(20, 'industry');
-    store.fetchStockRanking();
+    store.fetchHeatmap(30, 'industry');
+    store.fetchSectorRankingTrend(30, 'industry');
   }, []);
 
   // ── Layer 1: 市场总览图表 options ──
@@ -386,145 +333,6 @@ const FundFlow: React.FC = () => {
     };
   }, [store.industries, store.concepts, store.sectorType]);
 
-  // ── Layer 2: 热力图 ──
-
-  const heatmapOption = useMemo(() => {
-    if (!store.heatmap?.rows.length) return {};
-    const rows = store.heatmap.rows;
-    const dates = [...new Set(rows.map((r) => r.trade_date))].sort();
-    const sectors = [...new Set(rows.map((r) => r.sector_name))];
-
-    // 取近 20 日主力净流入总和最大的 20 个板块
-    const sectorTotals: Record<string, number> = {};
-    rows.forEach((r) => {
-      sectorTotals[r.sector_name] = (sectorTotals[r.sector_name] || 0) + r.main_net_yi;
-    });
-    const topSectors = Object.entries(sectorTotals)
-      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-      .slice(0, 25)
-      .map(([name]) => name)
-      .reverse();
-
-    const maxAbs = Math.max(...rows.map((r) => Math.abs(r.main_net_yi)), 0.1);
-    const data = rows
-      .filter((r) => topSectors.includes(r.sector_name))
-      .map((r) => [dates.indexOf(r.trade_date), topSectors.indexOf(r.sector_name), r.main_net_yi]);
-
-    return {
-      tooltip: {
-        formatter: (params: any) => {
-          const [di, si, v] = params.value || [0, 0, 0];
-          return `${dates[di]}<br/>${topSectors[si]}<br/>主力净流入: ${fmtYiShort(v)}`;
-        },
-      },
-      grid: { left: 90, right: 40, top: 10, bottom: 50 },
-      xAxis: {
-        type: 'category',
-        data: dates,
-        axisLabel: { rotate: 45, fontSize: 10 },
-        position: 'bottom',
-      },
-      yAxis: {
-        type: 'category',
-        data: topSectors,
-        axisLabel: { fontSize: 10 },
-      },
-      visualMap: {
-        min: -maxAbs,
-        max: maxAbs,
-        inRange: { color: [GREEN_COLOR, '#f5f5f5', RED_COLOR] },
-        show: false,
-      },
-      series: [
-        {
-          type: 'heatmap',
-          data,
-          label: { show: false },
-          emphasis: {
-            itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' },
-          },
-        },
-      ],
-    };
-  }, [store.heatmap]);
-
-  // ── Layer 3: 个股表格 ──
-
-  const stockColumns: ColumnsType<StockFlowItem> = [
-    {
-      title: '排名',
-      key: 'rank',
-      width: 50,
-      render: (_: any, __: any, idx: number) => idx + 1,
-      sorter: false,
-    },
-    {
-      title: '代码',
-      dataIndex: 'ts_code',
-      width: 100,
-      render: (v: string) => <Text code>{v}</Text>,
-    },
-    {
-      title: '名称',
-      dataIndex: 'stock_name',
-      width: 80,
-    },
-    {
-      title: '行业',
-      dataIndex: 'industry_name',
-      width: 80,
-      ellipsis: true,
-    },
-    {
-      title: '主力净流入(元)',
-      dataIndex: 'main_net_flow',
-      width: 140,
-      align: 'right',
-      sorter: (a, b) => a.main_net_flow - b.main_net_flow,
-      render: (v: number) => (
-        <span style={{ color: posColor(v), fontWeight: 500 }}>
-          {(v / 1e8).toFixed(2)} 亿
-        </span>
-      ),
-    },
-    {
-      title: '超大单',
-      dataIndex: 'jumbo_net_flow',
-      width: 110,
-      align: 'right',
-      render: (v: number) => <span style={{ color: posColor(v) }}>{(v / 1e8).toFixed(2)} 亿</span>,
-    },
-    {
-      title: '大单',
-      dataIndex: 'block_net_flow',
-      width: 100,
-      align: 'right',
-      render: (v: number) => <span style={{ color: posColor(v) }}>{(v / 1e8).toFixed(2)} 亿</span>,
-    },
-    {
-      title: '中单',
-      dataIndex: 'mid_net_flow',
-      width: 100,
-      align: 'right',
-      render: (v: number) => <span style={{ color: posColor(v) }}>{(v / 1e8).toFixed(2)} 亿</span>,
-    },
-    {
-      title: '占流通市值',
-      dataIndex: 'main_inflow_circ_rate',
-      width: 90,
-      align: 'right',
-      sorter: (a, b) => a.main_inflow_circ_rate - b.main_inflow_circ_rate,
-      render: (v: number) => v > 0 ? `${v.toFixed(2)}%` : '-',
-    },
-    {
-      title: '5日累计',
-      dataIndex: 'main_net_flow_5d',
-      width: 110,
-      align: 'right',
-      render: (v: number) => <span style={{ color: posColor(v) }}>{(v / 1e8).toFixed(1)} 亿</span>,
-    },
-  ];
-
   // ── 板块个股排行 Drawer 表格列（精简版）──
   const boardStockColumns: ColumnsType<StockFlowItem> = [
     {
@@ -564,42 +372,6 @@ const FundFlow: React.FC = () => {
       ),
     },
   ];
-
-  // ── 个股展开：趋势图（按股票缓存，避免多行展开时数据串扰） ──
-  const [trendCache, setTrendCache] = useState<Record<string, typeof store.stockTrend>>({});
-
-  const handleExpand = (expanded: boolean, record: StockFlowItem) => {
-    if (expanded) {
-      if (!trendCache[record.ts_code]) {
-        // 异步获取后写入缓存
-        fundFlowService.getStockTrend(record.ts_code, 30).then((trend) => {
-          setTrendCache((prev) => ({ ...prev, [record.ts_code]: trend }));
-        }).catch(() => {});
-      }
-    }
-  };
-
-  const expandedRowRender = (record: StockFlowItem) => {
-    const trend = trendCache[record.ts_code];
-    if (!trend?.days?.length) {
-      return <Spin style={{ display: 'block', padding: 20 }} />;
-    }
-    const days = trend.days;
-    return (
-      <Row gutter={16}>
-        <Col span={12}>
-          <Card size="small" title="四类订单净流入（超大/大/中/小）">
-            <ReactECharts option={buildOrderFlowChart(days)} style={{ height: 250 }} />
-          </Card>
-        </Col>
-        <Col span={12}>
-          <Card size="small" title="多日累计趋势">
-            <ReactECharts option={buildCumTrendChart(days)} style={{ height: 250 }} />
-          </Card>
-        </Col>
-      </Row>
-    );
-  };
 
   // ── Render ──
 
@@ -719,6 +491,89 @@ const FundFlow: React.FC = () => {
               </Card>
             </Col>
           </Row>
+        )}
+      </Drawer>
+
+      {/* ── 板块个股排行 Drawer（行业/题材点击）── */}
+      <Drawer
+        title={
+          <Space>
+            <Tag color="blue">{selectedSector}</Tag>
+            <Text strong>{store.sectorType === 'industry' ? '行业' : '题材'}个股资金流</Text>
+          </Space>
+        }
+        open={!!selectedSector}
+        onClose={handleCloseSectorDrawer}
+        width={700}
+        destroyOnClose
+      >
+        {sectorDrawerLoading ? (
+          <Spin style={{ display: 'block', padding: 60 }} />
+        ) : (
+          <Table
+            dataSource={sectorStocks}
+            rowKey="ts_code"
+            columns={[
+              { title: '#', key: 'rank', width: 40, render: (_: any, __: any, idx: number) => idx + 1 },
+              {
+                title: '代码',
+                dataIndex: 'ts_code',
+                width: 90,
+                render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
+              },
+              {
+                title: '名称',
+                dataIndex: 'stock_name',
+                width: 80,
+                render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+              },
+              {
+                title: '涨跌幅',
+                dataIndex: 'pct_change',
+                width: 80,
+                align: 'right',
+                sorter: (a, b) => a.pct_change - b.pct_change,
+                render: (v: number) => (
+                  <Text style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500, fontSize: 12 }}>
+                    {v > 0 ? '+' : ''}{v.toFixed(2)}%
+                  </Text>
+                ),
+              },
+              {
+                title: '主力净流入',
+                dataIndex: 'main_net_flow',
+                width: 110,
+                align: 'right',
+                sorter: (a, b) => a.main_net_flow - b.main_net_flow,
+                render: (v: number) => (
+                  <span style={{ color: posColor(v), fontWeight: 500, fontSize: 12 }}>
+                    {(v / 1e8).toFixed(2)} 亿
+                  </span>
+                ),
+              },
+              {
+                title: '超大单',
+                dataIndex: 'jumbo_net_flow',
+                width: 90,
+                align: 'right',
+                render: (v: number) => <span style={{ color: posColor(v), fontSize: 12 }}>{(v / 1e8).toFixed(2)} 亿</span>,
+              },
+              {
+                title: '占流通市值',
+                dataIndex: 'main_inflow_circ_rate',
+                width: 80,
+                align: 'right',
+                render: (v: number) => <Text style={{ fontSize: 12 }}>{v > 0 ? `${v.toFixed(2)}%` : '-'}</Text>,
+              },
+            ]}
+            size="small"
+            pagination={false}
+            scroll={{ x: 560 }}
+            onRow={(record) => ({
+              onClick: () => handleTopStockSelect(record.ts_code),
+              style: { cursor: 'pointer' },
+            })}
+          />
         )}
       </Drawer>
 
@@ -895,81 +750,53 @@ const FundFlow: React.FC = () => {
         )}
       </Card>
 
-      {/* Heatmap */}
-      <Card size="small" title={`${store.sectorType === 'industry' ? '行业' : '题材'}资金流热力图（近 20 日）`} style={{ marginBottom: 16 }}>
-        {loading.heatmap ? (
-          <Spin style={{ display: 'block', padding: 60 }} />
-        ) : store.heatmap?.rows.length ? (
-          <ReactECharts option={heatmapOption} style={{ height: 500 }} />
-        ) : (
-          <Empty description="暂无热力图数据" />
-        )}
+      {/* 板块主力资金流趋势（折线图） */}
+      <Card
+        size="small"
+        title="板块主力资金流趋势"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Space size="small">
+            <Segmented
+              options={[
+                { label: '每日净流入', value: 'daily' },
+                { label: '累计净流入', value: 'cum' },
+              ]}
+              value={lineMode}
+              onChange={(v) => setLineMode(v as 'daily' | 'cum')}
+            />
+            <Select
+              value={lineTopN}
+              style={{ width: 110 }}
+              onChange={(v) => setLineTopN(v)}
+              options={[
+                { label: 'Top 10', value: 10 },
+                { label: 'Top 15', value: 15 },
+                { label: 'Top 20', value: 20 },
+              ]}
+            />
+          </Space>
+        }
+      >
+        <SectorFlowLineChart
+          rows={store.heatmap?.rows || []}
+          topN={lineTopN}
+          mode={lineMode}
+          loading={loading.heatmap}
+        />
       </Card>
 
-      {/* ═════════════════════════════════════════════╗
-          ║  Layer 3: 个股资金流                          ║
-          ╚════════════════════════════════════════════╝ */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-        <Title level={4} style={{ margin: 0 }}>
-          <FallOutlined /> 个股资金流
-        </Title>
-        <Space>
-          <StockSearchLookup
-            value={stockSearchValue}
-            onChange={setStockSearchValue}
-            onSelect={handleStockSelect}
-            placeholder="搜索个股代码或名称"
-            style={{ width: 220 }}
-          />
-          {searchedStock && (
-            <Tag
-              closable
-              onClose={handleClearStock}
-              color="blue"
-              style={{ cursor: 'default' }}
-            >
-              已选: {searchedStock}
-            </Tag>
-          )}
-          <Select
-            value="main_net"
-            style={{ width: 140 }}
-            onChange={(v) => store.fetchStockRanking(store.selectedDate, v)}
-            options={[
-              { label: '主力净流入↓', value: 'main_net' },
-              { label: '主力净流出↑', value: 'main_net_asc' },
-              { label: '占流通市值比', value: 'inflow_rate' },
-              { label: '超大单', value: 'jumbo' },
-              { label: '大单', value: 'block' },
-            ]}
-          />
-        </Space>
-      </div>
-
-      {/* ── 个股搜索详情面板 ── */}
-      <StockFundFlowDetail
-        tsCode={searchedStock}
-        onClose={handleClearStock}
-      />
-
-      <Card size="small">
-        {loading.stockRanking ? (
-          <Spin style={{ display: 'block', padding: 60 }} />
-        ) : (
-          <Table
-            columns={stockColumns}
-            dataSource={store.stockRanking}
-            rowKey="ts_code"
-            size="small"
-            scroll={{ x: 1000 }}
-            pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
-            expandable={{
-              expandedRowRender,
-              onExpand: handleExpand,
-              rowExpandable: () => true,
-            }}
-          />
-        )}
+      {/* 趋势追踪（潜力板块） */}
+      <Card
+        size="small"
+        title={`趋势追踪 · 潜力${store.sectorType === 'industry' ? '行业' : '题材'}（按 5 日累计净流入排名变化）`}
+      >
+        <RankingTrend
+          data={{ items: store.sectorRankingTrend }}
+          loading={loading.sectorRankingTrend}
+          nameField="sector_name"
+          onItemClick={handleSectorClick}
+        />
       </Card>
     </div>
   );

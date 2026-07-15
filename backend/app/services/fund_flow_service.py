@@ -551,6 +551,144 @@ class FundFlowService:
         return {"type": sector_type, "days": days, "rows": rows}
 
     # ═══════════════════════════════════════════════════════════════
+    # 6.1 板块排名追踪（行业 或 题材 5日累计排名变化）
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def get_sector_ranking_trend(
+        db: AsyncSession,
+        sector_type: str = "industry",
+        days: int = 30,
+    ) -> dict:
+        """板块主力资金流排名追踪 — 过去 N 日每个板块按 5日累计净流入排名变化
+        逻辑镜像 get_index_ranking_trend，数据源为板块聚合（行业/题材）。
+        单位与 heatmap 一致：main_net_yi 已折算为「亿」。
+        """
+        from collections import defaultdict
+
+        # 额外多取 25 天用于 15 日滚动窗口预热
+        cutoff = (date.today() - timedelta(days=days + 25)).strftime("%Y-%m-%d")
+
+        sector_flows: dict[str, dict[str, float]] = defaultdict(dict)
+        all_dates: set[str] = set()
+        sectors: dict[str, str] = {}
+
+        if sector_type == "industry":
+            f = DailyStockFundFlow.__table__
+            s = Stock.__table__
+            stmt = (
+                select(
+                    f.c.trade_date,
+                    s.c.industry_l1.label("sector_name"),
+                    func.coalesce(func.sum(f.c.main_net_flow) / 1e8, 0).label("main_net_yi"),
+                )
+                .select_from(f.join(s, f.c.ts_code == s.c.ts_code))
+                .where(
+                    f.c.trade_date >= cutoff,
+                    s.c.industry_l1.isnot(None),
+                    s.c.industry_l1 != "",
+                )
+                .group_by(f.c.trade_date, s.c.industry_l1)
+                .order_by(f.c.trade_date.asc())
+            )
+            result = await db.execute(stmt)
+            for r in result.mappings().all():
+                sn = r["sector_name"]
+                if not sn:
+                    continue
+                dt = FundFlowService._normalize_date(r["trade_date"])
+                sector_flows[sn][dt] = float(r["main_net_yi"] or 0)
+                all_dates.add(dt)
+                sectors[sn] = sn
+        else:
+            sql = text(
+                """
+                SELECT
+                    f.trade_date,
+                    trim(concept_item) AS sector_name,
+                    COALESCE(SUM(f.main_net_flow) / 1e8, 0) AS main_net_yi
+                FROM daily_stock_fund_flow f
+                JOIN stocks s ON f.ts_code = s.ts_code
+                CROSS JOIN LATERAL jsonb_array_elements_text(
+                    CASE
+                        WHEN s.concepts ~ '^\\s*\\[' THEN s.concepts::jsonb
+                        ELSE to_jsonb(string_to_array(s.concepts, ','))
+                    END
+                ) AS concept_item
+                WHERE f.trade_date >= :cutoff
+                  AND s.concepts IS NOT NULL
+                  AND s.concepts != ''
+                GROUP BY f.trade_date, trim(concept_item)
+                ORDER BY f.trade_date ASC
+                """
+            )
+            result = await db.execute(sql, {"cutoff": cutoff})
+            for r in result.mappings().all():
+                sn = (r["sector_name"] or "").strip('" ')
+                if not sn:
+                    continue
+                dt = FundFlowService._normalize_date(r["trade_date"])
+                sector_flows[sn][dt] = float(r["main_net_yi"] or 0)
+                all_dates.add(dt)
+                sectors[sn] = sn
+
+        sorted_all_dates = sorted(all_dates)
+
+        # 计算每个板块每日的 5 日 / 15 日滚动累计主力净流入
+        sector_roll: dict[str, list] = defaultdict(list)  # sector -> [(date, flow5d, flow15d, flow_today)]
+        for sn in sectors:
+            flow_by_date = sector_flows.get(sn, {})
+            for i, dt in enumerate(sorted_all_dates):
+                today_flow = flow_by_date.get(dt, 0)
+                win5 = sorted_all_dates[max(0, i - 4): i + 1]
+                flow5d = sum(flow_by_date.get(d, 0) for d in win5)
+                win15 = sorted_all_dates[max(0, i - 14): i + 1]
+                flow15d = sum(flow_by_date.get(d, 0) for d in win15)
+                sector_roll[sn].append((dt, flow5d, flow15d, today_flow))
+
+        # 每日按 5 日累计对全部板块排名（15 日窗口填满后开始计入）
+        sector_ranks: dict[str, dict] = {}
+        for sn in sectors:
+            sector_ranks[sn] = {"sector_name": sn, "dates": [], "ranks": [], "flows5d": [], "flows15d": [], "flows": []}
+
+        for idx, dt in enumerate(sorted_all_dates):
+            if idx < 14:
+                continue
+            day_items = [(sn, sector_roll[sn][idx][1], sector_roll[sn][idx][2], sector_roll[sn][idx][3])
+                        for sn in sectors if idx < len(sector_roll[sn])]
+            day_items.sort(key=lambda x: x[1], reverse=True)  # 按 5 日累计降序
+            for rank_i, (sn, flow5d, flow15d, flow_today) in enumerate(day_items):
+                if sn in sector_ranks:
+                    sector_ranks[sn]["dates"].append(dt)
+                    sector_ranks[sn]["ranks"].append(rank_i + 1)
+                    sector_ranks[sn]["flows5d"].append(flow5d)
+                    sector_ranks[sn]["flows15d"].append(flow15d)
+                    sector_ranks[sn]["flows"].append(flow_today)
+
+        items = []
+        for sn, data in sector_ranks.items():
+            if len(data["ranks"]) < 2:
+                continue
+            first_rank = data["ranks"][0]
+            last_rank = data["ranks"][-1]
+            items.append({
+                "sector_name": sn,
+                "dates": data["dates"],
+                "ranks": data["ranks"],
+                "flows5d": data["flows5d"],
+                "flows15d": data["flows15d"],
+                "flows": data["flows"],
+                "improvement": first_rank - last_rank,
+                "current_rank": last_rank,
+                "current_flow_5d": data["flows5d"][-1] if data["flows5d"] else 0,
+                "current_flow_15d": data["flows15d"][-1] if data["flows15d"] else 0,
+                "current_flow": data["flows"][-1] if data["flows"] else 0,
+            })
+
+        items.sort(key=lambda x: x["improvement"], reverse=True)
+        return {"items": items}
+
+    # ═══════════════════════════════════════════════════════════════
     # 7. 个股资金流排名
     # ═══════════════════════════════════════════════════════════════
 
@@ -561,14 +699,17 @@ class FundFlowService:
         sort: str = "main_net",
         limit: int = 100,
         board: Optional[str] = None,
+        sector_name: Optional[str] = None,
+        sector_type: str = "industry",
     ) -> dict:
-        """单日个股资金流排名（支持按板块过滤）"""
+        """单日个股资金流排名（支持按板块或行业/题材过滤，返回当日涨跌幅）"""
         d = trade_date or await FundFlowService._get_latest_date(db)
         if not d:
             return {"trade_date": None, "items": []}
 
         f = DailyStockFundFlow.__table__
         s = Stock.__table__
+        dl = Daily.__table__
 
         sort_cols = {
             "main_net": f.c.main_net_flow.desc(),
@@ -598,12 +739,26 @@ class FundFlowService:
                 f.c.main_inflow_circ_rate,
                 f.c.main_inflow_rank,
                 f.c.close_price,
+                dl.c.pre_close,
             )
-            .select_from(f.join(s, f.c.ts_code == s.c.ts_code))
+            .select_from(
+                f.join(s, f.c.ts_code == s.c.ts_code)
+                .outerjoin(dl, (f.c.ts_code == dl.c.ts_code) & (dl.c.trade_date == d))
+            )
             .where(f.c.trade_date == d, s.c.type == "stock")
         )
         if board and board in BOARD_REGEX:
             stmt = stmt.where(f.c.ts_code.regexp_match(BOARD_REGEX[board]))
+        if sector_name:
+            if sector_type == "concept":
+                stmt = stmt.where(
+                    or_(
+                        s.c.concepts.ilike(f'%"%{sector_name}%"%'),
+                        s.c.concepts.ilike(f'%{sector_name}%'),
+                    )
+                )
+            else:
+                stmt = stmt.where(s.c.industry_l1 == sector_name)
         stmt = stmt.order_by(order_by).limit(limit)
         result = await db.execute(stmt)
         rows = result.mappings().all()
@@ -616,6 +771,9 @@ class FundFlowService:
         for r in rows:
             ts = r["ts_code"]
             r5 = rolling.get(ts, {})
+            close = float(r["close_price"] or 0)
+            pre_close = float(r["pre_close"] or 0)
+            pct_change = round((close - pre_close) / pre_close * 100, 2) if pre_close else 0
             items.append({
                 "ts_code": r["ts_code"],
                 "stock_name": r["stock_name"] or "",
@@ -634,7 +792,8 @@ class FundFlowService:
                 "main_net_flow_20d": r5.get(f"{d}|20d", 0),
                 "main_inflow_circ_rate": float(r["main_inflow_circ_rate"] or 0),
                 "main_inflow_rank": r["main_inflow_rank"],
-                "close_price": float(r["close_price"] or 0),
+                "close_price": close,
+                "pct_change": pct_change,
             })
         return {"trade_date": FundFlowService._normalize_date(d), "items": items}
 

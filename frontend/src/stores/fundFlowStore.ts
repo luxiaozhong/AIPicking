@@ -8,6 +8,8 @@ import type {
   IndustryFlowItem,
   ConceptFlowItem,
   HeatmapData,
+  SectorRankingTrendItem,
+  SectorRankingTrendData,
   StockFlowItem,
   StockTrend,
 } from '@/services/fundFlowService';
@@ -21,6 +23,7 @@ interface FundFlowState {
   industries: IndustryFlowItem[];
   concepts: ConceptFlowItem[];
   heatmap: HeatmapData | null;
+  sectorRankingTrend: SectorRankingTrendItem[];
   stockRanking: StockFlowItem[];
   stockTrend: StockTrend | null;
   availableDates: string[];
@@ -45,6 +48,7 @@ interface FundFlowState {
   fetchIndustryFlow: (date?: string) => Promise<void>;
   fetchConceptFlow: (date?: string) => Promise<void>;
   fetchHeatmap: (days?: number, type?: 'industry' | 'concept') => Promise<void>;
+  fetchSectorRankingTrend: (days?: number, type?: 'industry' | 'concept') => Promise<void>;
   fetchStockRanking: (date?: string, sort?: string) => Promise<void>;
   fetchStockTrend: (tsCode: string, days?: number) => Promise<void>;
 
@@ -60,6 +64,7 @@ export const useFundFlowStore = create<FundFlowState>((set, get) => ({
   industries: [],
   concepts: [],
   heatmap: null,
+  sectorRankingTrend: [],
   stockRanking: [],
   stockTrend: null,
   availableDates: [],
@@ -76,7 +81,6 @@ export const useFundFlowStore = create<FundFlowState>((set, get) => ({
     get().fetchOverview(date);
     get().fetchIndustryFlow(date);
     get().fetchConceptFlow(date);
-    get().fetchStockRanking(date);
   },
 
   setSelectedStock: (tsCode) => {
@@ -88,7 +92,8 @@ export const useFundFlowStore = create<FundFlowState>((set, get) => ({
 
   setSectorType: (type) => {
     set({ sectorType: type });
-    get().fetchHeatmap(20, type);
+    get().fetchHeatmap(30, type);
+    get().fetchSectorRankingTrend(30, type);
   },
 
   // ── Async fetches ──
@@ -192,6 +197,19 @@ export const useFundFlowStore = create<FundFlowState>((set, get) => ({
       set({
         error: e.response?.data?.message || '获取热力图数据失败',
         loading: { ...get().loading, heatmap: false },
+      });
+    }
+  },
+
+  fetchSectorRankingTrend: async (days?: number, type?: 'industry' | 'concept') => {
+    set((s) => ({ loading: { ...s.loading, sectorRankingTrend: true }, error: null }));
+    try {
+      const data = await fundFlowService.getSectorRankingTrend(days, type);
+      set({ sectorRankingTrend: data.items, loading: { ...get().loading, sectorRankingTrend: false } });
+    } catch (e: any) {
+      set({
+        error: e.response?.data?.message || '获取板块排名追踪失败',
+        loading: { ...get().loading, sectorRankingTrend: false },
       });
     }
   },

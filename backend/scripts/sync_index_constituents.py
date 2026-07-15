@@ -117,6 +117,13 @@ KNOWN_INDICES: Dict[str, Dict[str, Any]] = {
         "constituent_count": 30,
         "data_source": "akshare.index_stock_cons_weight_csindex",
     },
+    "931152": {
+        "index_name": "创新药",
+        "full_name": "中证创新药产业指数",
+        "publisher": "中证",
+        "constituent_count": 50,
+        "data_source": "akshare.index_stock_cons_weight_csindex",
+    },
     # ── 中证（深市代码） ──
     "399966": {
         "index_name": "800证保",

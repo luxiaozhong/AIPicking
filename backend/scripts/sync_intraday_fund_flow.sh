@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$SCRIPT_DIR/../venv/bin/python"
 TODAY=$(date +%Y-%m-%d)
 
-CONSTITUENT_INDICES=(980080 900001 900002 399667 900009 399966 000905)
+CONSTITUENT_INDICES=(980080 900001 900002 399667 900009 399966 000905 931152)
 SELF_INDICES=(
     000001   # 上证指数
     000016   # 上证50
@@ -37,6 +37,7 @@ SELF_INDICES=(
     399750   # 深证主板50
     931643   # 科创创业50
     950180   # 科创AI
+    931152   # 创新药
     980080   # 国证成长100
 )
 
@@ -69,6 +70,7 @@ SELF_CODES=(
     sz399750   # 深证主板50
     sh931643   # 科创创业50
     sh950180   # 科创AI
+    sh931152   # 创新药
     sh980080   # 国证成长100
 )
 SELF_TOTAL=${#SELF_CODES[@]}

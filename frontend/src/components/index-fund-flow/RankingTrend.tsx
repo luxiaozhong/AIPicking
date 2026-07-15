@@ -1,18 +1,38 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Table, Typography, Spin, Empty, Tag } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, MinusOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { ColumnsType } from 'antd/es/table';
-import type { RankingTrendData, RankingTrendItem } from '@/services/indexFundFlowService';
 
 const { Text } = Typography;
 const RED_COLOR = '#cf1322';
 const GREEN_COLOR = '#3f8600';
 
+export interface TrendItem {
+  dates: string[];
+  ranks: number[];
+  flows5d: number[];
+  flows15d: number[];
+  flows: number[];
+  improvement: number;
+  current_rank: number;
+  current_flow_5d: number;
+  current_flow_15d: number;
+  current_flow: number;
+  ts_code?: string;
+  stock_name?: string;
+  sector_name?: string;
+}
+
 interface Props {
-  data: RankingTrendData | null;
+  data: { items: TrendItem[] } | null;
   loading: boolean;
+  /** 名称字段：股票场景用 stock_name，板块场景用 sector_name（默认股票） */
+  nameField?: 'stock_name' | 'sector_name';
+  /** 股票点击回调（nameField=stock_name 时生效） */
   onStockClick?: (tsCode: string) => void;
+  /** 板块点击回调（nameField=sector_name 时生效） */
+  onItemClick?: (sector: string) => void;
 }
 
 function rankSparklineOption(ranks: number[]) {
@@ -37,8 +57,10 @@ function rankSparklineOption(ranks: number[]) {
   };
 }
 
-const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
-  const columns: ColumnsType<RankingTrendItem> = [
+const RankingTrend: React.FC<Props> = ({ data, loading, nameField = 'stock_name', onStockClick, onItemClick }) => {
+  const isSector = nameField === 'sector_name';
+
+  const columns: ColumnsType<TrendItem> = [
     {
       title: '趋势',
       dataIndex: 'improvement',
@@ -52,14 +74,20 @@ const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
       sorter: (a, b) => b.improvement - a.improvement,
     },
     {
-      title: '股票',
-      dataIndex: 'stock_name',
-      width: 100,
-      render: (name: string, record) => (
-        <a onClick={() => onStockClick?.(record.ts_code)} style={{ cursor: 'pointer' }}>
-          {name || record.ts_code}
-        </a>
-      ),
+      title: isSector ? '板块' : '股票',
+      dataIndex: nameField,
+      width: 110,
+      ellipsis: true,
+      render: (name: string, record) => {
+        const key = isSector ? (record.sector_name || '') : (record.ts_code || '');
+        const label = name || (isSector ? record.sector_name : record.ts_code);
+        const handler = isSector ? onItemClick : onStockClick;
+        return (
+          <a onClick={() => handler?.(key)} style={{ cursor: handler ? 'pointer' : 'default' }}>
+            {label}
+          </a>
+        );
+      },
     },
     {
       title: '今日变化',
@@ -97,7 +125,7 @@ const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
       sorter: (a, b) => b.current_flow_5d - a.current_flow_5d,
       render: (v: number) => (
         <Text style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>
-          {(v / 1e8).toFixed(2)}亿
+          {isSector ? `${v.toFixed(2)}亿` : `${(v / 1e8).toFixed(2)}亿`}
         </Text>
       ),
     },
@@ -109,7 +137,7 @@ const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
       sorter: (a, b) => b.current_flow_15d - a.current_flow_15d,
       render: (v: number) => (
         <Text style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR, fontWeight: 500 }}>
-          {(v / 1e8).toFixed(2)}亿
+          {isSector ? `${v.toFixed(2)}亿` : `${(v / 1e8).toFixed(2)}亿`}
         </Text>
       ),
     },
@@ -129,7 +157,7 @@ const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
       sorter: (a, b) => b.current_flow - a.current_flow,
       render: (v: number) => (
         <Text style={{ color: v >= 0 ? RED_COLOR : GREEN_COLOR }}>
-          {(v / 1e8).toFixed(2)}亿
+          {isSector ? `${v.toFixed(2)}亿` : `${(v / 1e8).toFixed(2)}亿`}
         </Text>
       ),
     },
@@ -144,17 +172,21 @@ const RankingTrend: React.FC<Props> = ({ data, loading, onStockClick }) => {
   }
 
   return (
-    <Table<RankingTrendItem>
+    <Table<TrendItem>
       columns={columns}
       dataSource={data.items}
-      rowKey="ts_code"
+      rowKey={isSector ? 'sector_name' : 'ts_code'}
       size="small"
       pagination={{ pageSize: 20, showSizeChanger: false }}
       scroll={{ x: 600 }}
-      onRow={(record) => ({
-        onClick: () => onStockClick?.(record.ts_code),
-        style: { cursor: 'pointer' },
-      })}
+      onRow={(record) => {
+        const key = isSector ? (record.sector_name || '') : (record.ts_code || '');
+        const handler = isSector ? onItemClick : onStockClick;
+        return {
+          onClick: () => handler?.(key),
+          style: { cursor: handler ? 'pointer' : 'default' },
+        };
+      }}
     />
   );
 };

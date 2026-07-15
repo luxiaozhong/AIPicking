@@ -109,6 +109,26 @@ export interface HeatmapData {
   rows: HeatmapRow[];
 }
 
+// ── 板块排名追踪 ──
+
+export interface SectorRankingTrendItem {
+  sector_name: string;
+  dates: string[];
+  ranks: number[];
+  flows5d: number[];
+  flows15d: number[];
+  flows: number[];
+  improvement: number;
+  current_rank: number;
+  current_flow_5d: number;
+  current_flow_15d: number;
+  current_flow: number;
+}
+
+export interface SectorRankingTrendData {
+  items: SectorRankingTrendItem[];
+}
+
 // ── 个股 ──
 
 export interface StockFlowItem {
@@ -130,6 +150,7 @@ export interface StockFlowItem {
   main_inflow_circ_rate: number;
   main_inflow_rank: number | null;
   close_price: number;
+  pct_change: number;
 }
 
 export interface StockFlowRanking {
@@ -223,9 +244,17 @@ export const fundFlowService = {
     return data.data;
   },
 
-  async getHeatmap(days: number = 20, sectorType: 'industry' | 'concept' = 'industry') {
+  async getHeatmap(days: number = 30, sectorType: 'industry' | 'concept' = 'industry') {
     const { data } = await api.get<{ code: number; data: HeatmapData }>(
       '/fund-flow/heatmap',
+      { params: { days, sector_type: sectorType } }
+    );
+    return data.data;
+  },
+
+  async getSectorRankingTrend(days: number = 30, sectorType: 'industry' | 'concept' = 'industry') {
+    const { data } = await api.get<{ code: number; data: SectorRankingTrendData }>(
+      '/fund-flow/sector-ranking-trend',
       { params: { days, sector_type: sectorType } }
     );
     return data.data;
@@ -235,6 +264,20 @@ export const fundFlowService = {
     const { data } = await api.get<{ code: number; data: StockFlowRanking }>(
       '/fund-flow/stocks',
       { params: { trade_date: tradeDate, sort, limit, board } }
+    );
+    return data.data;
+  },
+
+  async getSectorStocks(
+    sectorName: string,
+    sectorType: 'industry' | 'concept' = 'industry',
+    tradeDate?: string,
+    sort: string = 'main_net',
+    limit: number = 20,
+  ) {
+    const { data } = await api.get<{ code: number; data: StockFlowRanking }>(
+      '/fund-flow/stocks/sector-ranking',
+      { params: { sector_name: sectorName, sector_type: sectorType, trade_date: tradeDate, sort, limit } }
     );
     return data.data;
   },
