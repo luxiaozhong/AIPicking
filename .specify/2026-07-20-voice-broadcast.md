@@ -172,3 +172,18 @@ VOICE_QUOTE_SOURCE=tencent
 4. **token**：先支持单个 token（`VOICE_TOKENS=elder:xxxx`，逗号可多组）。
 
 > 状态：已确认，已 coding 完成并通过基础联调（实时报价 / Edge-TTS 合成 / token 校验 / H5 注入均验证通过）。
+
+## 9. 上云初始化脚本
+
+手动配置易漏，已固化为 `backend/scripts/setup_voice.py`（仅操作 DB，不依赖 Edge-TTS）：
+
+```bash
+cd /opt/AIpicking/backend
+./venv/bin/python scripts/setup_voice.py --gen-token --public-ip <公网IP> --port 80
+./venv/bin/python scripts/setup_voice.py --stocks 600519.SH 601318.SH   # 加/改关注股票
+```
+
+脚本会：① 幂等注册指数 900099；② 批量加股票；③ `--gen-token` 时输出 `.env.production` 配置片段与可直接发给老人的 URL。
+把配置片段追加进 `.env.production` 后需 `systemctl restart aipicking` 让后端加载新 token。
+
+> 2026-07-20 更新：播报改为「轮询播报」——点「开始播报」后逐只朗读，本轮播完若不足 30s 则停顿补足后再重新获取最新行情循环播报（可随时停止）。对应 commit 见 git。
