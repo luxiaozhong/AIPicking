@@ -97,13 +97,14 @@ def run_job(script: str, date_arg: Optional[str],
             force_today: bool = False) -> Tuple[bool, float, str]:
     """运行单个同步脚本，返回 (成功, 耗时秒, stdout)
 
-    force_today: 始终传 --date today，确保盘后 cron 不因 count 检查而跳过
+    force_today: 盘后 cron 默认模式下传 --date today，确保不因 count 检查而跳过。
+                 但显式传入 date_arg（手动补历史）时，date_arg 优先。
     """
     cmd = [PYTHON, str(SCRIPT_DIR / script)]
-    if force_today:
-        cmd.extend(["--date", "today"])
-    elif date_arg:
+    if date_arg:
         cmd.extend(["--date", date_arg])
+    elif force_today:
+        cmd.extend(["--date", "today"])
 
     start = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)

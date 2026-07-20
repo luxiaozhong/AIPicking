@@ -79,6 +79,7 @@ _PG_PARAMS = _parse_pg_url(_default_db)
 
 TENCENT_API = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 QUOTE_API   = "http://qt.gtimg.cn/q="
+EM_KLINE_API = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 CONCURRENCY = 30
 TIMEOUT     = aiohttp.ClientTimeout(total=15)
 
@@ -271,10 +272,12 @@ async def download_one(session, ts_code, symbol, start_date, end_date, fetch_ext
         # 腾讯 API 对不同股票返回不同键名：主板用 qfqday，部分科创板用 day
         qfq_data = stock_data.get("qfqday") or stock_data.get("day", [])
     except (json.JSONDecodeError, AttributeError):
-        return None
+        # 腾讯被 WAF 拦截或返回异常 → 东方财富兜底
+        return await download_one_em(session, ts_code, symbol, start_date, end_date)
 
     if not qfq_data:
-        return None
+        # 腾讯无数据 → 东方财富兜底
+        return await download_one_em(session, ts_code, symbol, start_date, end_date)
 
     records = []
     prev_close = None
@@ -301,6 +304,64 @@ async def download_one(session, ts_code, symbol, start_date, end_date, fetch_ext
         except (ValueError, IndexError):
             continue
     return records
+
+
+# ── 东方财富兜底（腾讯 K 线被 WAF 封时启用） ───────────────────────────────
+
+async def download_one_em(session, ts_code, symbol, start_date, end_date, fetch_extra_days=2):
+    """
+    东方财富前复权日线兜底，返回 records 列表或 None。
+    secid：沪市 1.xxxxxx，深市 0.xxxxxx（北交所东方财富未覆盖，跳过）。
+    """
+    from datetime import datetime as dt, timedelta as td
+    start_dt = dt.strptime(_fmt_date(start_date), "%Y-%m-%d")
+    end_dt = dt.strptime(_fmt_date(end_date), "%Y-%m-%d")
+    expanded_start = (start_dt - td(days=fetch_extra_days)).strftime("%Y%m%d")
+    end_s = end_dt.strftime("%Y%m%d")
+
+    code = symbol[2:]  # 去掉 sh/sz 前缀
+    market = "1" if symbol.startswith("sh") else ("0" if symbol.startswith("sz") else None)
+    if market is None:
+        return None  # 北交所等非沪深，东方财富不支持，跳过
+    secid = f"{market}.{code}"
+    url = (f"{EM_KLINE_API}?secid={secid}&fields1=f1"
+           f"&fields2=f51,f52,f53,f54,f55,f56,f57"
+           f"&klt=101&fqt=1&beg={expanded_start}&end={end_s}")
+    try:
+        async with session.get(url, timeout=TIMEOUT) as resp:
+            data = json.loads(await resp.text())
+    except Exception:
+        return None
+
+    k = data.get("data")
+    if not k:
+        return None
+    klines = k.get("klines", [])
+    if not klines:
+        return None
+
+    records = []
+    prev_close = None
+    for line in klines:
+        parts = line.split(",")
+        if len(parts) < 7:
+            continue
+        try:
+            trade_date = parts[0]
+            open_p  = float(parts[1])
+            close_p = float(parts[2])
+            high_p  = float(parts[3])
+            low_p   = float(parts[4])
+            vol     = float(parts[5])
+            amount  = vol * close_p * 100  # 与腾讯口径一致（手→股×价）
+        except (ValueError, IndexError):
+            continue
+        row_date = dt.strptime(trade_date, "%Y-%m-%d")
+        if start_dt <= row_date <= end_dt:
+            records.append((ts_code, trade_date, open_p, high_p, low_p,
+                            close_p, prev_close, vol, amount, close_p))
+        prev_close = close_p
+    return records if records else None
 
 
 # ── 实时报价接口（盘中 + 兜底） ───────────────────────────────────────────

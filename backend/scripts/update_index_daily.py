@@ -74,6 +74,7 @@ _PG_PARAMS = _parse_pg_url(_default_db)
 
 TENCENT_API = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 QUOTE_API   = "http://qt.gtimg.cn/q="
+EM_KLINE_API = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 TIMEOUT     = aiohttp.ClientTimeout(total=15)
 
 # 指数 API 不含交易日字段，通过个股 API field[30] 获取真实交易日
@@ -276,12 +277,14 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str,
         data = json.loads(text)
         index_data = data.get("data", {}).get(idx["symbol"], {})
     except (json.JSONDecodeError, AttributeError):
-        return None
+        # 腾讯被 WAF 拦截或返回异常 → 东方财富兜底
+        return await download_one_index_em(session, idx, start_date, end_date)
 
     # 指数无复权，数据在 .day 下（不是 .qfqday）
     day_list = index_data.get("day", [])
     if not day_list:
-        return None
+        # 腾讯无数据（含单日区间返回空）→ 东方财富兜底
+        return await download_one_index_em(session, idx, start_date, end_date)
 
     range_start = _fmt_date(start_date)
     range_end = _fmt_date(end_date)
@@ -303,6 +306,58 @@ async def download_one_index(session, idx: dict, start_date: str, end_date: str,
             vol     = float(row[5])
             # 指数成交额估算（K 线不含成交额字段）
             amount  = vol * ((open_p + close_p + high_p + low_p) / 4.0)
+            records.append((idx["ts_code"], trade_date, open_p, high_p, low_p,
+                            close_p, vol, amount, close_p))
+        except (ValueError, IndexError):
+            continue
+    return records if records else None
+
+
+# ── 东方财富兜底（腾讯 K 线被 WAF 封时启用）────────────────────────────────
+
+async def download_one_index_em(session, idx: dict, start_date: str, end_date: str):
+    """
+    东方财富历史日线兜底，返回 records 列表或 None。
+    指数 secid：沪市 1.xxxxxx，深市 0.xxxxxx；无复权（fqt=0）。
+    """
+    start_s = _fmt_date(start_date).replace("-", "")
+    end_s = _fmt_date(end_date).replace("-", "")
+    code = idx["symbol"][2:]  # 去掉 sh/sz 前缀
+    market = "1" if idx["symbol"].startswith("sh") else "0"
+    secid = f"{market}.{code}"
+    url = (f"{EM_KLINE_API}?secid={secid}&fields1=f1"
+           f"&fields2=f51,f52,f53,f54,f55,f56,f57"
+           f"&klt=101&fqt=0&beg={start_s}&end={end_s}")
+    try:
+        async with session.get(url, timeout=TIMEOUT) as resp:
+            data = json.loads(await resp.text())
+    except Exception:
+        return None
+
+    k = data.get("data")
+    if not k:
+        return None
+    klines = k.get("klines", [])
+    if not klines:
+        return None
+
+    range_start = _fmt_date(start_date)
+    range_end = _fmt_date(end_date)
+    records = []
+    for line in klines:
+        parts = line.split(",")
+        if len(parts) < 7:
+            continue
+        trade_date = parts[0]
+        if trade_date < range_start or trade_date > range_end:
+            continue
+        try:
+            open_p  = float(parts[1])
+            close_p = float(parts[2])
+            high_p  = float(parts[3])
+            low_p   = float(parts[4])
+            vol     = float(parts[5])
+            amount  = float(parts[6])
             records.append((idx["ts_code"], trade_date, open_p, high_p, low_p,
                             close_p, vol, amount, close_p))
         except (ValueError, IndexError):
