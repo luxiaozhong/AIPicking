@@ -5,6 +5,7 @@
     GET /api/v1/voice/announce?token=  返回关注股实时报价 + 预生成音频 URL
     GET /api/v1/voice/tts?text=&voice= 生成（命中缓存则返回）mp3 音频
     GET /api/v1/voice/audio/{key}.mp3  返回缓存的 mp3（供 <audio> 播放）
+    GET /api/v1/voice/watchlist?token=&action=&codes=  管理关注列表（token 简单验证）
 """
 
 from __future__ import annotations
@@ -20,7 +21,12 @@ from ..config import settings
 from ..database import get_db
 from ..services import tts_service
 from ..services.quote_service import fetch_quotes, build_broadcast_text
-from ..services.watchlist_service import get_stocks
+from ..services.watchlist_service import (
+    ensure_index_info,
+    add_stocks,
+    remove_stock,
+    get_stocks,
+)
 
 router = APIRouter()
 
@@ -180,6 +186,60 @@ async def audio(key: str):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="音频未生成")
     return FileResponse(path, media_type="audio/mpeg")
+
+
+@router.get("/api/v1/voice/watchlist")
+async def watchlist_manager(
+    token: str = Query(..., description="voice token，做简单验证"),
+    action: str = Query("list", pattern="^(list|add|remove)$", description="list/add/remove"),
+    codes: str = Query("", description="逗号分隔的 ts_code，如 600519.SH,000001.SZ"),
+    index: str = Query(None, description="指数代码，默认用 VOICE_WATCHLIST_INDEX"),
+    db: AsyncSession = Depends(get_db),
+):
+    """管理语音播报关注列表（无 UI，用 voice token 简单验证，便于直接以 URL 增删）。
+
+    - action=list（默认）：查看当前关注列表
+    - action=add&codes=...：添加股票（幂等，只加不存在的）
+    - action=remove&codes=...：删除股票
+    无论哪种 action，最终都返回当前完整列表。增删只动 DB，下一次轮询即生效，无需重启。
+    """
+    _require_token(token)  # 简单 token 验证（无效返回 403）
+    index_code = index or settings.VOICE_WATCHLIST_INDEX
+
+    result: dict = {"action": action, "index_code": index_code}
+
+    if action == "add":
+        code_list = [c.strip().upper() for c in codes.split(",") if c.strip()]
+        if not code_list:
+            raise HTTPException(status_code=400, detail="codes 不能为空")
+        await ensure_index_info(
+            db,
+            index_code=index_code,
+            index_name=settings.VOICE_WATCHLIST_NAME,
+            full_name=settings.VOICE_WATCHLIST_NAME,
+        )
+        added = await add_stocks(db, code_list, index_code=index_code)
+        result["added"] = added["ts_codes"]
+    elif action == "remove":
+        code_list = [c.strip().upper() for c in codes.split(",") if c.strip()]
+        if not code_list:
+            raise HTTPException(status_code=400, detail="codes 不能为空")
+        removed = []
+        for c in code_list:
+            r = await remove_stock(db, c, index_code=index_code)
+            if r.get("removed"):
+                removed.append(c)
+        result["removed"] = removed
+
+    # 始终返回当前列表
+    current = await get_stocks(db, index_code=index_code)
+    info = current.get("index_info") or {}
+    result["index_name"] = info.get("index_name") or settings.VOICE_WATCHLIST_NAME
+    result["stocks"] = [
+        {"ts_code": s["ts_code"], "stock_name": s["stock_name"]}
+        for s in current.get("stocks", [])
+    ]
+    return {"code": 0, "data": result}
 
 
 def register_voice_tokens() -> None:
