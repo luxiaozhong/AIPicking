@@ -191,6 +191,16 @@ server {
         proxy_read_timeout 120s;
     }
 
+    # 语音播报 H5 页（根路径 /voice/{token}，不在 /api/ 下，必须单独代理到后端）
+    location /voice/ {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+    }
+
     location / {
         try_files \$uri \$uri/ /index.html;
     }

@@ -40,6 +40,11 @@ cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_type ON stocks(type)")
 conn.commit()
 print("   ✓ stocks.type 列 + 索引已添加")
 
+print("1b. 添加 users.last_login 列（登录时写入，缺失会导致 /auth/login 500）...")
+cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
+conn.commit()
+print("   ✓ users.last_login 列已添加")
+
 print("2. 添加 index_info.ts_code 列...")
 cur.execute("ALTER TABLE index_info ADD COLUMN IF NOT EXISTS ts_code VARCHAR(20)")
 conn.commit()

@@ -33,10 +33,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import async_session
 from app.config import settings
-from app.services.watchlist_service import ensure_index_info, add_stocks, get_stocks
+from app.services.watchlist_service import (
+    ensure_index_info,
+    add_stocks,
+    remove_stock,
+    get_stocks,
+)
 
 
 DEFAULT_STOCKS = ["600519.SH", "601318.SH"]  # 贵州茅台、中国平安
+
+
+def _print_current(current: dict) -> None:
+    print(
+        "  当前关注列表："
+        + ", ".join(f"{s['stock_name']}({s['ts_code']})" for s in current["stocks"])
+    )
 
 
 async def setup(
@@ -56,10 +68,22 @@ async def setup(
         current = await get_stocks(db, index_code=index_code)
         print(f"✓ 指数 {index_code}（{index_name}）已就绪")
         print(f"✓ 本次添加 {result['added']} 只：{', '.join(result['ts_codes'])}")
-        print(
-            "  当前关注列表："
-            + ", ".join(f"{s['stock_name']}({s['ts_code']})" for s in current["stocks"])
-        )
+        _print_current(current)
+    finally:
+        await db.close()
+
+
+async def remove(index_code: str, stocks: list[str]) -> None:
+    db = await async_session()
+    try:
+        removed = []
+        for ts_code in stocks:
+            r = await remove_stock(db, ts_code, index_code=index_code)
+            if r["removed"]:
+                removed.append(ts_code)
+        current = await get_stocks(db, index_code=index_code)
+        print(f"✓ 从指数 {index_code} 删除 {len(removed)} 只：{', '.join(removed) or '（无匹配）'}")
+        _print_current(current)
     finally:
         await db.close()
 
@@ -73,6 +97,10 @@ def main() -> None:
     parser.add_argument(
         "--stocks", nargs="+", default=DEFAULT_STOCKS,
         help=f"关注股票 ts_code 列表（默认 {DEFAULT_STOCKS}）",
+    )
+    parser.add_argument(
+        "--remove", nargs="+", default=None,
+        help="从指数删除的股票 ts_code 列表（如 601318.SH），提供后仅执行删除",
     )
     parser.add_argument(
         "--index", default=settings.VOICE_WATCHLIST_INDEX,
@@ -95,6 +123,11 @@ def main() -> None:
         help="对外端口（nginx 默认 80；直连后端用 8000）",
     )
     args = parser.parse_args()
+
+    # --remove 优先：仅执行删除，不再添加
+    if args.remove:
+        asyncio.run(remove(args.index, args.remove))
+        return
 
     asyncio.run(setup(args.index, args.name, args.stocks))
 
