@@ -359,51 +359,69 @@ def main():
     total_start = time.time()
     jobs_results: Dict[str, Any] = {}
 
-    for i, job in enumerate(JOBS, 1):
-        log_key = job["log_key"]
-        if log_key in args.skip:
-            print(f"\n[{i}/{len(JOBS)}] {job['script']} — {job['desc']} [跳过]")
-            continue
+    # report job 必须在 sync_summary.json 写入之后才运行，否则 sync_report.py
+    # 会读到上一次运行残留的旧摘要，导致邮件日期/条数永远比实际晚一次。
+    report_job = next((j for j in JOBS if j["log_key"] == "report"), None)
+    main_jobs = [j for j in JOBS if j["log_key"] != "report"]
 
-        print(f"\n[{i}/{len(JOBS)}] {job['script']} — {job['desc']}")
+    def _run_and_record(idx: int, job: Dict[str, Any]) -> None:
+        nonlocal total_ok, total_fail
+        log_key = job["log_key"]
+        print(f"\n[{idx}/{len(JOBS)}] {job['script']} — {job['desc']}")
         ok, elapsed, stdout = run_job(job["script"], date_arg,
                                       force_today=job.get("force_today", False))
         if ok:
             total_ok += 1
         else:
             total_fail += 1
-
         # Parse structured result for sync_report.py
         jobs_results[log_key] = parse_job_result(log_key, stdout, ok, elapsed)
         jobs_results[log_key]["desc"] = job["desc"]
+
+    def _write_summary() -> None:
+        """写入结构化摘要 JSON（供 sync_report.py 消费）。
+        date 优先取 update_daily 实际同步的交易日，其次 update_index_daily，最后用系统日期。"""
+        ud_result = jobs_results.get("update_daily", {})
+        idx_result = jobs_results.get("update_index_daily", {})
+        sync_date = ud_result.get("trade_date") or idx_result.get("trade_date") or datetime.now().strftime("%Y%m%d")
+        summary = {
+            "run_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "date": sync_date,
+            "total_ok": total_ok,
+            "total_fail": total_fail,
+            "total_elapsed_s": round(time.time() - total_start, 1),
+            "jobs": jobs_results,
+        }
+        try:
+            _SUMMARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _SUMMARY_FILE.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+            print(f"\n📋 摘要已写入 {_SUMMARY_FILE}")
+        except (OSError, PermissionError) as e:
+            print(f"\n⚠️ 无法写入摘要文件: {e}")
+
+    # ── 1. 先跑除 report 外的全部任务 ──
+    for i, job in enumerate(main_jobs, 1):
+        if job["log_key"] in args.skip:
+            print(f"\n[{i}/{len(JOBS)}] {job['script']} — {job['desc']} [跳过]")
+            continue
+        _run_and_record(i, job)
+
+    # ── 2. 写日期标记 + 写 summary（必须在 report 之前！）──
+    _write_report_marker()
+    _write_summary()
+
+    # ── 3. 最后跑 report：此时它读到的是刚写好的最新 summary.json ──
+    if report_job and report_job["log_key"] not in args.skip:
+        _run_and_record(len(JOBS), report_job)
+        # 把 report 结果并入 summary 重写一次，便于回溯查看
+        _write_summary()
+    elif report_job:
+        print(f"\n[{len(JOBS)}/{len(JOBS)}] {report_job['script']} — {report_job['desc']} [跳过]")
 
     total_elapsed = time.time() - total_start
     print(f"\n{'='*60}")
     print(f"  完成: {total_ok} 成功, {total_fail} 失败, 总耗时 {total_elapsed:.1f}s")
     print(f"{'='*60}")
-
-    # 在 update_daily.log 写入日期标记，确保 sync_report.py 能识别最新同步日期
-    _write_report_marker()
-
-    # 写入结构化摘要 JSON（供 sync_report.py 消费）
-    # date 优先取 update_daily 实际同步的交易日，其次 update_index_daily，最后用系统日期
-    ud_result = jobs_results.get("update_daily", {})
-    idx_result = jobs_results.get("update_index_daily", {})
-    sync_date = ud_result.get("trade_date") or idx_result.get("trade_date") or datetime.now().strftime("%Y%m%d")
-    summary = {
-        "run_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "date": sync_date,
-        "total_ok": total_ok,
-        "total_fail": total_fail,
-        "total_elapsed_s": round(total_elapsed, 1),
-        "jobs": jobs_results,
-    }
-    try:
-        _SUMMARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SUMMARY_FILE.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
-        print(f"\n📋 摘要已写入 {_SUMMARY_FILE}")
-    except (OSError, PermissionError) as e:
-        print(f"\n⚠️ 无法写入摘要文件: {e}")
 
     sys.exit(0 if total_fail == 0 else 1)
 
