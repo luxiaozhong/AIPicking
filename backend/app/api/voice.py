@@ -30,33 +30,25 @@ from ..services.watchlist_service import (
 
 router = APIRouter()
 
-# token -> label 映射（启动时从配置加载）
-_TOKEN_MAP: dict[str, str] = {}
+from ..services import voice_token_service
 
 
-def _load_tokens() -> None:
-    """从 settings.VOICE_TOKENS 解析 token 映射（label:token, 逗号分隔）"""
-    _TOKEN_MAP.clear()
-    raw = (settings.VOICE_TOKENS or "").strip()
-    if not raw:
-        return
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        if ":" in item:
-            label, token = item.split(":", 1)
-            _TOKEN_MAP[token.strip()] = label.strip()
-        else:
-            # 仅有 token，label 用 token 本身
-            _TOKEN_MAP[item] = item
+async def _resolve_token(db, token: str):
+    """校验 token（DB 查询），返回 VoiceToken 行；无效/未启用抛 403。
 
-
-def _require_token(token: str) -> str:
-    """校验 token，返回对应 label；失败抛 403"""
-    if token not in _TOKEN_MAP:
+    一 token 一列表：token 绑定的 index_code 即该链接独立的关注列表。
+    """
+    vt = await voice_token_service.get_token(db, token)
+    if vt is None or not vt.active:
         raise HTTPException(status_code=403, detail="无效的播报链接")
-    return _TOKEN_MAP[token]
+    return vt
+
+
+def _check_admin(admin: str | None) -> None:
+    """管理员校验：配置了 VOICE_ADMIN_TOKEN 时必须匹配；未配置则放开（任一有效 token 即可）。"""
+    if settings.VOICE_ADMIN_TOKEN:
+        if admin != settings.VOICE_ADMIN_TOKEN:
+            raise HTTPException(status_code=403, detail="需要管理员 token")
 
 
 def _voice_cache_dir() -> str:
@@ -68,9 +60,9 @@ def _voice_cache_dir() -> str:
 
 
 @router.get("/voice/{token}", response_class=HTMLResponse)
-async def voice_page(token: str):
+async def voice_page(token: str, db: AsyncSession = Depends(get_db)):
     """H5 大字播报页（注入 token 与配置）"""
-    _require_token(token)  # 校验
+    vt = await _resolve_token(db, token)  # 校验
     html_path = os.path.join(os.path.dirname(__file__), "..", "static", "voice.html")
     html_path = os.path.abspath(html_path)
     if not os.path.exists(html_path):
@@ -80,7 +72,7 @@ async def voice_page(token: str):
     # 注入运行时配置（token / 刷新间隔 / 标题）
     html = html.replace("__VOICE_TOKEN__", token)
     html = html.replace("__VOICE_REFRESH__", str(settings.VOICE_REFRESH_SECONDS))
-    html = html.replace("__VOICE_TITLE__", settings.VOICE_WATCHLIST_NAME)
+    html = html.replace("__VOICE_TITLE__", vt.index_name)
     return HTMLResponse(content=html)
 
 
@@ -90,10 +82,10 @@ async def announce(
     db: AsyncSession = Depends(get_db),
 ):
     """返回关注股实时报价 + 口语化播报文本 + 预生成音频 URL"""
-    _require_token(token)
+    vt = await _resolve_token(db, token)
 
-    # 读取老人关注列表（独立 index）
-    result = await get_stocks(db, index_code=settings.VOICE_WATCHLIST_INDEX)
+    # 读取该 token 独立的关注列表
+    result = await get_stocks(db, index_code=vt.index_code)
     stocks = result.get("stocks", [])
     ts_codes = [s["ts_code"] for s in stocks if s.get("ts_code")]
 
@@ -154,7 +146,7 @@ async def announce(
     return {
         "code": 0,
         "data": {
-            "title": settings.VOICE_WATCHLIST_NAME,
+            "title": vt.index_name,
             "refresh_seconds": settings.VOICE_REFRESH_SECONDS,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "stocks": stocks_out,
@@ -191,21 +183,66 @@ async def audio(key: str):
 @router.get("/api/v1/voice/watchlist")
 async def watchlist_manager(
     token: str = Query(..., description="voice token，做简单验证"),
-    action: str = Query("list", pattern="^(list|add|remove)$", description="list/add/remove"),
+    action: str = Query(
+        "list", pattern="^(list|add|remove|create_token|delete_token)$",
+        description="list/add/remove/create_token/delete_token",
+    ),
     codes: str = Query("", description="逗号分隔的 ts_code，如 600519.SH,000001.SZ"),
-    index: str = Query(None, description="指数代码，默认用 VOICE_WATCHLIST_INDEX"),
+    index: str = Query(None, description="指数代码（高级覆盖，默认用该 token 自身的列表）"),
+    admin: str = Query(None, description="管理员 token（create_token/delete_token 需要）"),
+    name: str = Query(None, description="create_token 时的列表名称，如 朋友B"),
+    target: str = Query(None, description="delete_token 时指定要删除的 token"),
     db: AsyncSession = Depends(get_db),
 ):
     """管理语音播报关注列表（无 UI，用 voice token 简单验证，便于直接以 URL 增删）。
 
+    一 token 一列表：默认操作的是【传入 token 自身】的关注列表。
     - action=list（默认）：查看当前关注列表
     - action=add&codes=...：添加股票（幂等，只加不存在的）
     - action=remove&codes=...：删除股票
-    无论哪种 action，最终都返回当前完整列表。增删只动 DB，下一次轮询即生效，无需重启。
+    - action=create_token：生成一份全新独立列表（新 token + 新指数 + 种子默认股票），
+      需管理员校验，返回新 token 与 URL
+    - action=delete_token&target=<token>：删除指定 token，需管理员校验
+    增删只动 DB，下一次轮询即生效，无需重启。
     """
-    _require_token(token)  # 简单 token 验证（无效返回 403）
-    index_code = index or settings.VOICE_WATCHLIST_INDEX
+    vt = await _resolve_token(db, token)  # 基本 token 验证（无效返回 403）
 
+    # 创建 / 删除 token 需要管理员权限
+    if action in ("create_token", "delete_token"):
+        _check_admin(admin)
+
+    if action == "create_token":
+        new_vt = await voice_token_service.create_token(db, label="elder", index_name=name)
+        current = await get_stocks(db, index_code=new_vt.index_code)
+        return {
+            "code": 0,
+            "data": {
+                "action": "create_token",
+                "token": new_vt.token,
+                "index_code": new_vt.index_code,
+                "index_name": new_vt.index_name,
+                "url": f"/voice/{new_vt.token}",
+                "stocks": [
+                    {"ts_code": s["ts_code"], "stock_name": s["stock_name"]}
+                    for s in current.get("stocks", [])
+                ],
+            },
+        }
+
+    if action == "delete_token":
+        tgt = target or token
+        ok = await voice_token_service.delete_token(db, tgt)
+        return {
+            "code": 0,
+            "data": {
+                "action": "delete_token",
+                "deleted": tgt if ok else None,
+                "found": ok,
+            },
+        }
+
+    # list / add / remove：操作该 token 自身的列表
+    index_code = index or vt.index_code
     result: dict = {"action": action, "index_code": index_code}
 
     if action == "add":
@@ -215,8 +252,8 @@ async def watchlist_manager(
         await ensure_index_info(
             db,
             index_code=index_code,
-            index_name=settings.VOICE_WATCHLIST_NAME,
-            full_name=settings.VOICE_WATCHLIST_NAME,
+            index_name=vt.index_name,
+            full_name=vt.index_name,
         )
         added = await add_stocks(db, code_list, index_code=index_code)
         result["added"] = added["ts_codes"]
@@ -233,15 +270,9 @@ async def watchlist_manager(
 
     # 始终返回当前列表
     current = await get_stocks(db, index_code=index_code)
-    info = current.get("index_info") or {}
-    result["index_name"] = info.get("index_name") or settings.VOICE_WATCHLIST_NAME
+    result["index_name"] = vt.index_name
     result["stocks"] = [
         {"ts_code": s["ts_code"], "stock_name": s["stock_name"]}
         for s in current.get("stocks", [])
     ]
     return {"code": 0, "data": result}
-
-
-def register_voice_tokens() -> None:
-    """供应用启动时调用，加载 token 映射"""
-    _load_tokens()

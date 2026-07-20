@@ -17,6 +17,7 @@ from .stock_tables import (
 )
 from .financial import FinancialReport, DailyValuation
 from .index_tables import IndexInfo, IndexConstituent
+from .voice_token import VoiceToken
 from .trade_sim import TradeSimReport, BatchTradeSimReport
 from .rebalance import RebalanceReport
 from .user_holding import UserHolding

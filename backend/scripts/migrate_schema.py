@@ -45,6 +45,26 @@ cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
 conn.commit()
 print("   ✓ users.last_login 列已添加")
 
+print("1c. 创建 voice_tokens 表（一 token 一列表）...")
+cur.execute(
+    """
+    CREATE TABLE IF NOT EXISTS voice_tokens (
+        id SERIAL PRIMARY KEY,
+        token VARCHAR(64) NOT NULL UNIQUE,
+        label VARCHAR(50) NOT NULL DEFAULT 'elder',
+        index_code VARCHAR(20) NOT NULL,
+        index_name VARCHAR(50) NOT NULL DEFAULT '语音播报关注',
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP,
+        updated_at TIMESTAMP
+    )
+    """
+)
+cur.execute("CREATE INDEX IF NOT EXISTS idx_voice_tokens_token ON voice_tokens(token)")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_voice_tokens_index_code ON voice_tokens(index_code)")
+conn.commit()
+print("   ✓ voice_tokens 表已创建")
+
 print("2. 添加 index_info.ts_code 列...")
 cur.execute("ALTER TABLE index_info ADD COLUMN IF NOT EXISTS ts_code VARCHAR(20)")
 conn.commit()

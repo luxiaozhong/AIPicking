@@ -63,24 +63,15 @@ async def startup_event():
     finally:
         await session.close()
 
-    # 语音播报：加载 token 映射 + 种子独立关注指数（如 900099）
-    from .api.voice import register_voice_tokens
+    # 语音播报：种子 token 表 + 默认关注指数（一 token 一列表）
+    from .services.voice_token_service import seed_voice_tokens
     from .config import settings as _settings
-    register_voice_tokens()
-    if _settings.VOICE_TOKENS.strip():
-        session = await async_session()
-        try:
-            await ensure_index_info(
-                session,
-                index_code=_settings.VOICE_WATCHLIST_INDEX,
-                index_name=_settings.VOICE_WATCHLIST_NAME,
-                full_name=_settings.VOICE_WATCHLIST_NAME,
-            )
-            print(f"语音播报指数 {_settings.VOICE_WATCHLIST_INDEX} 元数据已就绪")
-        finally:
-            await session.close()
-    else:
-        print("未配置 VOICE_TOKENS，语音播报入口暂不启用")
+    session = await async_session()
+    try:
+        await seed_voice_tokens(session, _settings)
+        print("语音播报 token 已就绪")
+    finally:
+        await session.close()
 
 
 @app.get("/")
