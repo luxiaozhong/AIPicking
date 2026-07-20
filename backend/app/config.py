@@ -77,5 +77,14 @@ class Settings:
         )
         self.DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
 
+        # 语音播报（老人微信链接入口）配置
+        # VOICE_TOKENS: 逗号分隔的 token 列表，格式 label:token（如 elder:a1b2c3）
+        self.VOICE_TOKENS = os.getenv("VOICE_TOKENS", "")
+        self.VOICE_WATCHLIST_INDEX = os.getenv("VOICE_WATCHLIST_INDEX", "900099")
+        self.VOICE_WATCHLIST_NAME = os.getenv("VOICE_WATCHLIST_NAME", "语音播报关注")
+        self.VOICE_TTS_VOICE = os.getenv("VOICE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+        self.VOICE_QUOTE_SOURCE = os.getenv("VOICE_QUOTE_SOURCE", "tencent")
+        self.VOICE_REFRESH_SECONDS = int(os.getenv("VOICE_REFRESH_SECONDS", "30"))
+
 
 settings = Settings()

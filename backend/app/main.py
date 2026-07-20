@@ -63,6 +63,25 @@ async def startup_event():
     finally:
         await session.close()
 
+    # 语音播报：加载 token 映射 + 种子独立关注指数（如 900099）
+    from .api.voice import register_voice_tokens
+    from .config import settings as _settings
+    register_voice_tokens()
+    if _settings.VOICE_TOKENS.strip():
+        session = await async_session()
+        try:
+            await ensure_index_info(
+                session,
+                index_code=_settings.VOICE_WATCHLIST_INDEX,
+                index_name=_settings.VOICE_WATCHLIST_NAME,
+                full_name=_settings.VOICE_WATCHLIST_NAME,
+            )
+            print(f"语音播报指数 {_settings.VOICE_WATCHLIST_INDEX} 元数据已就绪")
+        finally:
+            await session.close()
+    else:
+        print("未配置 VOICE_TOKENS，语音播报入口暂不启用")
+
 
 @app.get("/")
 async def root():
@@ -82,7 +101,7 @@ async def health_check():
 
 
 # 导入并注册 API 路由
-from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments, financials, trade_sims, market_heat, fund_flow, rebalance, strategy_tracker, paper_trade, watchlist
+from .api import strategies, backtests, batch_backtests, factors, ai, auth, users, stocks, education, ratings, comments, financials, trade_sims, market_heat, fund_flow, rebalance, strategy_tracker, paper_trade, watchlist, voice
 app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["strategies"])
 app.include_router(ratings.router, prefix="/api/v1/strategies", tags=["ratings"])
 app.include_router(comments.router, prefix="/api/v1/strategies", tags=["comments"])
@@ -102,3 +121,4 @@ app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["watchlis
 app.include_router(rebalance.router, prefix="/api/v1/rebalance", tags=["调仓回测"])
 app.include_router(strategy_tracker.router, prefix="/api/v1/strategy-tracker", tags=["策略跟踪"])
 app.include_router(paper_trade.router, prefix="/api/v1/paper-trade", tags=["模拟盘"])
+app.include_router(voice.router, prefix="", tags=["语音播报"])

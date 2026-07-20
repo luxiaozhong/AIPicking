@@ -35,6 +35,9 @@ pypinyin>=0.51.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
 
+# 语音播报（Edge-TTS 中文语音合成，免费免 key）
+edge-tts>=6.1.0
+
 # 开发依赖
 black==23.12.1
 ruff==0.1.9

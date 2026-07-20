@@ -27,6 +27,9 @@ ENV/
 *.sqlite3
 backend/data/database/*.db
 
+# 语音播报合成缓存（Edge-TTS 生成的 mp3，运行期产物）
+backend/data/voice_cache/
+
 # 日志文件
 *.log
 logs/
