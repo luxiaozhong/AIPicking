@@ -47,15 +47,22 @@
   <h1>__VOICE_TITLE__</h1>
   <div class="updated" id="updated">加载中…</div>
   <div class="list" id="list"></div>
-  <button class="btn" id="playBtn">🔊 播报</button>
-  <div class="hint">点击「播报」可听实时价格，页面每 30 秒自动刷新</div>
+  <button class="btn" id="playBtn">🔊 开始播报</button>
+  <div class="hint" id="hint">点击下方按钮，自动逐只播报并每 30 秒循环刷新</div>
   <audio id="audio" preload="none"></audio>
 
 <script>
   var TOKEN = "__VOICE_TOKEN__";
   var REFRESH = parseInt("__VOICE_REFRESH__", 10) || 30;
   var audioEl = document.getElementById("audio");
-  var currentAudioUrl = "";
+  var hintEl = document.getElementById("hint");
+  var btnEl = document.getElementById("playBtn");
+
+  var broadcasting = false;
+  var queue = [];        // 本轮待播音频 URL 列表
+  var queueIdx = 0;
+  var roundStart = 0;
+  var nextTimer = null;
 
   function fmtPct(pct) {
     if (pct === null || pct === undefined) return "--";
@@ -74,7 +81,6 @@
     var list = document.getElementById("list");
     if (!data.stocks || data.stocks.length === 0) {
       list.innerHTML = '<div class="empty">您还没有关注股票，请让家人帮您添加</div>';
-      currentAudioUrl = "";
       return;
     }
     var html = "";
@@ -89,46 +95,110 @@
             + '</div>';
     });
     list.innerHTML = html;
-    currentAudioUrl = data.audio_url || "";
   }
 
-  function play() {
-    if (!currentAudioUrl) {
-      alert("暂时没有可播报的内容");
-      return;
-    }
-    audioEl.src = currentAudioUrl;
-    audioEl.play().catch(function () {
-      alert("播放失败，请重试或检查网络");
-    });
-  }
-
-  async function load() {
+  async function fetchAnnounce() {
     try {
       var resp = await fetch("/api/v1/voice/announce?token=" + encodeURIComponent(TOKEN));
       var json = await resp.json();
-      if (json.code === 0 && json.data) {
-        render(json.data);
-      } else {
-        document.getElementById("updated").textContent = "加载失败，请稍后重试";
-      }
-    } catch (e) {
-      document.getElementById("updated").textContent = "网络错误，请稍后重试";
+      if (json.code === 0 && json.data) return json.data;
+    } catch (e) {}
+    return null;
+  }
+
+  // 顺序播放单条音频；播放结束或出错都继续下一条
+  function playOne(url, onEnd) {
+    var done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      audioEl.onended = null;
+      audioEl.onerror = null;
+      onEnd();
+    }
+    audioEl.onended = finish;
+    audioEl.onerror = finish;
+    audioEl.src = url;
+    var p = audioEl.play();
+    if (p && p.catch) p.catch(function () { finish(); });
+  }
+
+  function playQueue() {
+    if (!broadcasting) return;
+    if (queueIdx >= queue.length) {
+      scheduleNext();
+      return;
+    }
+    var url = queue[queueIdx];
+    hintEl.textContent = "正在播报 第 " + (queueIdx + 1) + " / " + queue.length + " 只";
+    queueIdx++;
+    playOne(url, function () {
+      if (!broadcasting) return;
+      playQueue();
+    });
+  }
+
+  // 本轮播完：若距开始不足 REFRESH 秒，则停顿补足后再重新获取
+  function scheduleNext() {
+    if (!broadcasting) return;
+    var elapsed = (Date.now() - roundStart) / 1000;
+    var wait = REFRESH - elapsed;
+    if (wait < 0) wait = 0;
+    if (wait > 0) {
+      hintEl.textContent = "本轮播报完成，" + Math.ceil(wait) + " 秒后重新播报…";
+      nextTimer = setTimeout(startRound, wait * 1000);
+    } else {
+      hintEl.textContent = "本轮播报完成，重新获取行情…";
+      startRound();
     }
   }
 
-  document.getElementById("playBtn").addEventListener("click", play);
-
-  // 首次加载并播报一次（点击按钮兜底，部分浏览器禁止自动播放）
-  load().then(function () {
-    if (currentAudioUrl) {
-      audioEl.src = currentAudioUrl;
-      audioEl.play().catch(function () {}); // 失败静默，靠按钮
+  async function startRound() {
+    if (!broadcasting) return;
+    roundStart = Date.now();
+    queueIdx = 0;
+    hintEl.textContent = "正在获取最新行情…";
+    var data = await fetchAnnounce();
+    if (!data) {
+      hintEl.textContent = "获取行情失败，" + REFRESH + " 秒后重试";
+      nextTimer = setTimeout(startRound, REFRESH * 1000);
+      return;
     }
+    render(data);
+    queue = (data.stocks || []).map(function (s) { return s.audio_url; }).filter(Boolean);
+    if (queue.length === 0) {
+      hintEl.textContent = "暂无可播报内容，" + REFRESH + " 秒后重试";
+      nextTimer = setTimeout(startRound, REFRESH * 1000);
+      return;
+    }
+    playQueue();
+  }
+
+  function startBroadcast() {
+    if (broadcasting) return;
+    broadcasting = true;
+    btnEl.textContent = "⏸ 停止播报";
+    startRound();
+  }
+  function stopBroadcast() {
+    broadcasting = false;
+    if (nextTimer) { clearTimeout(nextTimer); nextTimer = null; }
+    audioEl.pause();
+    audioEl.onended = null;
+    audioEl.onerror = null;
+    btnEl.textContent = "🔊 开始播报";
+    hintEl.textContent = "已暂停，点击按钮继续播报";
+  }
+
+  btnEl.addEventListener("click", function () {
+    if (broadcasting) stopBroadcast(); else startBroadcast();
   });
 
-  // 交易时段每 REFRESH 秒自动刷新
-  setInterval(load, REFRESH * 1000);
+  // 首次加载仅展示行情（浏览器禁止无手势自动播放，需点按钮启动轮询播报）
+  (async function () {
+    var data = await fetchAnnounce();
+    if (data) render(data);
+  })();
 </script>
 </body>
 </html>

@@ -128,18 +128,32 @@ async def announce(
     if not quotes and stocks:
         text = "暂时获取不到行情数据，请稍后再试。"
 
-    # 预生成音频（命中缓存则直接返回），确保 H5 的 audio_url 可播放
+    # 为每只股票单独生成播报文本与音频（轮询播报：逐只朗读）
+    stocks_out = []
+    for s in items:
+        if s["price"] is None:
+            btext = f"{s['name']}，暂无行情。"
+        else:
+            pct = s["pct"] or 0
+            direction = "上涨" if pct > 0 else ("下跌" if pct < 0 else "持平")
+            btext = f"{s['name']}，{s['price']:.2f} 元，{direction} {abs(pct):.2f}%。"
+        # 预生成音频（命中缓存直接返回），确保 H5 的 audio_url 可播放
+        await tts_service.synthesize(btext)
+        audio_url = tts_service.get_audio_url(btext)
+        stocks_out.append({**s, "broadcast_text": btext, "audio_url": audio_url})
+
+    # 预生成整段音频（兼容旧用法 / 单条播报兜底）
     await tts_service.synthesize(text)
-    audio_url = tts_service.get_audio_url(text)
+    summary_audio_url = tts_service.get_audio_url(text)
     return {
         "code": 0,
         "data": {
             "title": settings.VOICE_WATCHLIST_NAME,
             "refresh_seconds": settings.VOICE_REFRESH_SECONDS,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "stocks": items,
+            "stocks": stocks_out,
             "summary_text": text,
-            "audio_url": audio_url,
+            "audio_url": summary_audio_url,
         },
     }
 
