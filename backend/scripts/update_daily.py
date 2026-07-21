@@ -365,23 +365,21 @@ async def download_one_em(session, ts_code, symbol, start_date, end_date, fetch_
 
 
 # ── 实时报价接口（盘中 + 兜底） ───────────────────────────────────────────
-async def fetch_realtime_quote(session, symbol, trade_date):
-    """
-    拉取实时报价，返回 record_tuple
-    trade_date 为 YYYY-MM-DD
-    """
-    url = f"{QUOTE_API}{symbol}"
-    try:
-        async with session.get(url, timeout=TIMEOUT) as resp:
-            raw = await resp.read()
-        text = raw.decode("gbk", errors="replace")
-    except Exception:
-        return None
+# 腾讯 qt 接口原生支持批量：q=sh600519,sz000001 一次请求多只，返回每行一个
+# v_xxx="..." 段（字段顺序与单只一致）。一次拼 BATCH_SYMBOLS 只，把 5000+ 只的
+# HTTP 往返从数千次降到数十次。
+BATCH_SYMBOLS = 100
 
-    if "=" not in text:
+
+def _parse_qt_line(line: str, trade_date: str):
+    """
+    解析单行 v_xxx="..." 为 record_tuple；失败返回 None。
+    字段索引与单只请求一致（抽出自原 fetch_realtime_quote，供批量/单只复用）。
+    """
+    if "=" not in line:
         return None
     try:
-        content = text.split("=", 1)[1].strip().strip('"')
+        content = line.split("=", 1)[1].strip().strip('"')
         fields = content.split("~")
         if len(fields) < 46:
             return None
@@ -414,6 +412,44 @@ async def fetch_realtime_quote(session, symbol, trade_date):
         return record
     except (ValueError, IndexError):
         return None
+
+
+async def fetch_realtime_quote(session, symbol, trade_date):
+    """拉取单只实时报价（批量失败时的降级入口）。返回 record_tuple 或 None。"""
+    url = f"{QUOTE_API}{symbol}"
+    try:
+        async with session.get(url, timeout=TIMEOUT) as resp:
+            raw = await resp.read()
+        text = raw.decode("gbk", errors="replace")
+    except Exception:
+        return None
+    return _parse_qt_line(text, trade_date)
+
+
+async def fetch_realtime_batch(session, pairs, trade_date):
+    """
+    批量拉取实时报价，一次请求拼 BATCH_SYMBOLS 只。
+    pairs: list[(ts_code, symbol), ...]，symbol 已是 sh600519 / sz000001 形式。
+    trade_date: YYYY-MM-DD。
+    返回 list[(ts_code, record_tuple), ...]（仅成功解析的）；整组请求异常返回 None。
+    """
+    symbols = [s for _, s in pairs]
+    url = f"{QUOTE_API}{','.join(symbols)}"
+    try:
+        async with session.get(url, timeout=TIMEOUT) as resp:
+            raw = await resp.read()
+        text = raw.decode("gbk", errors="replace")
+    except Exception:
+        return None
+
+    # 返回按行 v_xxx="..."，顺序与请求顺序一致 → 与 pairs 一一对应
+    lines = [ln for ln in text.split("\n") if ln.strip().startswith("v_")]
+    results = []
+    for (ts_code, _), line in zip(pairs, lines):
+        record = _parse_qt_line(line, trade_date)
+        if record:
+            results.append((ts_code, record))
+    return results
 
 
 # ── 数据库写入 ────────────────────────────────────────────────────────────
@@ -463,34 +499,43 @@ async def run_intraday(stocks, trade_date: str):
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
         semaphore = asyncio.Semaphore(CONCURRENCY)
 
-        async def bounded_fetch(s):
+        async def bounded_batch(group_pairs):
             async with semaphore:
-                record = await fetch_realtime_quote(
-                    session, s["symbol"], trade_date)
-                return s["ts_code"], record
+                res = await fetch_realtime_batch(
+                    session, group_pairs, trade_date)
+                if res is None:  # 整组请求失败 → 逐只降级
+                    res = []
+                    for tc, sym in group_pairs:
+                        rec = await fetch_realtime_quote(
+                            session, sym, trade_date)
+                        if rec:
+                            res.append((tc, rec))
+                return res
 
-        tasks = [bounded_fetch(s) for s in stocks]
-        updated, skipped = 0, 0
+        # 按 BATCH_SYMBOLS 分组，每组一次批量请求
+        groups = [stocks[i:i + BATCH_SYMBOLS]
+                  for i in range(0, len(stocks), BATCH_SYMBOLS)]
+        print(f"  📦 分 {len(groups)} 组批量拉取（每组 {BATCH_SYMBOLS} 只）")
+        tasks = [bounded_batch([(s["ts_code"], s["symbol"]) for s in g])
+                 for g in groups]
+        updated = 0
         batch = []
         BATCH_SIZE = 200
         for coro in asyncio.as_completed(tasks):
-            ts_code, record = await coro
-            if record:
+            results = await coro
+            for ts_code, record in results:
                 full_record = (ts_code,) + record[1:]
                 batch.append(full_record)
                 updated += 1
                 if updated <= 3 or updated % 500 == 0:
                     print(f"  ✅ {ts_code}：现价 {record[5]:.2f} 昨收 {record[6]:.2f}")
-                # 批量写入
                 if len(batch) >= BATCH_SIZE:
                     bulk_upsert(batch)
                     batch = []
-            else:
-                skipped += 1
-            await asyncio.sleep(0.02)
         # 剩余批量写入
         if batch:
             bulk_upsert(batch)
+        skipped = len(stocks) - updated
 
     print(f"\n🎉 实时更新完成！成功 {updated} 只，跳过 {skipped} 只（停牌/未开盘）")
     return updated
@@ -500,7 +545,12 @@ async def run_intraday(stocks, trade_date: str):
 async def run_history(stocks, start_date: str, end_date: str, do_fallback=False):
     """
     用历史日线接口拉取 start_date ~ end_date 的数据
-    do_fallback: 是否在盘后补齐 end_date 缺失的股票（用 qt 兜底）
+    do_fallback: 是否在盘后补齐 end_date「历史接口未取到数据」的股票（用 qt 兜底）。
+
+    注意：兜底不再以「daily 表是否缺失」为判据——盘中实时写入已让绝大多数股票
+    在 daily 表中有行（但可能是上午快照价而非收盘价）。因此只要 download_one
+    没能返回该股票的当日数据，就一律交给 qt 实时接口兜底覆盖，保证最终拿到的是
+    收盘口径的真实价格，而非残留的盘中快照。
     """
     print(f"🚀 历史日线模式：{start_date} ~ {end_date}，共 {len(stocks)} 只股票...\n")
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
@@ -514,6 +564,7 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
 
         tasks = [bounded_update(s) for s in stocks]
         new_count = 0
+        failed = []  # 历史接口未取到数据的股票（缺失/失败/非当日 bar），交 qt 兜底
         for coro in asyncio.as_completed(tasks):
             ts_code, symbol, records = await coro
             if records:
@@ -521,43 +572,55 @@ async def run_history(stocks, start_date: str, end_date: str, do_fallback=False)
                 new_count += len(records)
                 print(f"  ✅ {ts_code}：+{len(records)} 条")
             else:
+                failed.append((ts_code, symbol))
                 print(f"  ⚠️  {ts_code}：无新数据")
             await asyncio.sleep(0.02)
 
-        # ── qt 兜底：补齐日线接口缺失的股票 ──
-        if do_fallback:
+        # ── qt 兜底：补齐历史接口未取到数据的股票（无论是否已存在于 daily 表）──
+        # 批量抓取（每 BATCH_SYMBOLS 只一次请求）+ 整组失败降级单只 + 攒批 bulk_upsert
+        if do_fallback and failed:
             fallback_date = _fmt_date(end_date)
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT s.ts_code, s.symbol FROM stocks s
-                WHERE s.ts_code NOT IN (
-                    SELECT ts_code FROM daily WHERE trade_date=%s
-                )
-            """, (fallback_date,))
-            missing = cur.fetchall()
-            conn.close()
+            print(f"\n⚠️  历史接口未取到 {len(failed)} 只，qt 实时接口批量兜底...")
+            qt_sem = asyncio.Semaphore(CONCURRENCY)
 
-            if missing:
-                print(f"\n⚠️  日线接口缺失 {len(missing)} 只，qt 实时接口兜底...")
-                fb_updated, fb_skipped = 0, 0
-                for ts_code, symbol in missing:
-                    record = await fetch_realtime_quote(
-                        session, symbol, fallback_date)
-                    if record:
-                        full_record = (ts_code,) + record[1:]
-                        upsert_daily(full_record)
-                        fb_updated += 1
-                        if fb_updated <= 3 or fb_updated % 500 == 0:
-                            print(f"  ✅ {ts_code}：收盘 {record[5]:.2f}")
-                    else:
-                        fb_skipped += 1
-                    if fb_updated % 100 == 0:
-                        await asyncio.sleep(0.02)
-                new_count += fb_updated
-                print(f"  📊 qt 兜底 {fb_updated} 只，跳过 {fb_skipped} 只（停牌/退市）")
-            else:
-                print(f"\n✅ 日线接口全覆盖，无需兜底")
+            async def bounded_qt(group_pairs):
+                async with qt_sem:
+                    res = await fetch_realtime_batch(
+                        session, group_pairs, fallback_date)
+                    if res is None:  # 整组请求失败 → 逐只降级
+                        res = []
+                        for tc, sym in group_pairs:
+                            rec = await fetch_realtime_quote(
+                                session, sym, fallback_date)
+                            if rec:
+                                res.append((tc, rec))
+                    return res
+
+            qt_groups = [failed[i:i + BATCH_SYMBOLS]
+                         for i in range(0, len(failed), BATCH_SYMBOLS)]
+            print(f"  📦 分 {len(qt_groups)} 组批量拉取（每组 {BATCH_SYMBOLS} 只）")
+            qt_tasks = [bounded_qt(g) for g in qt_groups]
+            fb_updated = 0
+            batch = []
+            BATCH_SIZE = 200
+            for coro in asyncio.as_completed(qt_tasks):
+                results = await coro
+                for ts_code, record in results:
+                    full_record = (ts_code,) + record[1:]
+                    batch.append(full_record)
+                    fb_updated += 1
+                    if fb_updated <= 3 or fb_updated % 500 == 0:
+                        print(f"  ✅ {ts_code}：收盘 {record[5]:.2f}")
+                    if len(batch) >= BATCH_SIZE:
+                        bulk_upsert(batch)
+                        batch = []
+            if batch:
+                bulk_upsert(batch)
+            fb_skipped = len(failed) - fb_updated
+            new_count += fb_updated
+            print(f"  📊 qt 兜底 {fb_updated} 只，跳过 {fb_skipped} 只（停牌/退市）")
+        elif do_fallback:
+            print(f"\n✅ 历史接口全覆盖，无需兜底")
 
     print(f"\n🎉 历史更新完成！新增/覆盖 {new_count} 条数据")
     return new_count
